@@ -90,6 +90,12 @@ _Avoid_: bridge, module, adapter
 A way for the GM to interact with SecondChair: conversation, CLI, later a GUI or a VTT panel.
 _Avoid_: UI, frontend, client
 
+## Inputs
+
+**Source**:
+A document the user supplies and the tool only reads, never ships: rulebooks, a previous campaign bible, session recordings, VTT exports.
+_Avoid_: corpus, import, data
+
 ## Agents
 
 **Agent host**:
