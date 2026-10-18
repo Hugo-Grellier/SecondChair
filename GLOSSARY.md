@@ -139,3 +139,57 @@ _Avoid_: task, request
 **Runner**:
 The GM-configured way a queued job gets started in an agent host without the GM present. Without one, jobs wait until the GM starts them.
 _Avoid_: worker, scheduler
+
+## Measurement
+
+**GM effort**:
+The GM's share of the work in a moment: every GM interaction (approval, rejection, edit, undo, answer to an exception), counted and timed.
+_Avoid_: prep time, GM time (as wall-clock time)
+
+**Interruption**:
+Anything that calls for the GM's attention during a live session without the GM asking for it: a pending proposal, a surfaced exception, a ceiling refusal.
+_Avoid_: prompt, notification
+
+**Rejection reason**:
+The short reason, picked from a closed list (contradiction, rules, tone, other), that the GM attaches when rejecting or undoing a delegated action.
+_Avoid_: comment, feedback
+
+**Gold set**:
+Expected results for a scenario, written by hand once (facts a session should yield, answers to probes), against which every later run is scored without a human.
+_Avoid_: ground truth, fixture, expected output
+
+**Probe**:
+A question with a known answer from a gold set, put to agents to check continuity.
+_Avoid_: test question, quiz
+
+**Baseline**:
+A scenario's measurements with every responsibility at manual, against which the gains of delegation are stated.
+_Avoid_: reference run, control
+
+**Drift ratio**:
+The share of narrative decisions initiated by agents rather than by the GM, watched for a rise rather than held to a target.
+_Avoid_: creative freedom score
+
+**Test bench**:
+The set of replayable scenarios, each scored automatically against its gold set, used to measure SecondChair without the GM present.
+_Avoid_: test suite, benchmark, eval
+
+**Scenario**:
+One replayable run of the test bench: a starting state, the Sources fed in, a moment, and a gold set to score against.
+_Avoid_: test case, fixture
+
+**Scripted GM**:
+The stand-in for the GM on the test bench, answering proposals and exceptions from the gold set.
+_Avoid_: simulated GM, mock GM
+
+**Shadow mode**:
+Replaying a real session's traces while agents act on a copy of the world, so their actions can be compared with what the GM actually did without changing what happened.
+_Avoid_: dry run, simulation
+
+**Agreement rate**:
+In shadow mode, the share of agent actions that match what the GM actually did.
+_Avoid_: accuracy
+
+**Runner configuration**:
+The agent host, model and effort a runner uses to start a job.
+_Avoid_: model settings, profile
