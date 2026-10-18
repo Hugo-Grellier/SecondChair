@@ -89,3 +89,25 @@ _Avoid_: bridge, module, adapter
 **Surface**:
 A way for the GM to interact with SecondChair: conversation, CLI, later a GUI or a VTT panel.
 _Avoid_: UI, frontend, client
+
+## Agents
+
+**Agent host**:
+A general-purpose agent program (Claude Code, Codex) that runs the agents: it loads playbooks and acts on SecondChair only through its tool surface. SecondChair ships no agent loop of its own.
+_Avoid_: orchestrator, runtime, client
+
+**Agent**:
+One session of an agent host doing delegated work. Agents are interchangeable: what an agent may do is decided per delegated action by its responsibility, never by which agent acts.
+_Avoid_: combat agent, NPC agent (as roles with their own rights)
+
+**Playbook**:
+A written procedure an agent follows for one kind of work (prep a session, wrap a session, run the monsters), shared by every supported agent host.
+_Avoid_: skill (outside host docs), prompt, command
+
+**Job**:
+A unit of work that needs a model, with an explicit contract: playbook, inputs, expected output, responsibility. The Core queues jobs; it does not run models itself.
+_Avoid_: task, request
+
+**Runner**:
+The GM-configured way a queued job gets started in an agent host without the GM present. Without one, jobs wait until the GM starts them.
+_Avoid_: worker, scheduler
