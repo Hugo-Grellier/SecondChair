@@ -86,6 +86,10 @@ _Avoid_: plugin, module, adapter
 Everything specific to one virtual tabletop: reading, acting, capturing traces (Foundry first).
 _Avoid_: bridge, module, adapter
 
+**System adapter**:
+The part of a VTT connector that drives one game system inside that VTT (strikes, conditions, turn context). Optional: without it the connector stays generic.
+_Avoid_: submodule, plugin, system module
+
 **Surface**:
 A way for the GM to interact with SecondChair: conversation, CLI, later a GUI or a VTT panel.
 _Avoid_: UI, frontend, client
@@ -95,6 +99,24 @@ _Avoid_: UI, frontend, client
 **Source**:
 A document the user supplies and the tool only reads, never ships: rulebooks, a previous campaign bible, session recordings, VTT exports.
 _Avoid_: corpus, import, data
+
+**Observation**:
+A timestamped record, captured from the VTT, of live mechanical state or of what happened at the table. Never canon by itself; it becomes canon only through memory.
+_Avoid_: fact, event (when meaning canon), log
+
+## Authority
+
+**Canon**:
+What is true in the campaign's fiction, held by the Core. Ranked by authority: played, then GM decision, then cited official source, then agent proposal.
+_Avoid_: lore, truth (as the store's name)
+
+**Decision**:
+A creative call by the GM, recorded with the GM's own words. Outranks everything except what was played.
+_Avoid_: ruling, choice
+
+**Desired state**:
+What the Core asks the VTT to look like after prep (a scene, its tokens, lights, loot). Realised by reconciliation, which keeps what was played and what the GM retouched.
+_Avoid_: export, sync
 
 ## Agents
 
