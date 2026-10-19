@@ -4,7 +4,7 @@ Decision: [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md); ticke
 
 ## Install
 
-- **PKG-01** Plain Python install: `uv tool install secondchair`, one extra per building block (`[pf2e,foundry,capture]`). No Docker image in v4.
+- **PKG-01** Plain Python install with `uv tool install`, one extra per building block (`[pf2e,foundry,capture]`), from a git tag of the public repository (PKG-17). No Docker image in v4.
 - **PKG-02** Python ≥ 3.14; CI on 3.14 and 3.15 (the floor rises once the capture stack supports 3.15).
 - **PKG-03** Linux and macOS first-class; Windows through WSL, best effort.
 
@@ -45,7 +45,7 @@ Decision: [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md); ticke
 
 ## Distribution
 
-- **PKG-17** One Python distribution, `secondchair`, installable by `uv tool install`, with extras per block. The package index it is published to is left to planning.
+- **PKG-17** One Python distribution, `secondchair`, installable by `uv tool install`, with extras per block. v4 publishes to no package index: it installs from a git tag of the monorepo (`uv tool install "secondchair[…] @ git+https://github.com/Hugo-Grellier/SecondChair@<tag>"`). A wider distribution channel is decided after v4, with a Docker image as the preferred direction over a package index (settled in planning, 2026-10-19).
 - **PKG-18** Foundry modules by manifest URL on GitHub releases, kept catalogue-compliant ([08](08-licensing-repos.md), LIC-16).
 - **PKG-19** Playbooks as a Claude Code plugin and a Codex skill bundle. `secondchair host setup <claude|codex>` prints the host configuration and never writes host files.
 

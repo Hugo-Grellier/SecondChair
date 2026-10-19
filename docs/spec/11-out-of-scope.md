@@ -12,7 +12,7 @@ Each item is excluded from v4 only; none is excluded by the architecture.
 | A GUI for non-technical GMs; a hosted SaaS | Surfaces can be layered later; the remote Core is deferred, not excluded | [#1](https://github.com/Hugo-Grellier/SecondChair/issues/1), [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md) |
 | An in-house agent loop; an LLM client in the Core; LangGraph, LiteLLM | Jobs have a contract another executor can run later | [ADR 0001](../adr/0001-no-in-house-orchestrator-llm-free-core.md) |
 | Embeddings and semantic search | The derived index leaves room for a job to compute them | [ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md) |
-| Docker packaging | Can be added later without changing anything else | [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md) |
+| Docker packaging; publishing to a package index (PyPI) | v4 installs from git tags. Docker is the preferred later channel and can be added without changing anything else | [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md), [09](09-packaging.md) PKG-17 |
 | LoreForge integration; SecondChair as the engine of a hosted LoreForge | A fresh effort, kept possible by dual licensing under the CLA and the deferred remote Core | [#1](https://github.com/Hugo-Grellier/SecondChair/issues/1), [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md) |
 | The monetization model | The licences only keep it possible | [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md) |
 | Faction simulation by agents | A faction acts through the fronts it carries | [ADR 0009](../adr/0009-world-turn-deterministic-three-effect-classes.md) |
@@ -35,7 +35,7 @@ Each item is excluded from v4 only; none is excluded by the architecture.
 
 ## Open questions handed to planning
 
-None of these contradicts a decision; each is a detail the map left unspecified.
+None of these contradicts a decision; each is a detail the map left unspecified. All were settled with the GM at the start of planning (2026-10-19).
 
 1. ~~**Base profile values.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-06 to DEL-06b.
 2. ~~**Moment transitions.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-03 to DEL-03b.
@@ -45,4 +45,4 @@ None of these contradicts a decision; each is a detail the map left unspecified.
 6. ~~**Floors and numeric targets.**~~ Process settled 2026-10-19: [10](10-success-bench.md), MET-05a; the numbers come from the "Set floors" ticket.
 7. ~~**Dogfooding as an acceptance gate.**~~ Settled 2026-10-19: yes, [10](10-success-bench.md), BEN-14.
 8. ~~**Pre-publication pass.**~~ Settled 2026-10-19: [08](08-licensing-repos.md), LIC-17a.
-9. **Package index** for the Python distribution (PKG-17).
+9. ~~**Package index.**~~ Settled 2026-10-19: git install in v4, no index; Docker preferred later, [09](09-packaging.md), PKG-17.
