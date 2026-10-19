@@ -128,6 +128,18 @@ _Avoid_: campaign repo, vault, bible
 A timestamped record, captured from the VTT, of live mechanical state or of what happened at the table. Never canon by itself; it becomes canon only through memory.
 _Avoid_: fact, event (when meaning canon), log
 
+**Capture**:
+Turning Sources from a session (per-speaker voice transcripts, observations, the GM's notes) into candidate facts, each quoting its Source verbatim.
+_Avoid_: ingestion, extraction (as the whole step)
+
+**Candidate fact**:
+A fact drafted by capture and not yet in canon. It quotes the Source it comes from; a candidate with no quote is dropped.
+_Avoid_: assertion, draft fact
+
+**Wrap**:
+The between-sessions consolidation of a session's candidate facts into canon: duplicates merged, contradictions and blocking ambiguities put to the GM in one grouped round, the rest applied at the memory delegation level.
+_Avoid_: debrief, sync, post-processing
+
 ## Authority
 
 **Canon**:
