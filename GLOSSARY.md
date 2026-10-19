@@ -61,7 +61,7 @@ A delegation level the GM sets for one acting entity on NPCs, rules and combat o
 _Avoid_: exception, per-NPC level
 
 **Ceiling**:
-A maximum level the GM sets inside the VTT, enforced by the VTT connector regardless of the active profile.
+A maximum delegation level, one for the whole campaign, that the GM sets inside the VTT and the VTT connector enforces regardless of the active profile.
 _Avoid_: access level, permission
 
 **Delegated action**:
