@@ -70,6 +70,6 @@ Decisions: [ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md), [ADR 0012]
   - every invariant (leaks, narrative direction) holds on every run of every scenario;
   - continuity, capture coverage and agreement rate meet the floors set after the first baseline;
   - GM effort and interruptions show a gain against the manual baseline;
-  - and the v3 contracts carried as unit tests pass (world-turn T1–T8, calendar, reconciliation, reliability mechanisms).
-
-  Whether a dogfooded real session is also an acceptance gate is open ([11](11-out-of-scope.md)).
+  - the v3 contracts carried as unit tests pass (world-turn T1–T8, calendar, reconciliation, reliability mechanisms);
+  - and one dogfooded real session passes (BEN-14).
+- **BEN-14** Dogfooding gate (settled in planning, 2026-10-19): one real Beginner Box session played with the live-session column at *play*, from Start session through the wrap's grouped round. It passes when the invariants hold, the GM never abandons SecondChair mid-session (sets every responsibility to manual or stops `serve` to keep playing, which is logged), and the wrap completes. Its metrics are reported, not held to floors (N = 1). The read-only recorded session that feeds S4 and the duration baseline (BEN-03) comes first.

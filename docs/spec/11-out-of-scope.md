@@ -43,6 +43,6 @@ None of these contradicts a decision; each is a detail the map left unspecified.
 4. ~~**Disclosure hold lift.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-09a.
 5. ~~**Event envelope and payload schemas, transcript format, job contract format, workspace layout.**~~ Settled 2026-10-19: written just in time, [02](02-architecture.md), ARC-17a.
 6. ~~**Floors and numeric targets.**~~ Process settled 2026-10-19: [10](10-success-bench.md), MET-05a; the numbers come from the "Set floors" ticket.
-7. **Dogfooding as an acceptance gate.** Whether one real Beginner Box session run with SecondChair is required to accept v4 (BEN-13).
+7. ~~**Dogfooding as an acceptance gate.**~~ Settled 2026-10-19: yes, [10](10-success-bench.md), BEN-14.
 8. **Pre-publication pass** (LIC-17): its checklist and who runs it.
 9. **Package index** for the Python distribution (PKG-17).
