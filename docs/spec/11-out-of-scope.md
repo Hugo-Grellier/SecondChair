@@ -41,7 +41,7 @@ None of these contradicts a decision; each is a detail the map left unspecified.
 2. ~~**Moment transitions.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-03 to DEL-03b.
 3. ~~**Ceiling defaults.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-19a.
 4. ~~**Disclosure hold lift.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-09a.
-5. **Event envelope and payload schemas**, the transcript format, the job contract format and the workspace layout on disk: to be written as contracts at the start of planning.
+5. ~~**Event envelope and payload schemas, transcript format, job contract format, workspace layout.**~~ Settled 2026-10-19: written just in time, [02](02-architecture.md), ARC-17a.
 6. **Floors and numeric targets** for continuity, capture coverage and agreement rate, after the first baseline (MET-05).
 7. **Dogfooding as an acceptance gate.** Whether one real Beginner Box session run with SecondChair is required to accept v4 (BEN-13).
 8. **Pre-publication pass** (LIC-17): its checklist and who runs it.
