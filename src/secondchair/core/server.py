@@ -10,7 +10,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute
 
-from secondchair.core import PROTOCOL_VERSION, delegation
+from secondchair.core import PROTOCOL_VERSION, delegation, jobs
 from secondchair.core.tools import RegistrationError, load_tools
 from secondchair.core.workspace import Workspace
 
@@ -53,6 +53,13 @@ def build_server(ws: Workspace) -> MCPServer:
         annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
         meta={"secondchair/gm_interaction": True},
     )
+    # A session taking and closing a queued job (ARC-29): job state, not canon.
+    for fn in jobs.agent_tools(ws):
+        server.add_tool(
+            fn,
+            annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+            meta={"secondchair/job": True},
+        )
 
     @server.custom_route("/", methods=["GET"])
     async def about(_: Request) -> JSONResponse:

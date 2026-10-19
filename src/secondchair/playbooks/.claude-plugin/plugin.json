@@ -1,0 +1,8 @@
+{
+  "name": "secondchair",
+  "description": "SecondChair playbooks: the procedures agents follow for SecondChair jobs.",
+  "version": "0.1.0",
+  "author": {"name": "Hugo Grellier"},
+  "license": "AGPL-3.0-only",
+  "repository": "https://github.com/Hugo-Grellier/SecondChair"
+}

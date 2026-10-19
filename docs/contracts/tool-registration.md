@@ -1,12 +1,12 @@
 # Contract: tool registration and the Core's MCP endpoint
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, PKG-05, PKG-06, PKG-19.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-29, PKG-05, PKG-06, PKG-19.
 
 ## The MCP endpoint
 
 `secondchair serve <workspace>` carries the Core's MCP server over **Streamable HTTP** at `http://127.0.0.1:<port>/mcp`, the port coming from the machine configuration (default 7240). There is no stdio mode: every agent host (the GM's session, the runners) shares this one Core. The endpoint is unauthenticated and bound to loopback only; requests whose `Host` or `Origin` is not a loopback name are refused (DNS rebinding). `GET /` answers `{"service": "secondchair", "campaign_language": …, "protocol_version": …}`.
 
-`secondchair host setup <claude|codex>` prints the configuration an agent host needs to reach that endpoint. It writes no file: the GM pastes or runs what it prints.
+`secondchair host setup <claude|codex>` prints the configuration an agent host needs to reach that endpoint, and how to install the playbooks: for Claude Code a plugin (`claude plugin marketplace add <playbooks>` then `claude plugin install secondchair@secondchair`), for Codex a skill bundle linked into `~/.codex/skills/`. It writes no file: the GM pastes or runs what it prints.
 
 ## Registering tools
 
@@ -68,7 +68,7 @@ def create_note(title: str) -> Change:
 | `after` | string or null | The file's new content; null deletes it. |
 | `source` | string or null | What the action draws on, recorded in the log (DEL-24). |
 
-The Core adds a required `agent` string argument to every delegated action's MCP input schema: the agent's name, recorded for traceability only (ARC-22). A block's `fn` must not have an `agent` parameter. On each call the Core reads the current moment and the delegation table, then:
+The Core adds a required `agent` string argument to every delegated action's MCP input schema: the agent's name, recorded for traceability only (ARC-22). It also adds an optional `job` integer: the job the agent is running (see below). A block's `fn` must not have an `agent` or a `job` parameter. On each call the Core reads the current moment and the delegation table, then:
 
 | Effective level | What happens | Result |
 |---|---|---|
@@ -88,6 +88,31 @@ The mystery graph adds `record_mystery`, under prep and reversible ([workspace l
 `approve_proposal(entry, gm_words)` is served by the Core itself, outside block registration, with `_meta: {"secondchair/gm_interaction": true}`. An agent calls it only when the GM approved a pending reversible action in conversation, quoting the GM's words; the approval is logged "via agent" with the quote (DEL-28). An irreversible action cannot be approved this way.
 
 On the CLI, in the workspace (or with `-w <workspace>`): `secondchair approve <entry>`, `secondchair reject <entry> --reason <reason>`, `secondchair log undo <entry> --reason <reason>`, the reason one of contradiction, rules, tone, other (DEL-26), and `secondchair moment <prep|live-session|between-sessions>`, which needs an interactive terminal (DEL-03a). The log records whether each GM interaction came from an interactive terminal (`authenticated`).
+
+## Jobs
+
+An agent running a job ([`job.schema.json`](job.schema.json)) passes `job` to every delegated action. The job must be started; the action is then bound by the delegation table of the job's moment (a manual cell refuses it), and its log entry records the job and the runner configuration it was started with. Two tools, served by the Core outside block registration with `_meta: {"secondchair/job": true}`, let a session take and close a job:
+
+| Tool | Does |
+|---|---|
+| `start_job(job, host, model, effort)` | Starts a queued job from the GM's own session (ARC-29): the host, model and effort the session reports are logged as the effective configuration. Returns the job record; its tier is only a hint. |
+| `finish_job(job)` | Marks a started job done. |
+
+A runner started by `secondchair jobs run` logs its attempt itself and gives the agent the contract in its prompt; the job is done when the agent calls `finish_job` or exits cleanly.
+
+## Playbooks
+
+A playbook is an [Agent Skills](https://agentskills.io/specification) skill (`skills/<name>/SKILL.md`), in English, telling the agent to write in the campaign language (ARC-21). Its front matter's `metadata` declares what the Core needs to queue a job for it, never a model name (ARC-25):
+
+```yaml
+metadata:
+  secondchair-responsibility: memory
+  secondchair-tier: standard              # fast, standard or deep; a job may override it
+  secondchair-inputs: bible               # comma-separated input names
+  secondchair-expected-output: One canon entity per named person, place, …
+```
+
+The Core's playbooks live in `src/secondchair/playbooks/`, which is both a Claude Code plugin (`.claude-plugin/`) and, through its `skills/` directory, a Codex skill bundle (PKG-19). The first is `rebuild-entities-from-a-bible` (memory, standard).
 
 ## What agents see
 

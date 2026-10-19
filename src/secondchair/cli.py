@@ -6,7 +6,8 @@ from pathlib import Path
 
 import yaml
 
-from secondchair.core import canon, delegation, index, machine, workspace
+from secondchair import runner
+from secondchair.core import canon, delegation, index, jobs, machine, workspace
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.server import LOOPBACK, MCP_PATH, serve
@@ -20,18 +21,50 @@ class MachineConfigError(Exception):
     """A machine configuration `serve` cannot use."""
 
 
-def configured_port() -> int:
+def _machine_config() -> tuple[Path, dict]:
     path = machine.config_dir() / "config.yaml"
     if not path.is_file():
-        return DEFAULT_PORT
+        return path, {}
     try:
         config = yaml.safe_load(path.read_text()) or {}
     except yaml.YAMLError as e:
         raise MachineConfigError(f"{path} is not valid YAML: {e}") from e
-    port = config.get("port", DEFAULT_PORT) if isinstance(config, dict) else None
+    if not isinstance(config, dict):
+        raise MachineConfigError(f"{path} must be a YAML mapping.")
+    return path, config
+
+
+def configured_port() -> int:
+    path, config = _machine_config()
+    port = config.get("port", DEFAULT_PORT)
     if type(port) is not int or not 0 <= port <= 65535:
         raise MachineConfigError(f"{path}: port must be an integer between 0 and 65535.")
     return port
+
+
+def configured_runners() -> tuple[dict[str, list[dict[str, str]]], dict[str, list]]:
+    """The runner configuration, keyed by tier only (ARC-26), and the agent hosts' command
+    templates: the built-in ones, overridden or extended by the machine configuration's."""
+    path, config = _machine_config()
+    runners = config.get("runners") or {}
+    hosts = config.get("hosts") or {}
+    if not isinstance(runners, dict) or not set(runners) <= set(jobs.TIERS):
+        raise MachineConfigError(f"{path}: runners must map tiers ({', '.join(jobs.TIERS)}).")
+    for tier, entries in runners.items():
+        if not isinstance(entries, list) or not all(
+            isinstance(e, dict)
+            and sorted(e) == sorted(jobs.CONFIG_KEYS)
+            and all(isinstance(v, str) and v for v in e.values())
+            for e in entries
+        ):
+            raise MachineConfigError(
+                f"{path}: runners.{tier} must be a list of {{host, model, effort}} entries."
+            )
+    if not isinstance(hosts, dict) or not all(
+        isinstance(t, list) and t and all(isinstance(a, str) for a in t) for t in hosts.values()
+    ):
+        raise MachineConfigError(f"{path}: hosts must map host names to command lists.")
+    return runners, {**runner.HOSTS, **hosts}
 
 
 HOST_SETUP = {
@@ -50,10 +83,31 @@ url = "{url}"
 """,
 }
 
+PLAYBOOK_SETUP = {
+    "claude": """
+Install the SecondChair playbooks (a Claude Code plugin) with:
+
+  claude plugin marketplace add {playbooks}
+  claude plugin install secondchair@secondchair
+""",
+    "codex": """
+Install the SecondChair playbooks (a Codex skill bundle) with:
+
+  mkdir -p ~/.codex/skills
+{links}""",
+}
+
 
 def host_setup(host: str) -> str:
-    """The host configuration for the Core on this machine; never written anywhere (PKG-19)."""
-    return HOST_SETUP[host].format(url=f"http://{LOOPBACK}:{configured_port()}{MCP_PATH}")
+    """The host configuration for the Core and its playbooks on this machine; never written
+    anywhere (PKG-19)."""
+    links = "".join(
+        f"  ln -sfn {skill} ~/.codex/skills/{skill.name}\n"
+        for skill in sorted(runner.SKILLS.iterdir())
+    )
+    return HOST_SETUP[host].format(
+        url=f"http://{LOOPBACK}:{configured_port()}{MCP_PATH}"
+    ) + PLAYBOOK_SETUP[host].format(playbooks=runner.PLAYBOOKS, links=links)
 
 
 def _calendar_arg(value: str) -> str | dict:
@@ -105,6 +159,66 @@ def check(ws: workspace.Workspace) -> int:
     entities, facts, events = index.counts(ws)
     print(f"Indexed {entities} entities, {facts} facts, {events} events from {ws.root}.")
     return 1 if errors else 0
+
+
+def _input(value: str) -> tuple[str, str]:
+    """A job input `name=value`; a value naming an existing file becomes its absolute path, so
+    the agent finds it wherever it runs."""
+    name, sep, text = value.partition("=")
+    if not sep or not name:
+        raise argparse.ArgumentTypeError(f"{value!r}: expected name=value")
+    path = Path(text).expanduser()
+    return name, str(path.resolve()) if path.exists() else text
+
+
+def _describe(job: dict) -> str:
+    lines = [
+        f"Job {job['id']}  {job['status']}  {job['playbook']}  "
+        f"({job['responsibility']}, {job['moment']}; tier {job['tier']})"
+    ]
+    if job["attempts"]:
+        last = job["attempts"][-1]
+        config = ", ".join(last["runner_configuration"][k] for k in jobs.CONFIG_KEYS)
+        error = f": {last['error']}" if last["error"] else ""
+        lines.append(f"  last attempt {last['outcome']} ({config}){error}")
+    return "\n".join(lines)
+
+
+def _jobs_command(args: argparse.Namespace) -> int:
+    ws = workspace.load(args.workspace)
+    if args.job_command == "queue":
+        job = runner.queue(ws, args.playbook, dict(args.input), args.tier)
+        print(f"Queued job {job['id']} ({job['playbook']}, tier {job['tier']}).")
+        return 0
+    if args.job_command is None:
+        pending = jobs.pending(ws)
+        for job in pending:
+            print(_describe(job))
+        print(
+            "Start a job from your agent host session: ask it to start SecondChair job <id>; "
+            "the tier is a hint."
+            if pending
+            else "No pending job."
+        )
+        return 0
+    runners, hosts = configured_runners()
+    queued = [j for j in jobs.pending(ws) if j["status"] == "queued"]
+    status = 0
+    for job in [jobs.read(ws, args.job)] if args.job else queued:
+        try:
+            done = runner.run(ws, job["id"], runners, hosts)
+        except (runner.RunnerError, DelegationError) as e:
+            print(f"secondchair: {e}", file=sys.stderr)
+            status = 1
+            continue
+        if done is None:
+            print(
+                f"Job {job['id']}: no runner configured for tier {job['tier']}; "
+                "it waits for you to start it from your agent host session."
+            )
+        else:
+            print(_describe(done))
+    return status
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -159,6 +273,23 @@ def main(argv: list[str] | None = None) -> int:
         "undo", parents=[in_workspace, reason], help="undo an action of the current moment"
     )
     undo_cmd.add_argument("entry", type=int)
+    jobs_cmd = commands.add_parser(
+        "jobs", parents=[in_workspace], help="list pending jobs, queue one or run them"
+    )
+    # `-w` after the job command too, without its default hiding one given before it.
+    sub_workspace = argparse.ArgumentParser(add_help=False)
+    sub_workspace.add_argument("-w", "--workspace", type=Path, default=argparse.SUPPRESS)
+    jobs_sub = jobs_cmd.add_subparsers(dest="job_command")
+    queue_cmd = jobs_sub.add_parser("queue", parents=[sub_workspace], help="queue a job")
+    queue_cmd.add_argument("playbook")
+    queue_cmd.add_argument(
+        "--input", type=_input, action="append", default=[], help="a job input, name=value"
+    )
+    queue_cmd.add_argument("--tier", choices=jobs.TIERS, help="override the playbook's tier")
+    run_cmd = jobs_sub.add_parser(
+        "run", parents=[sub_workspace], help="start queued jobs with the configured runner"
+    )
+    run_cmd.add_argument("job", type=int, nargs="?", help="one job (default: every queued job)")
     args = parser.parse_args(argv)
 
     try:
@@ -177,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
             return check(workspace.load(args.workspace))
         elif args.command == "serve":
             serve(workspace.load(args.workspace), configured_port())
+        elif args.command == "jobs":
+            return _jobs_command(args)
         else:
             print(_gm_command(args))
     except (
@@ -185,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         RegistrationError,
         DelegationError,
         CanonError,
+        runner.RunnerError,
         OSError,
     ) as e:
         print(f"secondchair: {e}", file=sys.stderr)

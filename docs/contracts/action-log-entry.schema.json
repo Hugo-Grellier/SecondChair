@@ -19,7 +19,7 @@
     },
     "action": {
       "allOf": [{"$ref": "#/$defs/common"}],
-      "required": ["tool", "responsibility", "effective_level", "override_lowered", "reversible", "agent", "source", "runner_configuration", "target", "before", "after", "status", "approval"],
+      "required": ["tool", "responsibility", "effective_level", "override_lowered", "reversible", "agent", "source", "job", "runner_configuration", "target", "before", "after", "status", "approval"],
       "properties": {
         "kind": {"const": "action"},
         "tool": {"type": "string", "description": "The registered tool that took the action."},
@@ -29,7 +29,19 @@
         "reversible": {"type": "boolean", "description": "As declared at tool registration."},
         "agent": {"type": "string", "description": "The acting agent, as it names itself; traceability only (ARC-22)."},
         "source": {"type": ["string", "null"]},
-        "runner_configuration": {"type": ["object", "null"], "description": "The runner configuration used, for job work."},
+        "job": {"type": ["integer", "null"], "description": "The job the action was taken for (job.schema.json); null outside job work. A job's action is bound by the delegation table of the job's moment (ARC-23)."},
+        "runner_configuration": {
+          "description": "The runner configuration the job was started with (DEL-24, ARC-27); null outside job work.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["host", "model", "effort"],
+              "additionalProperties": false,
+              "properties": {"host": {"type": "string"}, "model": {"type": "string"}, "effort": {"type": "string"}}
+            }
+          ]
+        },
         "target": {"type": "string", "description": "The workspace file the action writes, relative to the workspace root."},
         "before": {"type": ["string", "null"], "description": "The target's content before the action; null when absent."},
         "after": {"type": ["string", "null"], "description": "The target's content after the action; null when deleted."},

@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-17a, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-12, BVE-02, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-12, BVE-02, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-16.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -12,6 +12,8 @@ my-campaign/
 ├── delegation.yaml    # the delegation table; seeded by `init`
 ├── moment.yaml        # the current moment; seeded by `init`, changed by `secondchair moment`
 ├── action-log/        # one YAML file per action log entry: 000001.yaml, 000002.yaml, …
+├── jobs/              # one YAML file per job: 000001.yaml, …
+├── calls/             # one YAML file per call on the GM: 000001.yaml, …
 ├── canon/
 │   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 │   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
@@ -115,6 +117,29 @@ Only `secondchair moment <moment>` in an interactive terminal changes it (DEL-03
 
 One YAML file per entry, named by its id on six digits, following [`action-log-entry.schema.json`](action-log-entry.schema.json): delegated actions (`kind: action`) and the GM interactions on them (`kind: gm_interaction`: approve, reject, undo, confirm). An action records the workspace file it writes (`target`) and that file's content before and after, which is what undo restores. The Core refuses to approve or undo when the file no longer holds the content the entry expects, such as after a hand edit, so nothing is overwritten unseen. A `confirm` interaction rewrites a canon file itself and carries its own `target`, `before` and `after`.
 
+An action taken for a job carries the job's id (`job`) and the runner configuration the job was started with; it is bound by the delegation table of the job's moment.
+
+## `jobs/`
+
+One YAML file per job, named by its id on six digits, following [`job.schema.json`](job.schema.json): the job contract (playbook, inputs, expected output, responsibility, moment, tier, campaign language, vocabulary), its status (`queued`, `started`, `done`) and every start attempt with the runner configuration used. `secondchair jobs queue <playbook> --input <name>=<value>` writes it; `secondchair jobs` lists the jobs not done; `secondchair jobs run` starts the queued ones with the runner configuration.
+
+## `calls/`
+
+One YAML file per call on the GM. So far the only call is the exception raised when every runner configuration for a job's tier failed; the job stays queued. Scheduling, answering and showing calls come with #42.
+
+```yaml
+id: 1
+at: '2026-10-19T20:15:00+00:00'
+kind: exception
+moment: prep
+moment_seq: 1
+responsibility: memory
+deadline: break
+job: 1
+message: Every runner configuration for tier standard failed; the job stays queued.
+status: open
+```
+
 ## `canon/entities/`
 
 An entity carries identity only (CAN-02): YAML front matter, then its player-facing description in the campaign language.
@@ -212,9 +237,17 @@ The derived index (CAN-10): entities, facts and events with their derived validi
 
   ```yaml
   port: 7240   # default when the file or the key is absent
+  runners:     # the runner configuration (ARC-26): per tier, the entries tried in order
+    standard:
+      - {host: claude, model: <model>, effort: high}
+      - {host: codex, model: <model>, effort: medium}
+  hosts:       # optional: command templates, overriding or adding to the built-in claude and codex
+    my-host: [my-agent, --model, "{model}", --effort, "{effort}", "{prompt}"]
   ```
 
   Next to it, `foundry-token` (mode 0600) holds the token the Foundry module connects with, created by `secondchair token` ([foundry-bridge.md](foundry-bridge.md)).
+
+  `runners` is keyed by tier only (`fast`, `standard`, `deep`); a tier with no entry has no runner, and its jobs wait for the GM to start them from their own agent host session. Each entry names a host, a model and an effort; model names appear only here (ARC-25). A host is a command template whose `{prompt}`, `{model}`, `{effort}`, `{playbooks}` (the playbooks' directory) and `{job}` are filled in; the built-in `claude` and `codex` templates run Claude Code (`claude -p`, with the playbooks as a plugin directory and only the SecondChair tools and file reads allowed) and Codex (`codex exec`) headless, both reaching the Core through the MCP configuration `secondchair host setup` prints. An entry whose command cannot be run or exits with an error is a failed attempt, and the next entry is tried.
 
 - **Sources** (raw audio, full transcripts, Foundry worlds, rulebooks) stay outside both; the workspace only references them (PKG-12).
 
