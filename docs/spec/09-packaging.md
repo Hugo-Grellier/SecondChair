@@ -49,6 +49,16 @@ Decision: [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md); ticke
 - **PKG-18** Foundry modules by manifest URL on GitHub releases, kept catalogue-compliant ([08](08-licensing-repos.md), LIC-16).
 - **PKG-19** Playbooks as a Claude Code plugin and a Codex skill bundle. `secondchair host setup <claude|codex>` prints the host configuration and never writes host files.
 
+## Development quality stack
+
+- **PKG-22** Every package gates in CI on a modern QA stack, set up by the first ticket that writes code in its language (settled in planning, 2026-10-19):
+  - Python: `ruff` for lint and format, `ty` for type checking, `pytest` for tests, all run through `uv` with versions pinned in the lock file;
+  - JavaScript (Foundry modules): Biome for lint and format, and `tsc --noEmit` with `checkJs` for type checking;
+  - one pre-commit configuration running the same checks locally;
+  - GitHub Actions workflows checked by `actionlint` and `zizmor`.
+
+  A check that fails blocks the merge; no rule is silenced without a comment naming why.
+
 ## Deferred
 
 - **PKG-20** A remote or hosted Core is deferred, not excluded: `serve` already speaks HTTP and WebSocket, so hosting it means binding beyond the loopback and authenticating the MCP endpoint, with no contract change.
