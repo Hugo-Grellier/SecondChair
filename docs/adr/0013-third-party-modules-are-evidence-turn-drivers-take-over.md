@@ -1,0 +1,16 @@
+# Third-party modules are optional evidence; a turn driver takes over monster turns; house rules come from discrepancies
+
+The PF2e system adapter takes no hard dependency on a third-party automation module in v4. It reads their traces through a closed list of trace readers, each written against a known format and silent when the module is absent or its format unknown: PF2e Toolbelt's Target Helper chat flags (targets, DC, each save with its degree before and after adjustment), PF2e Visioner's visibility and cover token flags, the reaction trackers (Reaction Checker's combatant flags, Combater's `reactionUsed`, Sundry's `effect-reaction-used`), and pf2e's own `dosAdjustments`. The only hard dependency stays the official translation module. Agents build monster turns on SecondChair's own executor in the adapter. But when a known turn driver is active (PF2e Combater, which exposes no API to drive), the executor and agent reactions are switched off for every GM creature: the GM runs turns through the driver, agents stay silent, and SecondChair observes, runs rules checks and logs those acts as the GM's. A reaction counts as used when the adapter's counter or any known tracker says so. An agent action is one system call; its follow-ups (conditions, effects) are applied only when the GM's modules have not already applied them once the call settles, and whatever stays ambiguous becomes a discrepancy, never a second application. House rules become visible in three ways. Those that write into the trace (`dosAdjustments`, modifiers in the breakdown) are already consistent, since checks never recompute the degree. Those held in settings are read from the rules context, an observation of active modules, versions and known rules settings emitted at the start of each moment and on change. Those that stay invisible (compendium patches, libWrapper wrappers) raise a discrepancy, which the GM can mark as intended: that records a named house rule in the campaign that silences that kind of check.
+
+## Considered Options
+
+- **Build monster turns on PF2e Combater**: rejected as a base. Its only exported API is a self-test, it is GPL-3.0 while the adapter is Apache-2.0 (ADR 0006), and it releases several times a day. Deferring to it at runtime needs none of that.
+- **Agents propose in the acting cue while a turn driver plays**: rejected for v4. The driver already plans, and a second voice adds interruptions.
+- **Require PF2e Toolbelt for its save trace**: rejected for now. A module may become a hard dependency later, by ADR, when it is maintained on the targeted Foundry/system pair and a real check or action cannot work without it. Requiring a module at runtime copies none of its code, so its licence does not block this.
+- **Declare house rules up front**: rejected. Most are visible in the trace or settings; the invisible rest surface as discrepancies the first time they matter.
+
+## Consequences
+
+- Turn driver detection is by module id on a closed list, so a new driver is invisible until it is added.
+- With a turn driver active, the delegation table still applies to everything else; only the adapter's ceiling refuses monster-turn actions.
+- Trace readers break silently when a module changes its flags: the check falls back to the pf2e trace alone, and the bench catches the drift.

@@ -128,6 +128,18 @@ _Avoid_: validation, rules engine, audit
 A rules check that fails: what the VTT did does not follow from its own trace. A call on the GM under rules and combat, held for the break by default. Fixing it is a proposal, never automatic.
 _Avoid_: error, bug, rules violation
 
+**House rule**:
+A deviation from the rules as the game system computes them that the GM intends, named in the campaign. It is born when the GM marks a discrepancy as intended, and from then on it silences the kind of rules check that reported it. Listed and removable.
+_Avoid_: variant rule (the system's own options), override, exception
+
+**Rules context**:
+The automation modules active in the VTT, their versions and the rules settings known to the system adapter, recorded as an observation at the start of each moment and whenever it changes. Rules checks read it.
+_Avoid_: module list, configuration snapshot
+
+**Turn driver**:
+A third-party VTT module that plans and executes a GM creature's turn. While a known one is active, agents act for no GM creature in encounters: the GM runs turns through it and SecondChair only observes and checks.
+_Avoid_: combat AI, monster AI, bot
+
 ## Inputs
 
 **Campaign language**:
