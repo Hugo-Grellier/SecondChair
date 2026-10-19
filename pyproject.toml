@@ -25,6 +25,7 @@ foundry = "secondchair_foundry.bridge:routes"
 
 [project.entry-points."secondchair.tools"]
 core = "secondchair.core.campaign:tools"
+foundry = "secondchair_foundry.tools:tools"
 
 [dependency-groups]
 dev = [

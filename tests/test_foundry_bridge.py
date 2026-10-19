@@ -2,17 +2,25 @@
 
 PKG-07, PKG-08, PKG-09, ARC-18."""
 
+import asyncio
 import json
 import stat
+import subprocess
+import sys
+import threading
+import urllib.error
+import urllib.request
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import jsonschema
 import pytest
 import yaml
 from conftest import Serving
-from websockets.sync.client import connect
+from mcp import Client
+from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Origin
 
 from secondchair.cli import main
@@ -21,6 +29,7 @@ SCHEMA = json.loads(
     (Path(__file__).parent.parent / "docs/contracts/foundry-bridge.schema.json").read_text()
 )
 WORLD = "secondchair-dev"
+TOKEN = "Scene.s1.Token.t1"
 
 
 @pytest.fixture
@@ -143,6 +152,111 @@ def test_a_campaign_bound_to_another_world_refuses_this_one(bridge: str, token: 
 def test_a_bound_world_that_lost_its_mark_reconnects(bridge: str, token: str) -> None:
     welcome = reply(bridge, hello(token))
     assert reply(bridge, hello(token)) == welcome
+
+
+@contextmanager
+def gm_client(url: str, token: str) -> Generator[dict[str, dict]]:
+    """A connected GM client answering requests in its own little world, as the module's
+    generic actions do; yields that world."""
+    docs = {TOKEN: {"x": 100, "y": 200}}
+    with connect(url, origin=Origin("https://foundry.example")) as socket:
+        socket.send(json.dumps(hello(token)))
+        assert json.loads(socket.recv(timeout=5))["type"] == "welcome"
+        thread = threading.Thread(target=answer, args=(socket, docs), daemon=True)
+        thread.start()
+        yield docs
+    thread.join(timeout=5)
+
+
+def answer(socket: ClientConnection, docs: dict[str, dict]) -> None:
+    """Answer the Core's requests until the socket closes."""
+    for raw in socket:
+        request = json.loads(raw)
+        jsonschema.validate(request, SCHEMA)
+        doc = docs[request["target"]]
+        before = dict(doc)
+        if request["expect"] and request["expect"] != before:
+            reply = {"ok": False, "error": f"{request['target']} changed since"}
+        else:
+            doc.update(request["params"])
+            reply = {"ok": True, "before": before, "after": dict(doc)}
+        message = {"type": "reply", "id": request["id"], **reply}
+        jsonschema.validate(message, SCHEMA)
+        socket.send(json.dumps(message))
+
+
+def move(bridge: str) -> Any:
+    async def run() -> Any:
+        async with Client(bridge.replace("ws://", "http://").replace("/foundry", "/mcp")) as c:
+            return await c.call_tool(
+                "move_token", {"token": TOKEN, "x": 300, "y": 200, "agent": "claude-live"}
+            )
+
+    return asyncio.run(run())
+
+
+def gm_undo(workspace: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "secondchair.cli", "log", "undo", "1", "--reason", "tone"],
+        cwd=workspace,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def action(workspace: Path) -> dict:
+    return yaml.safe_load((workspace / "action-log/000001.yaml").read_text())
+
+
+def test_an_agent_moves_a_token_and_the_gm_undoes_it_from_the_cli(
+    bridge: str, token: str, workspace: Path, machine_config: dict[str, str]
+) -> None:
+    with gm_client(bridge, token) as docs:
+        assert move(bridge).structured_content == {"entry": 1, "status": "applied"}
+        assert docs[TOKEN] == {"x": 300, "y": 200}
+
+        undo = gm_undo(workspace, machine_config)
+
+        assert undo.returncode == 0, undo.stderr
+        assert docs[TOKEN] == {"x": 100, "y": 200}
+    assert (action(workspace)["op"], action(workspace)["status"]) == ("move_token", "undone")
+
+
+def test_undo_of_a_vtt_action_needs_the_core_served(
+    bridge: str, token: str, workspace: Path, machine_config: dict[str, str]
+) -> None:
+    with gm_client(bridge, token):
+        move(bridge)
+    (workspace / ".secondchair/serve.json").unlink()
+
+    undo = gm_undo(workspace, machine_config)
+
+    assert undo.returncode == 1
+    assert "secondchair serve" in undo.stderr
+    assert action(workspace)["status"] == "applied"
+
+
+def test_the_gm_gesture_relay_refuses_a_wrong_token(
+    bridge: str, token: str, workspace: Path
+) -> None:
+    gesture = {"gesture": "undo", "entry": 1, "reason": "tone", "authenticated": True}
+    request = urllib.request.Request(
+        bridge.replace("ws://", "http://").replace("/foundry", "/gm"),
+        data=json.dumps({**gesture, "workspace": str(workspace.resolve())}).encode(),
+        headers={"Authorization": f"Bearer not-{token}"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5)
+    assert refused.value.code == 401
+
+
+def test_with_no_gm_client_open_the_action_fails_cleanly(bridge: str, workspace: Path) -> None:
+    result = move(bridge)
+
+    assert result.is_error
+    assert "No GM client" in result.content[0].text
+    assert action(workspace)["status"] == "failed"
 
 
 def test_a_malformed_hello_is_refused(bridge: str, token: str) -> None:

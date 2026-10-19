@@ -1,27 +1,45 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/blob/main/docs/contracts/foundry-bridge.schema.json",
-  "title": "Foundry bridge handshake message",
-  "description": "One message of the handshake on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md).",
+  "title": "Foundry bridge message",
+  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies.",
   "oneOf": [
     {
       "title": "hello",
       "description": "Sent once by the module in the GM's browser, right after the socket opens.",
       "type": "object",
       "properties": {
-        "type": { "const": "hello" },
+        "type": {
+          "const": "hello"
+        },
         "protocol": {
           "type": "string",
           "description": "The protocol version the module implements (semver)."
         },
-        "token": { "type": "string", "description": "The token printed by `secondchair token`." },
-        "world": { "type": "string", "minLength": 1, "description": "The Foundry world id." },
+        "token": {
+          "type": "string",
+          "description": "The token printed by `secondchair token`."
+        },
+        "world": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Foundry world id."
+        },
         "campaign": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The campaign id stored in the world, or null when the world is not bound."
         }
       },
-      "required": ["type", "protocol", "token", "world", "campaign"],
+      "required": [
+        "type",
+        "protocol",
+        "token",
+        "world",
+        "campaign"
+      ],
       "additionalProperties": false
     },
     {
@@ -29,12 +47,27 @@
       "description": "The Core accepts the connection. The module stores `campaign` in the world.",
       "type": "object",
       "properties": {
-        "type": { "const": "welcome" },
-        "protocol": { "type": "string", "description": "The Core's protocol version." },
-        "campaign": { "type": "string", "minLength": 1 },
-        "campaign_language": { "type": "string" }
+        "type": {
+          "const": "welcome"
+        },
+        "protocol": {
+          "type": "string",
+          "description": "The Core's protocol version."
+        },
+        "campaign": {
+          "type": "string",
+          "minLength": 1
+        },
+        "campaign_language": {
+          "type": "string"
+        }
       },
-      "required": ["type", "protocol", "campaign", "campaign_language"],
+      "required": [
+        "type",
+        "protocol",
+        "campaign",
+        "campaign_language"
+      ],
       "additionalProperties": false
     },
     {
@@ -42,12 +75,135 @@
       "description": "The Core refuses the connection, then closes the socket.",
       "type": "object",
       "properties": {
-        "type": { "const": "refused" },
-        "reason": { "enum": ["malformed", "no_token", "wrong_token", "protocol", "busy", "world"] },
-        "message": { "type": "string", "description": "A message for the GM, in English." }
+        "type": {
+          "const": "refused"
+        },
+        "reason": {
+          "enum": [
+            "malformed",
+            "no_token",
+            "wrong_token",
+            "protocol",
+            "busy",
+            "world"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "description": "A message for the GM, in English."
+        }
       },
-      "required": ["type", "reason", "message"],
+      "required": [
+        "type",
+        "reason",
+        "message"
+      ],
       "additionalProperties": false
+    },
+    {
+      "title": "request",
+      "description": "The Core asks the GM client to take one action in the VTT.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "request"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The request id. A request id already handled is never applied again: its first reply is sent back."
+        },
+        "op": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The operation: a generic one of the library (move_token, set_door) or a mechanical one, handled by the system adapter."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Foundry UUID of the document acted on."
+        },
+        "params": {
+          "type": "object",
+          "description": "The fields to set."
+        },
+        "expect": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "The fields the document must still have, or the action is refused (an undo after a hand edit); null to skip the check."
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "op",
+        "target",
+        "params",
+        "expect"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "reply",
+      "description": "The GM client's answer to a request.",
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "reply"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ok": {
+              "const": true
+            },
+            "before": {
+              "type": "object",
+              "description": "The fields before the action."
+            },
+            "after": {
+              "type": "object",
+              "description": "The fields after the action."
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ok",
+            "before",
+            "after"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "reply"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "string",
+              "description": "Why the action failed, for the GM, in English."
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ok",
+            "error"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   ]
 }

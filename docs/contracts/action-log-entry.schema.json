@@ -42,11 +42,13 @@
             }
           ]
         },
-        "target": {"type": "string", "description": "The workspace file the action writes, relative to the workspace root."},
-        "before": {"type": ["string", "null"], "description": "The target's content before the action; null when absent."},
-        "after": {"type": ["string", "null"], "description": "The target's content after the action; null when deleted."},
-        "status": {"enum": ["pending", "applied", "rejected", "undone", "refused"], "description": "pending at propose until approved or rejected; applied at once above propose; refused when the Core found the change contradicts canon (nothing written)."},
+        "op": {"type": "string", "description": "Present for an action taken in the VTT: the VTT connector's operation (docs/contracts/foundry-bridge.md). Absent for a workspace file."},
+        "target": {"type": "string", "description": "The workspace file the action writes, relative to the workspace root; for a VTT action, the document acted on, as the connector names it (a Foundry UUID)."},
+        "before": {"type": ["string", "object", "null"], "description": "The target's content before the action; null when absent. For a VTT action, the fields the VTT reported before it; null until it is taken."},
+        "after": {"type": ["string", "object", "null"], "description": "The target's content after the action; null when deleted. For a VTT action, the fields asked for, then the ones the VTT reported after it."},
+        "status": {"enum": ["pending", "applied", "rejected", "undone", "refused", "failed"], "description": "pending at propose until approved or rejected; applied at once above propose; refused when the Core found the change contradicts canon (nothing written); failed when the VTT did not take it (ARC-09), with `error`."},
         "refusal": {"type": "string", "description": "Why the Core refused the action as a contradiction with canon; present only when `status` is refused. Counted as a continuity error (MET-01)."},
+        "error": {"type": "string", "description": "Why a failed action failed."},
         "approval": {
           "description": "How a proposal was approved; null when none was needed or given.",
           "oneOf": [

@@ -18,12 +18,14 @@ from typing import Any, TypedDict
 import yaml
 from mcp.server.mcpserver.exceptions import ToolError
 
+from secondchair.core import vtt
 from secondchair.core.tools import (
     RESPONSIBILITIES,
     Change,
     Contradiction,
     RegistrationError,
     Tool,
+    VttAction,
 )
 from secondchair.core.workspace import CONFIG_FILE, STATE_DIR, Workspace, WorkspaceError
 
@@ -210,9 +212,16 @@ def act(
             change, refusal = describe(), None
         except Contradiction as c:  # logged: a Core-detected contradiction with canon (MET-01)
             change, refusal = Change(path=c.path, after=None), str(c)
-        if not isinstance(change, Change):
-            raise DelegationError(f"{tool.name} returned {change!r}, not a Change")
-        path = _target(ws, change.path)
+        if isinstance(change, VttAction):
+            # The VTT reports the state before; at propose it is known only once approved.
+            effect = {"op": change.op, "target": change.target, "before": None}
+            effect["after"] = change.params
+        elif isinstance(change, Change):
+            path = _target(ws, change.path)
+            effect = {"target": change.path, "before": path.read_text() if path.exists() else None}
+            effect["after"] = change.after
+        else:
+            raise DelegationError(f"{tool.name} returned {change!r}, not a Change or a VttAction")
         entry = {
             "kind": "action",
             "moment": moment,
@@ -226,9 +235,7 @@ def act(
             "source": change.source,
             "job": job,
             "runner_configuration": runner_configuration,
-            "target": change.path,
-            "before": path.read_text() if path.exists() else None,
-            "after": change.after,
+            **effect,
             "status": "pending" if level == "propose" else "applied",
             "approval": None,
         }
@@ -237,7 +244,14 @@ def act(
             logged = _append(ws, entry)["id"]
             raise DelegationError(f"Refused, it contradicts canon: {refusal} (entry {logged}).")
         if entry["status"] == "applied":
-            _apply(ws, entry, "after")
+            try:
+                _apply(ws, entry, "after")
+            except DelegationError as e:
+                if "op" not in entry:
+                    raise
+                # A failed action (ARC-09): logged, counted, and reported to the agent.
+                failed = _append(ws, {**entry, "status": "failed", "error": str(e)})
+                raise DelegationError(f"Failed action, logged as entry {failed['id']}: {e}") from e
         return {"entry": _append(ws, entry)["id"], "status": entry["status"]}
 
 
@@ -546,6 +560,15 @@ def _target(ws: Workspace, relative: str) -> Path:
 def _apply(ws: Workspace, entry: dict, state: str) -> None:
     """Bring the target to the entry's `before` or `after` state, refusing if the file is no
     longer in the other state (a hand edit since, CAN-11): nothing is overwritten unseen."""
+    if "op" in entry:  # a VTT action: the connector checks and takes it
+        other = "after" if state == "before" else "before"
+        try:
+            before, after = vtt.perform(entry["op"], entry["target"], entry[state], entry[other])
+        except vtt.VttError as e:
+            raise DelegationError(str(e)) from e
+        if state == "after":  # the state the VTT reports, not the one asked for
+            entry["before"], entry["after"] = before, after
+        return
     path = _target(ws, entry["target"])
     expected = entry["after" if state == "before" else "before"]
     current = path.read_text() if path.exists() else None

@@ -15,14 +15,20 @@ import yaml
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from secondchair.core import PROTOCOL_VERSION
+from secondchair.core import PROTOCOL_VERSION, vtt
 from secondchair.core.machine import foundry_token
+from secondchair.core.vtt import VttError
 from secondchair.core.workspace import Workspace
 
 PATH = "/foundry"
 BINDING_FILE = "foundry.yaml"
 HELLO_TIMEOUT = 10  # seconds the module has to say hello once the socket is open
+REPLY_TIMEOUT = 15  # seconds the GM client has to take an action and answer
 POLICY_VIOLATION = 1008
+NO_GM = (
+    "No GM client is connected: open the campaign's world as GM in Foundry, with the SecondChair "
+    "module enabled."
+)
 
 
 class Refused(Exception):
@@ -51,6 +57,8 @@ class Bridge:
     def __init__(self, ws: Workspace) -> None:
         self.ws = ws
         self.gm: WebSocket | None = None
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.waiting: dict[str, asyncio.Future[dict]] = {}  # replies awaited, by request id
 
     @property
     def binding_path(self) -> Path:
@@ -136,6 +144,7 @@ class Bridge:
             await _close_quietly(socket)
             return
         self.gm = socket
+        self.loop = asyncio.get_running_loop()
         try:
             await socket.send_json(
                 {
@@ -145,12 +154,60 @@ class Bridge:
                     "campaign_language": self.ws.campaign_language,
                 }
             )
-            while True:  # ponytail: messages after the handshake arrive with #48
-                await socket.receive_text()
+            while True:
+                try:
+                    reply = json.loads(await socket.receive_text())
+                    waiting = self.waiting.get(reply["id"]) if reply["type"] == "reply" else None
+                except ValueError, KeyError, TypeError:
+                    continue  # not a reply the Core waits for
+                if waiting and not waiting.done():
+                    waiting.set_result(reply)
         except WebSocketDisconnect:
             pass
         finally:
             self.gm = None
+            for waiting in self.waiting.values():
+                if not waiting.done():
+                    waiting.set_exception(VttError(NO_GM))
+
+    def perform(self, op: str, target: str, params: dict, expect: dict | None) -> tuple[dict, dict]:
+        """Have the GM client take one action (the Core's `vtt.perform`). Called from a worker
+        thread, never from the event loop, which it waits on."""
+        socket, loop = self.gm, self.loop
+        if socket is None or loop is None:
+            raise VttError(NO_GM)
+        request = {
+            "type": "request",
+            "id": uuid.uuid4().hex,
+            "op": op,
+            "target": target,
+            "params": params,
+            "expect": expect,
+        }
+        future = asyncio.run_coroutine_threadsafe(self._request(socket, request), loop)
+        try:
+            reply = future.result(REPLY_TIMEOUT)
+        except TimeoutError:
+            future.cancel()
+            raise VttError(
+                f"The GM client did not answer within {REPLY_TIMEOUT} s: check the VTT, the "
+                "action may have been taken."
+            ) from None
+        if not reply["ok"]:
+            raise VttError(reply["error"])
+        return reply["before"], reply["after"]
+
+    async def _request(self, socket: WebSocket, request: dict) -> dict:
+        waiting = asyncio.get_running_loop().create_future()
+        self.waiting[request["id"]] = waiting
+        try:
+            try:
+                await socket.send_json(request)
+            except (WebSocketDisconnect, RuntimeError) as e:
+                raise VttError(NO_GM) from e
+            return await waiting
+        finally:
+            del self.waiting[request["id"]]
 
 
 async def _close_quietly(socket: WebSocket) -> None:
@@ -159,5 +216,8 @@ async def _close_quietly(socket: WebSocket) -> None:
 
 
 def routes(ws: Workspace) -> list[BaseRoute]:
-    """The `secondchair.connectors` entry point: the bridge served next to the MCP endpoint."""
-    return [WebSocketRoute(PATH, Bridge(ws).endpoint)]
+    """The `secondchair.connectors` entry point: the bridge served next to the MCP endpoint,
+    plugged into the Core as the VTT that takes its VTT actions."""
+    bridge = Bridge(ws)
+    vtt.connect(bridge.perform)
+    return [WebSocketRoute(PATH, bridge.endpoint)]
