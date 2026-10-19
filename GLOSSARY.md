@@ -56,6 +56,10 @@ _Avoid_: settings, permissions
 A ready-made delegation profile shipped with the tool (read, prep, play), used as a starting point to fill a column of the delegation table.
 _Avoid_: preset, access level
 
+**Entity override**:
+A delegation level the GM sets for one acting entity on NPCs, rules and combat or disclosure. It can only lower the level the delegation table gives that responsibility, and it holds until the GM removes it.
+_Avoid_: exception, per-NPC level
+
 **Ceiling**:
 A maximum level the GM sets inside the VTT, enforced by the VTT connector regardless of the active profile.
 _Avoid_: access level, permission
