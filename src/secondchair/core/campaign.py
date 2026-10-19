@@ -2,8 +2,7 @@
 
 from typing import TypedDict
 
-from secondchair.core import PROTOCOL_VERSION
-from secondchair.core.canon import create_entity
+from secondchair.core import PROTOCOL_VERSION, canon
 from secondchair.core.tools import Tool
 from secondchair.core.workspace import Workspace
 
@@ -26,5 +25,5 @@ def tools(ws: Workspace) -> list[Tool]:
     # ponytail: a read sits under memory (canon and continuity) until reads get their own rule.
     return [
         Tool(fn=campaign_info, responsibility="memory", delegated_action=False, reversible=True),
-        Tool(fn=create_entity, responsibility="memory", delegated_action=True, reversible=True),
+        *canon.tools(ws),
     ]

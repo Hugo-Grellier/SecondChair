@@ -1,6 +1,6 @@
 # Contract: tool registration and the Core's MCP endpoint
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, DEL-09, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, PKG-05, PKG-06, PKG-19.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, PKG-05, PKG-06, PKG-19.
 
 ## The MCP endpoint
 
@@ -76,7 +76,11 @@ The Core adds a required `agent` string argument to every delegated action's MCP
 | propose | logged as pending; nothing is written until the GM approves | `{"entry": 3, "status": "pending"}` |
 | act-then-review, autonomous | written at once and logged | `{"entry": 3, "status": "applied"}` |
 
-An irreversible action is held at propose (DEL-09) and only an authenticated Surface approves it (DEL-29). The Core's own delegated action is `create_entity` (memory, reversible).
+An irreversible action is held at propose (DEL-09) and only an authenticated Surface approves it (DEL-29).
+
+A delegated action's `fn` that finds its change would contradict canon raises `secondchair.core.tools.Contradiction(path, message)`. The Core writes nothing, logs the action with `status: refused` and the message as `refusal` (a continuity error, MET-01), and returns an MCP error.
+
+The Core's own delegated actions are all under memory and reversible: `create_entity`, `record_fact`, `correct_fact` and `record_event` ([workspace layout](workspace-layout.md#canonfacts)).
 
 ## GM interactions relayed by agents
 
@@ -100,7 +104,7 @@ Each tool in `tools/list` carries its declarations in `_meta`, and the matching 
 }
 ```
 
-The Core's own read, `campaign_info` (memory, read), returns the campaign language, the workspace schema version and the protocol version.
+The Core's own reads, all under memory: `campaign_info` returns the campaign language, the workspace schema version and the protocol version; `search_entities(text)`, `search_facts(text, entity, relation, at, include_retconned)` and `search_events(text, fact)` search the derived index, structured and full text (every word of `text` must match).
 
 ## Versioning
 
