@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-17a, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-12, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-17a, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-12, BVE-02, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-16.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -15,7 +15,8 @@ my-campaign/
 ├── canon/
 │   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 │   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
-│   └── events/        # one Markdown file per event: v-1a2b3c4d.md
+│   ├── events/        # one Markdown file per event: v-1a2b3c4d.md
+│   └── mysteries/     # one Markdown file per mystery graph, named by the mystery entity's id
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
 └── .secondchair/      # derived state (index.sqlite, caches, the write lock); git-ignored, rebuildable
@@ -177,6 +178,29 @@ The party opened the bypass.
 - A **correction** rewrites a fact file in place, with no event. It is refused when the fact is played or ranks above the correction; the previous version stays in the action log entry's `before`.
 - A **retcon** is an event whose `replaces` names an earlier event, with the GM's words as origin. The earlier event stays on record. The retcon takes effect only at the `gm_decision` rank, once the GM confirms it; until then it is `pending_retcon` and the earlier event stays `canon`. Once in effect, the earlier event is `replaced` and the facts only it opened are `retconned`: kept, but left out of searches by default.
 - Nothing is deleted.
+
+## `canon/mysteries/`
+
+The graph of a mystery (BVE-02, the v3 mystery graph on facts). The mystery is an entity, and the file is named by its id. Conclusions and clues are facts, nodes are entities. The body holds optional GM notes. `record_mystery` writes it and refuses it when a reference does not resolve.
+
+```markdown
+---
+id: e-0d0e0a0d                     # the mystery entity
+conclusions:
+  - {id: conclusion-relay, fact: f-11111111}
+nodes:
+  - {id: node-weir, entity: e-22222222, entry: true}
+  - {id: node-convoy, proactive: f-33333333}
+clues:
+  - {id: clue-1, fact: f-44444444, on: node-weir, points_to: [conclusion-relay, node-convoy], mobile: false}
+---
+```
+
+- Local ids (`id`) are the author's, unique within the mystery across conclusions, nodes and clues.
+- A node has an `entity` (a place, a person, a faction). It is an entry with `entry: true`, or with a `proactive` fact, such as a front's agenda step, that brings the party in while it holds.
+- A clue is discoverable evidence: a fact `on` a node, pointing to node and conclusion ids.
+- The file holds no state. A clue is **lost** when its fact no longer holds (closed by an event, or retconned), **found** when the party knows its fact. A conclusion is **solved** when the party knows its fact.
+- `check_mystery` reports, while a conclusion is unsolved, the v3 warnings: `mystery-entry` (no entry), `mystery-unreachable` (a node not reachable from the entries through live clues), `mystery-node-clues` (fewer than 3 clues point to a node that is not an entry, the inverted three-clue rule), `mystery-conclusion` (no live clue on a reachable node), `mystery-three-clues` (fewer than 3 live clues, or on reachable nodes), `mystery-single-node` (all of a conclusion's clues on one node).
 
 ## `.secondchair/index.sqlite`
 
