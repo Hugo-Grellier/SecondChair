@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from secondchair.core import index
+from secondchair.core import delegation, index
 from secondchair.core.index import EVENT_KINDS, EVENTS_DIR, FACTS_DIR, RANKS, CanonError
 from secondchair.core.tools import Change, Contradiction, Tool
 from secondchair.core.workspace import Workspace
@@ -35,6 +35,28 @@ def create_entity(
     }
     front = yaml.safe_dump(identity, sort_keys=False, allow_unicode=True)
     return Change(path=f"{ENTITIES_DIR}/{entity_id}.md", after=f"---\n{front}---\n{description}\n")
+
+
+def confirm(ws: Workspace, doc_id: str, channel: str, authenticated: bool) -> dict:
+    """Promote a fact or event recorded from the GM's words to the GM-decision rank (CAN-09,
+    DEL-29): an agent prepared it as an agent proposal, the GM confirms it here. Returns the
+    logged GM interaction."""
+    found = [
+        (FACTS_DIR, d) for d in index.search_facts(ws, include_retconned=True) if d["id"] == doc_id
+    ] + [(EVENTS_DIR, d) for d in index.search_events(ws) if d["id"] == doc_id]
+    if not found:
+        raise CanonError(f"No fact or event {doc_id!r} in canon.")
+    [(folder, doc)] = found
+
+    def promote(text: str) -> tuple[str, int | None]:
+        front, body = index.split_doc(text)
+        if front.get("origin", {}).get("kind") != "gm":
+            raise CanonError(f"{doc_id} is not the GM's words; only a decision can be confirmed.")
+        if front["rank"] == "gm_decision":
+            raise CanonError(f"{doc_id} is already a GM decision.")
+        return index.join_doc({**front, "rank": "gm_decision"}, body), doc["admitted_by"]
+
+    return delegation.confirm(ws, f"{folder}/{doc_id}.md", promote, channel, authenticated)
 
 
 def _outranks(a: str, b: str) -> bool:
@@ -98,7 +120,8 @@ def tools(ws: Workspace) -> list[Tool]:
         `origin` is its provenance and sets its rank: {"kind": "observation", "quote", "locator"}
         for what was said or done at the table (played; the quote verbatim), {"kind": "source",
         "source", "page"} for a cited Source, {"kind": "job", "job"} for your own work, or
-        {"kind": "gm", "words"} for the GM's words (an agent proposal until the GM confirms it).
+        {"kind": "gm", "words"} for the GM's words (an agent proposal until the GM confirms it
+        with `secondchair confirm <id>` in a terminal).
         `relation` is optional: {"type", "subject", "object"} with a type from the Core list
         (member_of, leads, lives_in, located_in, owns, knows, allied_with, opposes, serves,
         kin_of) or one a System extension registers. `valid_from` / `valid_to` are campaign

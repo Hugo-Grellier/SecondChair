@@ -6,8 +6,9 @@ from pathlib import Path
 
 import yaml
 
-from secondchair.core import delegation, index, machine, workspace
+from secondchair.core import canon, delegation, index, machine, workspace
 from secondchair.core.delegation import DelegationError
+from secondchair.core.index import CanonError
 from secondchair.core.server import LOOPBACK, MCP_PATH, serve
 from secondchair.core.tools import RegistrationError
 from secondchair.core.workspace import WorkspaceError
@@ -81,6 +82,11 @@ def _gm_command(args: argparse.Namespace) -> str:
         if not delegation.change_moment(ws, args.moment):
             return f"Already in {args.moment}."
         return f"Moment: {args.moment}. The previous moment's action log is frozen."
+    if args.command == "confirm":
+        if not auth:  # DEL-29
+            raise DelegationError("Confirming a GM decision needs an interactive terminal.")
+        entry = canon.confirm(ws, args.id, "cli", auth)
+        return f"Confirmed {args.id} as a GM decision (entry {entry['id']})."
     if args.command == "approve":
         delegation.approve(ws, args.entry, "cli", auth)
         return f"Approved and applied entry {args.entry}."
@@ -140,6 +146,11 @@ def main(argv: list[str] | None = None) -> int:
     ):
         commands.add_parser(name, parents=parents, help=help_text).add_argument("entry", type=int)
     commands.add_parser(
+        "confirm",
+        parents=[in_workspace],
+        help="confirm a fact or event relayed from your words as a GM decision (interactive only)",
+    ).add_argument("id", help="the fact or event id, f-… or v-…")
+    commands.add_parser(
         "check", parents=[in_workspace], help="rebuild the derived index and report invalid files"
     )
     log_cmd = commands.add_parser("log", help="the action log")
@@ -173,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         MachineConfigError,
         RegistrationError,
         DelegationError,
+        CanonError,
         OSError,
     ) as e:
         print(f"secondchair: {e}", file=sys.stderr)

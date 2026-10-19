@@ -4,15 +4,18 @@ Core's MCP tools and the CLI, as an agent and the GM reach them."""
 import asyncio
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import jsonschema
 import pytest
 import yaml
 from mcp import Client
 
+from secondchair import cli
 from secondchair.cli import main
 from secondchair.core import workspace
 from secondchair.core.server import build_server
@@ -68,6 +71,12 @@ def fact(ws: Workspace, statement: str, **fields: Any) -> str:
     act(ws, "record_fact", statement=statement, **{"origin": JOB, "entities": [], **fields})
     [found] = read(ws, "search_facts", text=statement, include_retconned=True)
     return found["id"]
+
+
+def confirm(doc: str, ws: Workspace, interactive: bool = True) -> int:
+    """`secondchair confirm`, at an interactive terminal or not."""
+    with patch.object(cli, "interactive", return_value=interactive):
+        return main(["confirm", doc, "-w", str(ws.root)])
 
 
 def log(ws: Workspace) -> list[dict]:
@@ -127,6 +136,55 @@ def test_an_approved_agent_proposal_keeps_the_agent_proposal_rank(ws: Workspace)
     assert act(ws, "approve_proposal", entry=pending["entry"], gm_words="ok") is not None
     [found] = read(ws, "search_facts", text="ferry rope")
     assert found["rank"] == "agent_proposal"
+
+
+def test_the_gm_confirms_a_relayed_decision_in_one_gesture_at_a_terminal(ws: Workspace) -> None:
+    decided = fact(ws, "Sella holds the bypass key.", origin=GM_WORDS)
+    [relayed] = read(ws, "search_facts", text="bypass key")
+    assert relayed["rank"] == "agent_proposal"
+
+    assert confirm(decided, ws, interactive=False) == 1  # DEL-29: an authenticated Surface only
+    assert read(ws, "search_facts", text="bypass key")[0]["rank"] == "agent_proposal"
+
+    assert confirm(decided, ws) == 0
+    [found] = read(ws, "search_facts", text="bypass key")
+    *_, entry = log(ws)
+    assert found["rank"] == "gm_decision" and found["origin"] == GM_WORDS
+    assert entry["kind"] == "gm_interaction" and entry["interaction"] == "confirm"
+    assert entry["authenticated"] and entry["entry"] == relayed["admitted_by"]
+    assert entry["target"] == f"canon/facts/{decided}.md"
+    assert "agent_proposal" in entry["before"] and "gm_decision" in entry["after"]
+    assert found["admitted_by"] == entry["id"]
+    assert confirm(decided, ws) == 1  # already a decision
+
+    # An agent relaying the GM's words again cannot override the decision it now is.
+    assert "gm_decision" in refused(
+        ws, "correct_fact", fact=decided, statement="Edda holds it.", entities=[], origin=GM_WORDS
+    )
+
+
+def test_only_the_gms_words_can_be_confirmed(
+    ws: Workspace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    job = fact(ws, "The rope is frayed.", origin=JOB)
+    played = fact(ws, "Edda paid 12 silver.", origin=SEEN)
+    for doc in (job, played, "f-00000000"):
+        assert confirm(doc, ws) == 1
+    assert "GM's words" in capsys.readouterr().err
+    ranks = {f["id"]: f["rank"] for f in read(ws, "search_facts")}
+    assert ranks == {job: "agent_proposal", played: "played"}
+
+
+def test_confirm_from_a_non_interactive_process_is_refused(ws: Workspace) -> None:
+    decided = fact(ws, "Sella holds the bypass key.", origin=GM_WORDS)
+    run = subprocess.run(
+        [sys.executable, "-m", "secondchair.cli", "confirm", decided, "-w", str(ws.root)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+    assert run.returncode == 1 and "interactive terminal" in run.stderr
+    assert read(ws, "search_facts", text="bypass key")[0]["rank"] == "agent_proposal"
 
 
 def test_a_relation_outside_the_core_list_is_refused_unless_an_extension_registers_it(
@@ -227,9 +285,8 @@ def test_a_retcon_keeps_the_earlier_event_on_record(ws: Workspace) -> None:
     retcon = next(e for e in events.values() if e["replaces"] == played["id"])
     assert retcon["status"] == "pending_retcon" and events[played["id"]]["status"] == "canon"
 
-    # Once it carries the GM-decision rank, it replaces the played event, which stays on record.
-    path = ws.root / "canon/events" / f"{retcon['id']}.md"
-    path.write_text(path.read_text().replace("rank: agent_proposal", "rank: gm_decision"))
+    # Once the GM confirms it as a decision, it replaces the played event, which stays on record.
+    assert confirm(retcon["id"], ws) == 0
     events = {e["id"]: e for e in read(ws, "search_events", text="")}
     assert events[played["id"]]["status"] == "replaced"
     assert events[played["id"]]["replaced_by"] == retcon["id"]
