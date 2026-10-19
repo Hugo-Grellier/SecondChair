@@ -154,6 +154,10 @@ _Avoid_: settings, profile, user config
 A timestamped record, captured from the VTT, of live mechanical state or of what happened at the table. Never canon by itself; it becomes canon only through memory.
 _Avoid_: fact, event (when meaning canon), log
 
+**Behaviour trace**:
+A timestamped record of how a user (the GM or a consenting player) operates the VTT, such as a sheet opened, a compendium consulted, a manual roll or the length of a turn, in any moment. It says nothing about the fiction: never canon, never a source of candidate facts.
+_Avoid_: telemetry, analytics, observation
+
 **Capture**:
 Turning Sources from a session (per-speaker voice transcripts, observations, the GM's notes) into candidate facts, each quoting its Source verbatim.
 _Avoid_: ingestion, extraction (as the whole step)
@@ -275,8 +279,12 @@ _Avoid_: worker, scheduler
 ## Measurement
 
 **GM effort**:
-The GM's share of the work in a moment: every GM interaction (approval, rejection, edit, undo, answer to an exception), counted and timed.
+The GM's share of the work in a moment, counted and timed: every GM interaction with SecondChair (approval, rejection, edit, undo, answer to an exception), plus every manual act the GM performs in the VTT, read from the GM's behaviour traces. A Director's Desk interaction counts once, as a SecondChair interaction.
 _Avoid_: prep time, GM time (as wall-clock time)
+
+**Table friction**:
+The moments where a consenting player struggles with the VTT, detected from their behaviour traces. Watched over time with no target, and never part of GM effort.
+_Avoid_: player effort, UX score
 
 **Interruption**:
 Anything that calls for the GM's attention during a live session without the GM asking for it: a pending proposal, a surfaced exception, a ceiling refusal shown before the break. A call held until the break is not an interruption.
