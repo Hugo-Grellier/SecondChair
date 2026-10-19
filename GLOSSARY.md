@@ -160,6 +160,10 @@ _Avoid_: skill (outside host docs), prompt, command
 A unit of work that needs a model, with an explicit contract: playbook, inputs, expected output, responsibility. The Core queues jobs; it does not run models itself.
 _Avoid_: task, request
 
+**Tier**:
+How much model a job needs: fast, standard or deep. Declared by the playbook, overridable per job; never a model name. A runner configuration turns it into a concrete host, model and effort.
+_Avoid_: model, size, quality level
+
 **Runner**:
 The GM-configured way a queued job gets started in an agent host without the GM present. Without one, jobs wait until the GM starts them.
 _Avoid_: worker, scheduler
@@ -215,5 +219,5 @@ In shadow mode, the share of agent actions that match what the GM actually did.
 _Avoid_: accuracy
 
 **Runner configuration**:
-The agent host, model and effort a runner uses to start a job.
+The agent host, model and effort a runner uses to start a job of a given tier, with an ordered fallback list tried when one is unavailable. Every attempt is logged with the configuration actually used.
 _Avoid_: model settings, profile
