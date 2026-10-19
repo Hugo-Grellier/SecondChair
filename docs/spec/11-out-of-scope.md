@@ -39,7 +39,7 @@ None of these contradicts a decision; each is a detail the map left unspecified.
 
 1. ~~**Base profile values.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-06 to DEL-06b.
 2. ~~**Moment transitions.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-03 to DEL-03b.
-3. **Ceiling defaults.** The ceiling's default level on a fresh world and where in Foundry the GM sets it (DEL-19).
+3. ~~**Ceiling defaults.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-19a.
 4. **Disclosure hold lift.** Which Surface may lift the irreversible hold for a responsibility (DEL-09); loosening an override needs an authenticated Surface, and the same rule is the natural default.
 5. **Event envelope and payload schemas**, the transcript format, the job contract format and the workspace layout on disk: to be written as contracts at the start of planning.
 6. **Floors and numeric targets** for continuity, capture coverage and agreement rate, after the first baseline (MET-05).

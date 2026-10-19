@@ -80,6 +80,7 @@ Decisions: [ADR 0003](../adr/0003-core-is-the-only-gateway.md), [ADR 0005](../ad
 
 - **DEL-18** The **Core** is the single authority. Every delegated action goes through it and is checked against the effective level ([ADR 0003](../adr/0003-core-is-the-only-gateway.md)).
 - **DEL-19** The VTT connector enforces an independent **ceiling**, defence in depth: one maximum delegation level, global (not per entity), set by the GM inside the VTT and applied regardless of the active profile.
+- **DEL-19a** The ceiling is a world-scoped setting of `secondchair-foundry`, editable only by a GM user in Foundry's module settings. Its default on a fresh world is *act-then-review*: no base profile exceeds it, and *autonomous* anywhere takes a second, deliberate gesture inside Foundry. The Director's Desk shows the current ceiling read-only. It bounds only actions that reach the VTT; the Core still enforces everything (DEL-18). Each change is recorded as an observation (settled in planning, 2026-10-19).
 - **DEL-20** A ceiling refusal is a failed action and a call on the GM.
 - **DEL-21** Agents enforce nothing. What an agent believes it may do counts for nothing.
 - **DEL-22** While a known turn driver is active, the system adapter refuses monster-turn actions for every GM creature; the delegation table still applies to everything else ([ADR 0013](../adr/0013-third-party-modules-are-evidence-turn-drivers-take-over.md)).
