@@ -19,7 +19,7 @@ from secondchair.core.delegation import (
     DelegationError,
     _append,
     _for_agent,
-    _locked,
+    locked,
     _read_yaml,
     _save,
     current_moment,
@@ -45,7 +45,7 @@ def queue(
         raise DelegationError(f"Tier {tier!r}: expected one of {', '.join(TIERS)}.")
     if responsibility not in RESPONSIBILITIES:
         raise DelegationError(f"Unknown responsibility {responsibility!r}.")
-    with _locked(ws):
+    with locked(ws):
         moment, _ = current_moment(ws)
         return _append(
             ws,
@@ -87,7 +87,7 @@ def start(ws: Workspace, job_id: int, config: dict[str, str], manual: bool) -> d
         isinstance(v, str) and v.strip() for v in config.values()
     ):
         raise DelegationError(f"A runner configuration needs {', '.join(CONFIG_KEYS)}.")
-    with _locked(ws):
+    with locked(ws):
         job = read(ws, job_id)
         if job["status"] != "queued":
             raise DelegationError(f"Job {job_id} is {job['status']}, not queued.")
@@ -107,7 +107,7 @@ def start(ws: Workspace, job_id: int, config: dict[str, str], manual: bool) -> d
 
 def end(ws: Workspace, job_id: int, error: str | None = None) -> dict:
     """End the started attempt: done, or failed with the job queued again for the next one."""
-    with _locked(ws):
+    with locked(ws):
         job = read(ws, job_id)
         if job["status"] != "started":
             raise DelegationError(f"Job {job_id} is {job['status']}, not started.")
@@ -120,7 +120,7 @@ def end(ws: Workspace, job_id: int, error: str | None = None) -> dict:
 def raise_exception(ws: Workspace, job_id: int, message: str) -> dict:
     """An exception as a call on the GM, held for the break (ARC-27, DEL-30); the job stays
     queued. ponytail: a bare call record; #42 schedules calls and adds their deadlines."""
-    with _locked(ws):
+    with locked(ws):
         job = read(ws, job_id)
         moment, seq = current_moment(ws)
         return _append(

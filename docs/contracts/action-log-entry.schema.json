@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/action-log-entry.schema.json",
   "title": "Action log entry",
-  "description": "One entry of a campaign's action log (DEL-24, DEL-27), stored as YAML in `action-log/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. Either a delegated action taken through the Core (`kind: action`) or a GM interaction on one or on a canon file (`kind: gm_interaction`), each counted in GM effort.",
+  "description": "One entry of a campaign's action log (DEL-24, DEL-27, CAN-11), stored as YAML in `action-log/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. A delegated action taken through the Core (`kind: action`) or a GM interaction on one or on a canon file (`kind: gm_interaction`), each counted in GM effort, or a hand edit the Core found when rebuilding the index (`kind: hand_edit`).",
   "type": "object",
-  "oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/gm_interaction"}],
+  "oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/gm_interaction"}, {"$ref": "#/$defs/hand_edit"}],
   "$defs": {
     "common": {
       "type": "object",
@@ -12,7 +12,7 @@
       "properties": {
         "id": {"type": "integer", "minimum": 1, "description": "Increasing, unique in the log."},
         "at": {"type": "string", "format": "date-time", "description": "Real time the entry was written."},
-        "kind": {"enum": ["action", "gm_interaction"]},
+        "kind": {"enum": ["action", "gm_interaction", "hand_edit"]},
         "moment": {"enum": ["prep", "live-session", "between-sessions"]},
         "moment_seq": {"type": "integer", "minimum": 1, "description": "The moment's sequence number in `moment.yaml`. Once the moment changes, the entries of earlier sequence numbers are frozen (DEL-25)."}
       }
@@ -72,8 +72,8 @@
       "required": ["interaction", "entry", "channel", "authenticated", "quote", "reason"],
       "properties": {
         "kind": {"const": "gm_interaction"},
-        "interaction": {"enum": ["approve", "reject", "undo", "confirm"], "description": "confirm promotes a fact or event recorded from the GM's words to the gm_decision rank (CAN-09, DEL-29); it is accepted only from an authenticated Surface and rewrites `target` from `before` to `after`."},
-        "entry": {"type": ["integer", "null"], "description": "The action entry acted on; for confirm, the one that wrote the confirmed file, null after a hand edit."},
+        "interaction": {"enum": ["approve", "reject", "undo", "confirm", "promote"], "description": "promote makes a hand edit a GM decision (CAN-11), from an authenticated Surface only; confirm promotes a fact or event recorded from the GM's words to the gm_decision rank (CAN-09, DEL-29); it is accepted only from an authenticated Surface and rewrites `target` from `before` to `after`."},
+        "entry": {"type": ["integer", "null"], "description": "The action entry acted on; for confirm, the action or hand_edit entry that wrote the confirmed file, null when none did; for promote, the hand_edit entry promoted."},
         "target": {"type": "string", "description": "confirm only: the canon file it rewrites."},
         "before": {"type": "string", "description": "confirm only: that file's content before."},
         "after": {"type": "string", "description": "confirm only: that file's content after, at the gm_decision rank."},
@@ -85,6 +85,19 @@
       "if": {"properties": {"interaction": {"const": "confirm"}}},
       "then": {"required": ["target", "before", "after"], "properties": {"authenticated": {"const": true}}},
       "else": {"properties": {"entry": {"type": "integer"}, "target": false, "before": false, "after": false}},
+      "unevaluatedProperties": false
+    },
+    "hand_edit": {
+      "allOf": [{"$ref": "#/$defs/common"}],
+      "required": ["target", "before", "after", "rank", "promotion"],
+      "properties": {
+        "kind": {"const": "hand_edit"},
+        "target": {"type": "string", "description": "The canon file changed outside the Core, relative to the workspace root."},
+        "before": {"type": ["string", "null"], "description": "Its content as the Core last left it; null when the Core never wrote it."},
+        "after": {"type": ["string", "null"], "description": "Its content the rebuild found; null when it was deleted."},
+        "rank": {"enum": ["agent_proposal", "gm_decision"], "description": "The rank the index gives that content, whatever its front matter says: agent_proposal until promoted (CAN-11)."},
+        "promotion": {"type": ["integer", "null"], "description": "The gm_interaction entry that promoted it to a GM decision; null until then."}
+      },
       "unevaluatedProperties": false
     }
   }

@@ -1,6 +1,7 @@
 """The campaign workspace: its layout and `workspace.yaml` (docs/contracts/workspace-layout.md)."""
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +10,8 @@ import yaml
 from secondchair.core.calendar import Calendar, CalendarError, from_config
 
 SCHEMA_VERSION = 1
+# Version n -> the function migrating a workspace root from n to n + 1, in place (PKG-16).
+MIGRATIONS: dict[int, Callable[[Path], None]] = {}
 CONFIG_FILE = "workspace.yaml"
 STATE_DIR = ".secondchair"
 
@@ -85,6 +88,40 @@ def load(root: Path) -> Workspace:
     if "calendar" not in data:
         raise WorkspaceError(f"{config} has no calendar.")
     return Workspace(root, version, language, _calendar(data["calendar"], str(config)))
+
+
+def upgrade(root: Path) -> tuple[int, int]:
+    """Migrate the workspace in `root` in place to the current schema (PKG-16), one version at a
+    time, leaving the change as a diff for the GM to review; the versions before and after."""
+    config = root / CONFIG_FILE
+    if not config.is_file():
+        raise WorkspaceError(f"{root} is not a campaign workspace: {CONFIG_FILE} is missing.")
+    version = _read(config).get("schema_version")
+    if not isinstance(version, int):
+        raise WorkspaceError(f"{config} has no integer schema_version.")
+    start = version
+    if version > SCHEMA_VERSION:
+        raise WorkspaceError(
+            f"{config} declares schema version {version}, newer than the {SCHEMA_VERSION} "
+            "this SecondChair supports. Upgrade SecondChair instead."
+        )
+    while version < SCHEMA_VERSION:
+        if version not in MIGRATIONS:
+            raise WorkspaceError(f"No migration from workspace schema version {version}.")
+        MIGRATIONS[version](root)
+        version += 1
+        # Only the version line changes, so the diff shows the migration and nothing else.
+        config.write_text(
+            re.sub(
+                r"^schema_version:.*$",
+                f"schema_version: {version}",
+                config.read_text(),
+                count=1,
+                flags=re.M,
+            )
+        )
+    load(root)
+    return start, version
 
 
 def _calendar(value: object, where: str) -> Calendar:

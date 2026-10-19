@@ -141,6 +141,9 @@ def _gm_command(args: argparse.Namespace) -> str:
             raise DelegationError("Confirming a GM decision needs an interactive terminal.")
         entry = canon.confirm(ws, args.id, "cli", auth)
         return f"Confirmed {args.id} as a GM decision (entry {entry['id']})."
+    if args.command == "promote":
+        delegation.promote(ws, args.entry, "cli", auth)
+        return f"Promoted hand edit {args.entry} to a GM decision."
     if args.command == "approve":
         delegation.approve(ws, args.entry, "cli", auth)
         return f"Approved and applied entry {args.entry}."
@@ -152,12 +155,21 @@ def _gm_command(args: argparse.Namespace) -> str:
 
 
 def check(ws: workspace.Workspace) -> int:
-    """Rebuild the derived index from the workspace alone (CAN-10); 1 if a file is invalid."""
-    errors = index.rebuild(ws)
+    """Rebuild the derived index and validate the workspace from the directory alone, with no
+    Foundry or Source (CAN-10, PKG-15); 1 if a file is invalid. Lists the hand edits the
+    rebuild logged that await the GM (CAN-11)."""
+    errors = dict.fromkeys(index.rebuild(ws) + delegation.check(ws))
     for error in errors:
         print(f"secondchair: {error}", file=sys.stderr)
     entities, facts, events = index.counts(ws)
     print(f"Indexed {entities} entities, {facts} facts, {events} events from {ws.root}.")
+    latest = {e["target"]: e for e in delegation.read_log(ws)[0] if e.get("kind") == "hand_edit"}
+    for entry in latest.values():
+        if entry["rank"] == "agent_proposal" and entry["after"] is not None:
+            print(
+                f"Hand edit of {entry['target']} ranks agent_proposal; "
+                f"`secondchair promote {entry['id']}` makes it a GM decision."
+            )
     return 1 if errors else 0
 
 
@@ -267,6 +279,14 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "check", parents=[in_workspace], help="rebuild the derived index and report invalid files"
     )
+    commands.add_parser(
+        "promote",
+        parents=[in_workspace],
+        help="make a logged hand edit a GM decision (interactive only)",
+    ).add_argument("entry", type=int)
+    commands.add_parser(
+        "upgrade", parents=[in_workspace], help="migrate the workspace to the current schema"
+    )
     log_cmd = commands.add_parser("log", help="the action log")
     log_sub = log_cmd.add_subparsers(dest="log_command", required=True)
     undo_cmd = log_sub.add_parser(
@@ -304,6 +324,15 @@ def main(argv: list[str] | None = None) -> int:
             print(machine.ensure_foundry_token())
         elif args.command == "host":
             print(host_setup(args.host), end="")
+        elif args.command == "upgrade":
+            before, after = workspace.upgrade(args.workspace)
+            if before == after:
+                print(f"{args.workspace} is already at schema version {after}.")
+            else:
+                print(
+                    f"Upgraded {args.workspace} from schema version {before} to {after} in place; "
+                    "review the diff (git diff) and commit it."
+                )
         elif args.command == "check":
             return check(workspace.load(args.workspace))
         elif args.command == "serve":
