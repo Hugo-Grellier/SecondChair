@@ -131,7 +131,8 @@ SAMPLE = {
 def test_a_declared_calendar_validates_and_round_trips_dates() -> None:
     cal = from_config(SAMPLE)
     assert isinstance(cal, Calendar)
-    assert cal.is_leap(2) and cal.is_leap(-3) and cal.is_leap(302) and not cal.is_leap(300)
+    assert cal.is_leap(2) and cal.is_leap(302) and not cal.is_leap(300)
+    assert not cal.is_leap(-3)  # no leap year before the first one
     assert cal.is_date("0302-05-02") and not cal.is_date("0300-05-02")
     assert cal.diff("0300-01-01", "0301-01-01") == 325
     assert cal.diff("0302-01-01", "0303-01-01") == 326
@@ -152,8 +153,8 @@ def test_a_declared_calendar_validates_and_round_trips_dates() -> None:
 
 def test_year_zero_and_negative_years_exist() -> None:
     assert AR.add("-0001-12-31", "1d") == "0000-01-01"
-    assert AR.is_leap(0) and AR.is_leap(-4) and not AR.is_leap(-1)
-    assert AR.diff("-0001-01-01", "0001-01-01") == 365 + 366
+    assert AR.is_leap(0) and not AR.is_leap(-4) and not AR.is_leap(-1)
+    assert AR.diff("-0005-01-01", "0001-01-01") == 5 * 365 + 366
     assert AR.display("-0010") == "-10 AR"
 
 

@@ -28,7 +28,8 @@ class Month:
 
 @dataclass(frozen=True)
 class LeapRule:
-    """One day added to `month` (1-based) every `interval` years from `first_year`."""
+    """One day added to `month` (1-based) every `interval` years from `first_year`, none before
+    it, as in Foundry core's `CalendarConfig` (`leapStart`, `leapInterval`)."""
 
     interval: int
     first_year: int
@@ -72,7 +73,9 @@ class Calendar:
     # Dates
 
     def is_leap(self, year: int) -> bool:
-        return self.leap is not None and (year - self.leap.first_year) % self.leap.interval == 0
+        if self.leap is None or year < self.leap.first_year:
+            return False
+        return (year - self.leap.first_year) % self.leap.interval == 0
 
     def month_length(self, year: int, month: int) -> int:
         leap_day = self.leap is not None and month == self.leap.month and self.is_leap(year)
@@ -161,10 +164,14 @@ class Calendar:
 
     def _leaps_before(self, year: int) -> int:
         """Leap years in [0, year), negative for a negative year."""
-        if self.leap is None:
+        leap = self.leap
+        if leap is None:
             return 0
-        r, i = self.leap.first_year, self.leap.interval
-        return r // i - (r - year) // i
+
+        def up_to(y: int) -> int:  # leap years before y, counted from the first one
+            return max(0, -((leap.first_year - y) // leap.interval))
+
+        return up_to(year) - up_to(0)
 
     def _year_start(self, year: int) -> int:
         return sum(m.days for m in self.months) * year + self._leaps_before(year)

@@ -55,7 +55,7 @@ calendar:
     - {name: Thaw, days: 36}
     - {name: Lanternnight, days: 1}
     - {name: Ember, days: 36}
-  leap:                  # optional; one day added to `month` (1-based) when (year - first_year) % interval == 0
+  leap:                  # optional; one day added to `month` (1-based) in first_year and every interval years after it
     interval: 5
     first_year: 2
     month: 2
