@@ -105,7 +105,7 @@ def run(
         job = jobs.start(ws, job_id, config, manual=False)
         error = _launch(ws, job, config, hosts)
         job = jobs.read(ws, job_id)
-        if job["status"] == "done":  # the agent called finish_job
+        if job["status"] in ("done", "missed"):  # finish_job, or a live deadline passed (ARC-28)
             return job
         if error is None:
             return jobs.end(ws, job_id)
@@ -136,11 +136,21 @@ def _launch(ws: Workspace, job: dict, config: dict[str, str], hosts: dict[str, l
     # One pass, so a value is never itself filled in; other braces stay as written.
     argv = [re.sub(r"\{(\w+)\}", lambda m: values.get(m[1], m[0]), arg) for arg in template]
     try:
-        # ponytail: no time limit; a live job's deadline caps it when live jobs come (ARC-28).
-        done = subprocess.run(argv, cwd=ws.root, capture_output=True, text=True)
+        proc = subprocess.Popen(
+            argv, cwd=ws.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
     except OSError as e:
         return f"{argv[0]}: {e.strerror or e}"
-    if done.returncode:
-        tail = (done.stderr or done.stdout).strip()[-500:]
-        return f"{argv[0]} exited with status {done.returncode}: {tail}"
+    while True:  # a live job's deadline caps it (ARC-28): stop the host once the job missed it
+        try:
+            stdout, stderr = proc.communicate(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            if jobs.read(ws, job["id"])["status"] == "missed":
+                proc.kill()
+                proc.communicate()
+                return f"job {job['id']} missed its deadline"
+    if proc.returncode:
+        tail = (stderr or stdout).strip()[-500:]
+        return f"{argv[0]} exited with status {proc.returncode}: {tail}"
     return None

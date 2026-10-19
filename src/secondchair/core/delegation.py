@@ -88,6 +88,12 @@ def seed(root: Path) -> None:
 # The current moment
 
 
+def current_session(ws: Workspace) -> int | None:
+    """The open live session's id (DEL-03), None outside a live session."""
+    data = _read_yaml(ws.root / MOMENT_FILE)
+    return data.get("session", 0) if current_moment(ws)[0] == "live-session" else None
+
+
 def current_moment(ws: Workspace) -> tuple[str, int]:
     """The current moment and its sequence number, which grows at every moment change."""
     data = _read_yaml(ws.root / MOMENT_FILE)
@@ -97,8 +103,12 @@ def current_moment(ws: Workspace) -> tuple[str, int]:
 
 
 def change_moment(ws: Workspace, moment: str) -> bool:
-    """Open `moment`; False if it is already the current one. Freezes the previous moment's log
-    (DEL-25). Only an authenticated Surface may call this (DEL-03a)."""
+    """Open `moment`; False if it is already the current one. The end of a moment is the last
+    deadline of its calls (DEL-30, DEL-32), then its log is frozen (DEL-25). Opening a live
+    session gives it the next session id; ending one queues "wrap a session" (DEL-03, DEL-04).
+    Only an authenticated Surface may call this (DEL-03a)."""
+    from secondchair.core import calls, jobs  # they build on this module
+
     if moment not in MOMENTS:
         raise DelegationError(f"Unknown moment {moment!r}; expected one of {', '.join(MOMENTS)}.")
     with locked(ws):
@@ -107,12 +117,25 @@ def change_moment(ws: Workspace, moment: str) -> bool:
             return False
         if current == "live-session" and moment != "between-sessions":  # DEL-03b
             raise DelegationError("A live session is open; end it (between-sessions) first.")
-        _write_moment(ws.root, moment, seq + 1)
-        return True
+        session = _read_yaml(ws.root / MOMENT_FILE).get("session", 0)
+        calls.pass_deadline(ws, "end")
+        ended = current_session(ws)
+        _write_moment(ws.root, moment, seq + 1, session + (moment == "live-session"))
+    if ended is not None:
+        jobs.queue(
+            ws,
+            playbook="wrap-a-session",
+            inputs={"session": str(ended)},
+            expected_output="The session's candidate facts consolidated into canon.",
+            responsibility="memory",
+            tier="standard",
+        )
+    return True
 
 
-def _write_moment(root: Path, moment: str, seq: int) -> None:
-    _write(root / MOMENT_FILE, yaml.safe_dump({"moment": moment, "seq": seq}, sort_keys=False))
+def _write_moment(root: Path, moment: str, seq: int, session: int = 0) -> None:
+    data = {"moment": moment, "seq": seq, "session": session}
+    _write(root / MOMENT_FILE, yaml.safe_dump(data, sort_keys=False))
 
 
 # Levels
@@ -121,8 +144,7 @@ def _write_moment(root: Path, moment: str, seq: int) -> None:
 def effective_level(ws: Workspace, responsibility: str, moment: str, reversible: bool) -> str:
     """The table cell for the moment (DEL-12; no entity override yet). An irreversible action is
     held at propose (DEL-09)."""
-    cell = _read_yaml(ws.root / TABLE_FILE).get(moment, {}).get(responsibility, {})
-    level = cell.get("level") if isinstance(cell, dict) else None
+    level = _cell(ws, moment, responsibility).get("level")
     if level not in LEVELS:
         raise WorkspaceError(
             f"{ws.root / TABLE_FILE}: {moment} / {responsibility} needs a level among "
@@ -131,31 +153,41 @@ def effective_level(ws: Workspace, responsibility: str, moment: str, reversible:
     return level if reversible else min(level, "propose", key=LEVELS.index)
 
 
+def _cell(ws: Workspace, moment: str, responsibility: str) -> dict:
+    cell = _read_yaml(ws.root / TABLE_FILE).get(moment, {}).get(responsibility, {})
+    return cell if isinstance(cell, dict) else {}
+
+
 # Delegated actions
 
 
 class ActionResult(TypedDict):
     entry: int
-    status: str  # "applied" or "pending"
+    status: str  # "applied", "pending", or "rejected" by a safe default at once (DEL-31)
 
 
 def wrap(ws: Workspace, tool: Tool) -> Callable[..., ActionResult]:
     """The MCP function for a delegated action: the block's `fn` describes the change, the Core
     checks the effective level, logs it, then applies it or holds it for approval."""
     signature = inspect.signature(tool.fn)
-    for reserved in ("agent", "job"):
+    for reserved in ("agent", "job", "blocking"):
         if reserved in signature.parameters:
             raise RegistrationError(f"{tool.name}: `{reserved}` is reserved for the Core")
 
     @functools.wraps(tool.fn)
-    def run(*args: Any, agent: str, job: int | None = None, **kwargs: Any) -> ActionResult:
+    def run(
+        *args: Any, agent: str, job: int | None = None, blocking: bool = False, **kwargs: Any
+    ) -> ActionResult:
         with _for_agent():
-            return act(ws, tool, agent, lambda: tool.fn(*args, **kwargs), job)
+            return act(ws, tool, agent, lambda: tool.fn(*args, **kwargs), job, blocking)
 
     added = [
         inspect.Parameter("agent", inspect.Parameter.KEYWORD_ONLY, annotation=str),
         inspect.Parameter(
             "job", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=int | None
+        ),
+        inspect.Parameter(
+            "blocking", inspect.Parameter.KEYWORD_ONLY, default=False, annotation=bool
         ),
     ]
     run.__signature__ = signature.replace(  # ty: ignore[unresolved-attribute]
@@ -165,7 +197,9 @@ def wrap(ws: Workspace, tool: Tool) -> Callable[..., ActionResult]:
     run.__doc__ = (
         f"{inspect.getdoc(tool.fn) or ''}\n\n`agent`: your name as an agent, recorded in the "
         "action log for traceability only. `job`: the SecondChair job you are running, if any; "
-        "the action is then bound by the delegation table of the job's moment."
+        "the action is then bound by the delegation table of the job's moment. `blocking`: true "
+        "when the table is waiting on this action to go on with the current turn or scene; a "
+        "proposal then calls on the GM at once instead of at the next break."
     )
     return run
 
@@ -187,10 +221,13 @@ def act(
     agent: str,
     describe: Callable[[], Change],
     job: int | None = None,
+    blocking: bool = False,
 ) -> ActionResult:
-    """Take one delegated action (ARC-04): refused at manual, held at propose, applied above.
-    An action for a started job is bound by the table of the job's moment (ARC-23) and logs the
-    job's runner configuration (DEL-24)."""
+    """Take one delegated action (ARC-04): refused at manual, held at propose as a call on the
+    GM (DEL-30), applied above. An action for a started job is bound by the table of the job's
+    moment (ARC-23), logs the job's runner configuration (DEL-24) and blocks as the job does."""
+    from secondchair.core import calls
+
     with locked(ws):
         moment, seq = current_moment(ws)
         table_moment, runner_configuration = moment, None
@@ -202,6 +239,7 @@ def act(
                 raise DelegationError(f"Job {job} is {record['status']}, not started.")
             table_moment = record["moment"]
             runner_configuration = record["attempts"][-1]["runner_configuration"]
+            blocking = record.get("blocking", False)
         level = effective_level(ws, tool.responsibility, table_moment, tool.reversible)
         if level == "manual":
             raise DelegationError(
@@ -252,7 +290,19 @@ def act(
                 # A failed action (ARC-09): logged, counted, and reported to the agent.
                 failed = _append(ws, {**entry, "status": "failed", "error": str(e)})
                 raise DelegationError(f"Failed action, logged as entry {failed['id']}: {e}") from e
-        return {"entry": _append(ws, entry)["id"], "status": entry["status"]}
+        logged = _append(ws, entry)
+        if entry["status"] == "pending":
+            calls.open_call(
+                ws,
+                kind="proposal",
+                responsibility=tool.responsibility,
+                table_moment=table_moment,
+                blocking=blocking,
+                entry=logged["id"],
+                job=job,
+            )
+            logged = read_entry(ws, logged["id"])  # a safe default may have rejected it at once
+        return {"entry": logged["id"], "status": logged["status"]}
 
 
 # GM interactions (DEL-27): each is its own log entry.
@@ -281,6 +331,7 @@ def approve(
             _save(ws, entry)
             raise DelegationError(f"Failed action, entry {entry_id}: {e}") from e
         interaction = _interaction(ws, "approve", entry_id, channel, authenticated, quote, None)
+        _answered(ws, entry_id)
         entry["status"] = "applied"
         entry["approval"] = {
             "channel": channel,
@@ -298,6 +349,7 @@ def reject(ws: Workspace, entry_id: int, reason: str, channel: str, authenticate
     with locked(ws):
         entry = _pending(ws, entry_id)
         _interaction(ws, "reject", entry_id, channel, authenticated, None, reason)
+        _answered(ws, entry_id)
         entry["status"] = "rejected"
         _save(ws, entry)
         return entry
@@ -475,6 +527,8 @@ def promote(ws: Workspace, entry_id: int, channel: str, authenticated: bool) -> 
 
 def check(ws: Workspace) -> list[str]:
     """One message per invalid delegation table, moment, action log, job or call file."""
+    from secondchair.core import calls
+
     errors = read_log(ws)[1]
     for p in sorted((ws.root / JOBS_DIR).glob("*.yaml")) + sorted(
         (ws.root / CALLS_DIR).glob("*.yaml")
@@ -491,9 +545,16 @@ def check(ws: Workspace) -> list[str]:
         for moment in MOMENTS:
             for responsibility in RESPONSIBILITIES:
                 effective_level(ws, responsibility, moment, reversible=True)
+                calls.deadline(ws, responsibility, moment, blocking=False)
     except WorkspaceError as e:
         errors.append(str(e))
     return errors
+
+
+def _answered(ws: Workspace, entry_id: int) -> None:
+    from secondchair.core import calls
+
+    calls.answered(ws, entry_id)
 
 
 def _check_reason(reason: str) -> None:

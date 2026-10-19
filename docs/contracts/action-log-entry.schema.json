@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/action-log-entry.schema.json",
   "title": "Action log entry",
-  "description": "One entry of a campaign's action log (DEL-24, DEL-27, CAN-11), stored as YAML in `action-log/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. A delegated action taken through the Core (`kind: action`) or a GM interaction on one or on a canon file (`kind: gm_interaction`), each counted in GM effort, or a hand edit the Core found when rebuilding the index (`kind: hand_edit`).",
+  "description": "One entry of a campaign's action log (DEL-24, DEL-27, CAN-11), stored as YAML in `action-log/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. A delegated action taken through the Core (`kind: action`) or a GM interaction on one or on a canon file (`kind: gm_interaction`), each counted in GM effort, a hand edit the Core found when rebuilding the index (`kind: hand_edit`), or a safe default the Core applied when a call's deadline passed (`kind: safe_default`), which is not a GM interaction.",
   "type": "object",
-  "oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/gm_interaction"}, {"$ref": "#/$defs/hand_edit"}],
+  "oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/gm_interaction"}, {"$ref": "#/$defs/hand_edit"}, {"$ref": "#/$defs/safe_default"}],
   "$defs": {
     "common": {
       "type": "object",
@@ -12,7 +12,7 @@
       "properties": {
         "id": {"type": "integer", "minimum": 1, "description": "Increasing, unique in the log."},
         "at": {"type": "string", "format": "date-time", "description": "Real time the entry was written."},
-        "kind": {"enum": ["action", "gm_interaction", "hand_edit"]},
+        "kind": {"enum": ["action", "gm_interaction", "hand_edit", "safe_default"]},
         "moment": {"enum": ["prep", "live-session", "between-sessions"]},
         "moment_seq": {"type": "integer", "minimum": 1, "description": "The moment's sequence number in `moment.yaml`. Once the moment changes, the entries of earlier sequence numbers are frozen (DEL-25)."}
       }
@@ -46,7 +46,7 @@
         "target": {"type": "string", "description": "The workspace file the action writes, relative to the workspace root; for a VTT action, the document acted on, as the connector names it (a Foundry UUID)."},
         "before": {"type": ["string", "object", "null"], "description": "The target's content before the action; null when absent. For a VTT action, the fields the VTT reported before it; null until it is taken."},
         "after": {"type": ["string", "object", "null"], "description": "The target's content after the action; null when deleted. For a VTT action, the fields asked for, then the ones the VTT reported after it."},
-        "status": {"enum": ["pending", "applied", "rejected", "undone", "refused", "failed"], "description": "pending at propose until approved or rejected; applied at once above propose; refused when the Core found the change contradicts canon (nothing written); failed when the VTT did not take it (ARC-09), with `error`."},
+        "status": {"enum": ["pending", "applied", "rejected", "undone", "refused", "failed"], "description": "pending at propose until approved or rejected; applied at once above propose; refused when the Core found the change contradicts canon (nothing written); failed when the VTT did not take it (ARC-09), with `error`. A pending action whose call passes its deadline unanswered is rejected by the safe default (a `safe_default` entry)."},
         "refusal": {"type": "string", "description": "Why the Core refused the action as a contradiction with canon; present only when `status` is refused. Counted as a continuity error (MET-01)."},
         "error": {"type": "string", "description": "Why a failed action failed."},
         "approval": {
@@ -99,6 +99,18 @@
         "after": {"type": ["string", "null"], "description": "Its content the rebuild found; null when it was deleted."},
         "rank": {"enum": ["agent_proposal", "gm_decision"], "description": "The rank the index gives that content, whatever its front matter says: agent_proposal until promoted (CAN-11)."},
         "promotion": {"type": ["integer", "null"], "description": "The gm_interaction entry that promoted it to a GM decision; null until then."}
+      },
+      "unevaluatedProperties": false
+    },
+    "safe_default": {
+      "allOf": [{"$ref": "#/$defs/common"}],
+      "description": "A deadline passed unanswered (DEL-32, ARC-28): a proposal is rejected, an exception takes no action, a live job is missed. Shown again at the break.",
+      "required": ["call", "entry", "job"],
+      "properties": {
+        "kind": {"const": "safe_default"},
+        "call": {"type": ["integer", "null"], "description": "The defaulted call (call.schema.json); null for a live job that missed its deadline."},
+        "entry": {"type": ["integer", "null"], "description": "The proposal's action entry, now rejected; null otherwise."},
+        "job": {"type": ["integer", "null"], "description": "The job the call came from, or the live job that missed its deadline."}
       },
       "unevaluatedProperties": false
     }

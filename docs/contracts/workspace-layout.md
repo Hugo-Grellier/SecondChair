@@ -110,9 +110,10 @@ between-sessions:
 ```yaml
 moment: prep   # prep, live-session or between-sessions; a new workspace starts in prep
 seq: 1         # grows by one at every moment change
+session: 0     # the last live session's id; the open one's while moment is live-session
 ```
 
-Only `secondchair moment <moment>` in an interactive terminal changes it (DEL-03, DEL-03a). While `live-session` is open, only `between-sessions` (ending it) is accepted (DEL-03b). Each action log entry records the `seq` it was taken in; once the moment changes, those entries are frozen and can no longer be undone, approved or rejected (DEL-25).
+Only `secondchair moment <moment>`, `secondchair session start` and `secondchair session end` in an interactive terminal change it (DEL-03, DEL-03a). `session start` opens `live-session` with the next session id and is refused while one is open; `session end` returns to `between-sessions` (DEL-03b). Ending a live session, by either command, queues the "wrap a session" job (`wrap-a-session`, under memory, its input `session` the session id; DEL-04, CAP-09); its playbook comes with #46. The end of a moment is the last deadline of its calls: every call still open takes its safe default (`calls/`). While `live-session` is open, only `between-sessions` (ending it) is accepted (DEL-03b). Each action log entry records the `seq` it was taken in; once the moment changes, those entries are frozen and can no longer be undone, approved or rejected (DEL-25).
 
 ## `action-log/`
 
@@ -122,24 +123,36 @@ An action taken for a job carries the job's id (`job`) and the runner configurat
 
 ## `jobs/`
 
-One YAML file per job, named by its id on six digits, following [`job.schema.json`](job.schema.json): the job contract (playbook, inputs, expected output, responsibility, moment, tier, campaign language, vocabulary), its status (`queued`, `started`, `done`) and every start attempt with the runner configuration used. `secondchair jobs queue <playbook> --input <name>=<value>` writes it; `secondchair jobs` lists the jobs not done; `secondchair jobs run` starts the queued ones with the runner configuration.
+One YAML file per job, named by its id on six digits, following [`job.schema.json`](job.schema.json): the job contract (playbook, inputs, expected output, responsibility, moment, tier, campaign language, vocabulary), whether its call blocks and its deadline when queued in a live session (ARC-28), its status (`queued`, `started`, `done`, `missed`) and every start attempt with the runner configuration used. `secondchair jobs queue <playbook> --input <name>=<value>` writes it; `secondchair jobs` lists the jobs queued or started; `secondchair jobs run` starts the queued ones with the runner configuration.
 
 ## `calls/`
 
-One YAML file per call on the GM. So far the only call is the exception raised when every runner configuration for a job's tier failed; the job stays queued. Scheduling, answering and showing calls come with #42.
+One YAML file per call on the GM, following [`call.schema.json`](call.schema.json): a pending proposal (one per action held at propose) or a surfaced exception, such as the one raised when every runner configuration for a job's tier failed (the job stays queued). Ceiling refusals join with #49.
 
 ```yaml
 id: 1
 at: '2026-10-19T20:15:00+00:00'
-kind: exception
-moment: prep
-moment_seq: 1
-responsibility: memory
-deadline: break
-job: 1
-message: Every runner configuration for tier standard failed; the job stays queued.
-status: open
+kind: proposal
+moment: live-session
+moment_seq: 2
+session: 1
+responsibility: npcs
+blocking: true          # declared by the acting agent (`blocking` on every delegated action) or its job
+deadline: now           # now or break
+interruption: true      # due now during a live session (DEL-33)
+entry: 4                # a proposal's action log entry
+job: null
+message: null           # an exception's text
+status: open            # open, answered or defaulted
+shown: false            # a defaulted call shown again at a break
 ```
+
+- **Deadline** (DEL-30, DEL-07): the delegation table cell's deadline mode for the call's responsibility, in the moment whose table binds it. `auto` gives `now` to a blocking call and `break` to the others; `now` and `break` force it. A blocking call forced to `break` takes its safe default at once (DEL-31). A job's call inherits the job's deadline (ARC-28).
+- **Deadlines pass on gestures, never on a clock**: moving on (the blocking turn or scene went on; the Core's `calls.move_on`, which the VTT connector calls) passes `now`; `secondchair break` passes `now` and the live jobs due at the break, then shows the break pile; the end of the moment passes everything.
+- **Safe default** (DEL-32): a proposal's pending action is rejected, so an irreversible action never takes effect by default; an exception takes no action; a live job not done is `missed` and takes no further action. Each is a `safe_default` action log entry, not a GM interaction.
+- **Break pile**: the calls due at the break still open (shown at every break until answered or the moment ends) and every call defaulted since the last break (shown once, then `shown: true`).
+- **Interruptions** (DEL-33, MET-06): calls with `interruption: true`, counted by the Core per live session and per responsibility (`calls.interruptions`), whatever Surface shows them.
+- Approving or rejecting a proposal answers its call.
 
 ## `canon/entities/`
 

@@ -4,7 +4,7 @@
   "title": "Job",
   "description": "A job (ARC-23): work that needs a model, queued by the Core with an explicit contract, stored as YAML in `jobs/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. The Core calls no model: a runner, or the GM's own agent host session, starts the job (ARC-24, ARC-29). An agent receives the contract (every field but `at`, `status` and `attempts`) and passes `job` to each delegated action it takes, which is then bound by the delegation table of the job's moment and logs the job's runner configuration.",
   "type": "object",
-  "required": ["id", "at", "playbook", "inputs", "expected_output", "responsibility", "moment", "tier", "campaign_language", "vocabulary", "status", "attempts"],
+  "required": ["id", "at", "playbook", "inputs", "expected_output", "responsibility", "moment", "tier", "campaign_language", "vocabulary", "blocking", "deadline", "status", "attempts"],
   "additionalProperties": false,
   "properties": {
     "id": {"type": "integer", "minimum": 1, "description": "Increasing, unique among the workspace's jobs."},
@@ -17,7 +17,9 @@
     "tier": {"enum": ["fast", "standard", "deep"], "description": "How much model the job needs (ARC-25): the playbook's tier unless the job overrides it. Never a model name. A hint on a manual start (ARC-29)."},
     "campaign_language": {"type": "string", "description": "The campaign language (BCP 47) the job generates content in (ARC-21)."},
     "vocabulary": {"type": "array", "items": {"type": "string"}, "description": "The slice of the campaign vocabulary (CAN-22) relevant to the job: entity names and aliases."},
-    "status": {"enum": ["queued", "started", "done"], "description": "queued until an attempt starts it; queued again when that attempt fails (ARC-27); done when the agent finishes it or the runner's agent exits cleanly."},
+    "blocking": {"type": "boolean", "description": "Whether the call the job prepares blocks the current turn or scene."},
+    "deadline": {"enum": ["now", "break", null], "description": "A live job's latency cap (ARC-28): the deadline of the call it prepares (DEL-30), set when it is queued in a live session. null outside a live session: no cap."},
+    "status": {"enum": ["queued", "started", "done", "missed"], "description": "queued until an attempt starts it; queued again when that attempt fails (ARC-27); done when the agent finishes it or the runner's agent exits cleanly; missed when a live job's deadline passed first: its call's safe default applies, logged as a `safe_default` action log entry, and the job takes no further action."},
     "attempts": {
       "type": "array",
       "description": "Every start attempt, in order, with the configuration used (ARC-27). No silent substitution: a configuration not in the list is never tried. When the list is exhausted the job stays queued and an exception is raised as a call on the GM, held for the break.",

@@ -88,12 +88,12 @@ def move_token(token: str, x: int, y: int) -> VttAction:
 
 The log entry of a VTT action carries `op`, and the fields the VTT reported `before` and `after` it. A VTT action the VTT did not take is a **failed action**: logged with status `failed` and its `error`, and returned to the agent as an MCP error. The Foundry connector registers `move_token` and `set_door` (VTT operations, reversible).
 
-The Core adds a required `agent` string argument to every delegated action's MCP input schema: the agent's name, recorded for traceability only (ARC-22). It also adds an optional `job` integer: the job the agent is running (see below). A block's `fn` must not have an `agent` or a `job` parameter. On each call the Core reads the current moment and the delegation table, then:
+The Core adds a required `agent` string argument to every delegated action's MCP input schema: the agent's name, recorded for traceability only (ARC-22). It also adds an optional `job` integer: the job the agent is running (see below), and an optional `blocking` boolean (default false): whether the table waits on this action to go on with the current turn or scene, which makes its proposal due now rather than at the next break (DEL-30; a job's actions block as the job does). A block's `fn` must not have an `agent`, `job` or `blocking` parameter. On each call the Core reads the current moment and the delegation table, then:
 
 | Effective level | What happens | Result |
 |---|---|---|
 | manual | refused; nothing is written or logged | an MCP error saying why |
-| propose | logged as pending; nothing is written until the GM approves | `{"entry": 3, "status": "pending"}` |
+| propose | logged as pending, a call on the GM ([calls](workspace-layout.md#calls)); nothing is written until the GM approves | `{"entry": 3, "status": "pending"}`, or `"rejected"` when a blocking call forced to break takes its safe default at once (DEL-31) |
 | act-then-review, autonomous | written at once and logged | `{"entry": 3, "status": "applied"}` |
 
 An irreversible action is held at propose (DEL-09) and only an authenticated Surface approves it (DEL-29).
