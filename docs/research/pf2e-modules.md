@@ -7,6 +7,10 @@ automates, SecondChair checks; target pair Foundry v14 + pf2e 8.x) and
 [ADR 0004](../adr/0004-foundry-connector-library-plus-system-adapters.md) (connector library plus PF2e adapter).
 Paths written `repo:path` are relative to that repo's default branch on the date above.
 
+**Addendum (same day, second pass).** The first pass missed **PF2e Combater**, a live PF2e turn planner and executor
+for GM creatures, which overturns its "no usable base" conclusion. It also missed mookAI PF2e, Sundry's reaction
+tracker, PF2e Incapacitation Variants and PF2e Utility Buttons. They are added below and marked *(addendum)*.
+
 ## Answer in one table
 
 | Module (id) | What it does | Licence | Public surface | Last release | v14 + pf2e 8.x | Readable trace |
@@ -21,15 +25,23 @@ Paths written `repo:path` are relative to that repo's default branch on the date
 | **Isaac's PF2e Automation** (zarex97) | Area targeting as Regions, enforced frequencies, "riders" by degree of success, staged wrappers | MIT | `api` + hooks `<id>.init`, `<id>.counteracted` | v1.7.0, 2026-10-08 | Yes: Foundry `14.361`-`14`, pf2e `>=8.3.0` | Repo 2 weeks old, single author |
 | **PF2e Resolution Core** family (Theholycole): Core, Automatic Spell/Ability/Item Resolution, **Combat Simulator** | Compiles PF2e items into "plans" and resolves them; the simulator plays encounters in memory with an expected-value beam-search planner | MIT | `api` (`patches.status()`, `open()`, `oddsCheck()`), hook `pf2eResolutionCoreReady` | Core 0.7.1, 2026-10-17 | Yes: Foundry 14, pf2e `>=8.5.0` | Repos created 2026-10-07/09, single author, "milestone" status |
 | **PF2e AI Combat Assistant** (`pf2e-ai-combat-assistant`, AI-DM-Foundry) | LLM suggests the next action for any creature; on GM confirm it rolls the strike / casts the spell | **None** (no licence file) | None | 1.07, ~2025-04 | **No**: Foundry `>=12` verified 12.331, pf2e `>=6.0.0` | Actor flags `turnState` (actions left, MAP), combat flag `designations` |
+| **PF2e Combater** (`pf2e-combater`, roileaf) *(addendum)* | Turn planner **and executor** for the acting creature: Auto-fill builds a whole 3-action turn (move, strikes with MAP, spells, skill actions); Run next / Run all executes it through the system, with per-step revert; tracks actions spent, Delay, Ready, reaction used | GPL-3.0 | No usable API: `module.api` holds only `runLiveEngineMatrix` (a self-test); hooks `pf2e-combater.reactionMarkerChanged`, `.turnNavigationChanged` and others are UI events | 2.5.5, 2026-10-19 (33 releases since 2026-10-12) | **Yes**: Foundry `14.361`+ verified `14.364`, pf2e `>=8.3.0` verified 8.3.0; requires `socketlib` | Combatant `flags["pf2e-combater"].reactionUsed`; chat flags `actionSpend`, `actionTurn`; actor flags `intelLedger`, tactic overrides; Region/effect flags `areaRegion`, `areaTimer` |
+| **mookAI PF2e** (`mookAI-pf2e`, CircusGM) *(addendum)* | PF2e add-on to mookAI-12: hotkey (or auto below a level) makes the current combatant find a visible target, path, Stride and Strike, then end turn | No licence file (`NOASSERTION`); base mookAI-12 is MIT | None | 1.0.3, last push 2025-02 | **No**: Foundry 12-13, pf2e verified 6.8.1; requires `mookAI-12`, `lib-find-the-path-12` | n/a |
 | **mookAI** (dwonderley) | Automates "mook" NPC turns (move + attack) | MIT | None | 0.2.1, 2022 | **No**: dnd5e, Foundry 9 | n/a |
+| **Sundry** (`sundry`, ChasarooniZ) *(addendum)* | Grab bag; its **Reaction Tracker** adds a "Reaction Used" effect (with a use counter) when a reaction is used and at combat start until the creature's turn | MIT | `globalThis.sundry.api.reactionUsed(actors)` (used by Combater) | 1.11.2, 2026-10-19 | Foundry `>=12` verified 14; no system pin | Actor effect with slug `effect-reaction-used` |
+| **PF2e Incapacitation Variants** (`fvtt-pf2e-incapacitation-variants`, tyrielv) *(addendum)* | House rule: several variants of *when* and *how* the incapacitation trait changes the degree of success | Apache-2.0 | None; libWrapper on `game.pf2e.Check.roll` | 1.4.1, 2026-09-15 | Yes: Foundry verified `14.367`, pf2e verified **8.5.0** | Pushes a `dosAdjustments` entry labelled `IncapacitationVariant` into the check context, which pf2e copies to `flags.pf2e.context.dosAdjustments` |
+| **PF2e Utility Buttons** (`pf2e-flatcheck-helper`, oWave) *(addendum)* | Flat-check prompts (concealed, hidden, dim light), Delay button, Spirit/Life Link, emanation apply | MIT | Custom rule elements for flat-check DCs | 0.22.0, 2026-07-15 | Yes: Foundry `14.361`-`14`, pf2e `>=8.1.0` | Not inspected |
 | **Smart Combat NPC** (AtranonStudios) | Full NPC turn automation: target choice, pathfinding, flanking, spells | Premium (Patreon), source not public | Unknown | package updated 2026-10 | Foundry 13-14, **dnd5e only** | n/a |
 | **Familiar** (`familiar`, Ryan) | Commercial BYOK AI co-GM; "Combat AI" runs monster turns | **PolyForm Shield**, $6/month | MCP + 230 tools | v2.26.0, 2026-10 | Foundry `>=13` verified 14.368, but **monster turns are D&D 5e (2024) only**; on PF2e it does narrative only | n/a |
 
 **Bottom line.** For rules checks, three modules write traces worth reading: Toolbelt's Target Helper (chat message
 flags with each target's save), Visioner (token flags with per-observer visibility and cover), and Reaction Checker
-(combatant reaction flags). Nothing in the ecosystem is a usable base for agents running PF2e monster turns. The only
-PF2e turn driver (AI Combat Assistant) is unlicensed, stuck on v12 and abandoned. The live ones are D&D 5e only, closed
-or both. Theholycole's Combat Simulator has the only PF2e turn planner, and it is two weeks old and works in memory only.
+(combatant reaction flags). *(Addendum)* **PF2e Combater** is the one live PF2e module that plans and executes a
+GM creature's whole turn on Foundry v14 + pf2e 8.x. It is the closest existing thing to an agent-run monster turn,
+but it cannot serve as a base: it has no public API to drive, it is GPL-3.0 (so its code cannot be copied into the
+Apache-2.0 adapter, ADR 0006), and it moves daily. It is best treated as a **design reference and a coexistence
+concern** (both would spend actions and reactions on the same combatant). Every other turn driver is dead (AI Combat
+Assistant, mookAI PF2e: v12/13), D&D 5e only, or in-memory only (Theholycole's Combat Simulator).
 
 ## Rules automation modules
 
@@ -157,6 +169,8 @@ or both. Theholycole's Combat Simulator has the only PF2e turn planner, and it i
 | mookAI | dnd5e | Yes, move + attack | MIT, last commit 2022-01, Foundry 9 |
 | Smart Combat NPC | dnd5e | Yes: targeting, pathfinding, flanking, spells, per-token robot toggle | Patreon-gated, source not published |
 | Familiar | multi | Combat AI "resolves the attack under real 5e (2024) rules" | PolyForm Shield, paid; on PF2e: "Pathfinder 2e automates its own combat. Familiar runs the story around it." (familiarvtt.com/capabilities) |
+| **PF2e Combater** *(addendum)* | PF2e | **Yes, live, step by step.** Planner reads the actor's real strikes, spells (slots, focus, innate, wands/scrolls), system and skill actions, and the grid (walls, reach, threat lines, cover routes). NPC "tactic personalities" (role + temperament), aggro targeting, turn-intent rules. Executor rolls strikes from `action.variants[i]`, casts through `item.cast({ event, rank })`, rolls saves via `statistic.roll({ dc })`, moves tokens through Foundry movement, creates area Regions with a countdown effect, and records revert envelopes (`scripts/engine/execution/*.js`, `CONTEXT.md`). Run all stops at a step needing a choice or the GM. No LLM: heuristic scoring only | GPL-3.0, 2.5.5, Foundry 14 / pf2e 8.3+, one author (roileaf, also Visioner), very high churn |
+| mookAI PF2e *(addendum)* | PF2e | Yes, for mooks: target, path, Stride, Strike, end turn; optional auto-run below a level | No licence file, Foundry 12-13, pf2e 6.8, last push 2025-02 |
 | PF2e Combat Simulator | PF2e | **No live control**: "The simulations move nothing on the canvas and change no actor". It has an in-memory expected-value planner (`src/engine/planner.js`: "Each creature searches its possible plans for the rest of its turn with a small beam search") over range bands, not the grid | MIT, 0.14.1, Foundry 14 / pf2e 8.5, ~16.7k lines of engine, two weeks old |
 
 - An "Auto Combat AI" package by the same publisher as Smart Combat NPC appears in search results, but its
@@ -165,7 +179,17 @@ or both. Theholycole's Combat Simulator has the only PF2e turn planner, and it i
   documents and tokens to an LLM. They do not model a PF2e turn (actions, MAP, reactions), so they do not count as
   monster control.
 
-**Base for agents running monster turns.** None qualifies:
+**Base for agents running monster turns.** None qualifies as a base, but one is a strong reference:
+
+- *(Addendum)* **PF2e Combater** does live what ADR 0011's adapter must do (strike variants, `cast` with rank,
+  save rolls with a DC, movement, Regions, per-step undo, action and reaction accounting). Three things rule it out
+  as a base. First, its only exported API is a self-test runner, so an agent could only drive it by scripting its UI.
+  Second, it is GPL-3.0, while the Foundry modules are Apache-2.0 (ADR 0006): calling it at runtime is fine, copying is
+  not. Third, a single author ships several releases a day. It does show that a heuristic planner over the real
+  action set is feasible on v14 + 8.x. If both run in one world they will fight over the same state: Combater counts
+  spent actions from chat cards and token movement, and writes its own `reactionUsed` combatant flag (it also reads
+  Reaction Checker's flag and Sundry's effect). The adapter must detect it and either defer to it or ask the GM to
+  turn off its auto-open and tracking for GM creatures.
 
 - The only PF2e executor (AI Combat Assistant) cannot be reused: it has no licence, targets v12 and has been abandoned
   for 18 months. Its approach is the same as ADR 0011's adapter, which calls `strike.variants[n].roll` and
@@ -180,6 +204,12 @@ or both. Theholycole's Combat Simulator has the only PF2e turn planner, and it i
   `freeArchetypeVariant`, `automaticBonusVariant`, `mythic`, `proficiencyVariant` and the five
   `proficiency*Modifier` values (`foundryvtt/pf2e:src/module/system/settings/variant-rules.ts`). They are cheap to
   snapshot and change math a check would recompute (proficiency without level, ABP).
+- *(Addendum)* **Degree-of-success house rules that go through the check context are visible.** PF2e
+  Incapacitation Variants wraps `Check.roll` but pushes a labelled entry into `context.dosAdjustments`, and pf2e
+  writes `dosAdjustments` and `unadjustedOutcome` into the message's `flags.pf2e.context`
+  (`foundryvtt/pf2e:src/module/system/check/check.ts` ~L198-L302, commit `46f7c3c`). A rules check that reads those
+  two fields accepts the house-ruled degree and can name it. A check that recomputes the degree from total vs DC
+  alone would raise a false discrepancy.
 - **Module settings** (Workbench automations and house rules, Reyzor's rule table, Reaction Checker's homebrew
   reactions) are also `game.settings` entries, so they are readable the same way.
 - **Invisible to checks:** Workbench's house patcher (rewrites compendium items in place) and any libWrapper patch of
@@ -196,9 +226,13 @@ or both. Theholycole's Combat Simulator has the only PF2e turn planner, and it i
   before and after adjustment per target. That is enough for an internal-consistency check without a re-roll. It is
   the most valuable third-party trace.
 - **Reactions.** Coordinate with Reaction Checker's `flags["pf2e-reaction"].state` rather than keep a second counter
-  blindly, or detect the module and defer to it.
-- **Monster turns stay ours.** No module is a usable base. The adapter's own executor (strikes, `entry.cast`, system
-  actions) as ADR 0011 describes it is still required. The AI Combat Assistant and Combat Simulator are design
+  blindly, or detect the module and defer to it. *(Addendum)* There are three such trackers: Reaction Checker
+  (combatant flag), Sundry (actor effect `effect-reaction-used`) and Combater (combatant flag `reactionUsed`).
+  Combater already reads all three, so the adapter should do the same.
+- **Monster turns stay ours.** No module is a usable base. *(Addendum)* PF2e Combater is the reference design to
+  study (action facts, execution results with revert envelopes, tactic personalities), and a module to detect and
+  stand down from. The adapter's own executor (strikes, `entry.cast`, system
+  actions) as ADR 0011 describes it is still required. Combater, the AI Combat Assistant and the Combat Simulator are design
   references only.
 - **House rules.** Snapshot `pf2e` variant-rule settings, active module ids and versions, and key automation settings
   into session context, so a discrepancy can be read against them. Accept that compendium patches and method wrappers
