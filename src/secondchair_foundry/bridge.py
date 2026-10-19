@@ -193,9 +193,16 @@ class Bridge:
                 f"The GM client did not answer within {REPLY_TIMEOUT} s: check the VTT, the "
                 "action may have been taken."
             ) from None
-        if not reply["ok"]:
-            raise VttError(reply["error"])
-        return reply["before"], reply["after"]
+        before, after = reply.get("before"), reply.get("after")
+        if (
+            reply.get("ok") is not True
+            or not isinstance(before, dict)
+            or not isinstance(after, dict)
+        ):
+            raise VttError(
+                str(reply.get("error") or f"The GM client sent a malformed reply: {reply}")
+            )
+        return before, after
 
     async def _request(self, socket: WebSocket, request: dict) -> dict:
         waiting = asyncio.get_running_loop().create_future()
