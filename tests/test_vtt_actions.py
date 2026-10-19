@@ -120,3 +120,17 @@ def test_a_mechanical_action_with_no_system_adapter_is_a_failed_action(
     [entry] = log(ws)
     assert (entry["op"], entry["status"]) == ("strike", "failed")
     assert foundry.docs[TOKEN] == {"x": 100, "y": 200}
+
+
+def test_an_approved_action_the_vtt_does_not_take_is_a_failed_action(
+    ws: Workspace,  # noqa: F811
+) -> None:
+    set_level(ws, "prep", "vtt_operations", "propose")
+    move(ws, 300, 200)
+
+    with pytest.raises(delegation.DelegationError, match="No GM client"):
+        delegation.approve(ws, 1, "cli", True)
+
+    [entry] = log(ws)
+    assert entry["status"] == "failed"
+    assert "No GM client" in entry["error"]

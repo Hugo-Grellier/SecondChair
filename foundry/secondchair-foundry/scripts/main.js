@@ -72,8 +72,13 @@ Hooks.once("ready", () => {
         adapter: () => adapter,
       });
       socket.addEventListener("message", async (event) => {
-        const request = JSON.parse(String(event.data));
-        if (request.type === "request") socket.send(JSON.stringify(await actions.handle(request)));
+        try {
+          const request = JSON.parse(String(event.data));
+          if (request.type === "request") socket.send(JSON.stringify(await actions.handle(request)));
+        } catch (error) {
+          // A malformed frame or a closed socket: the Core times the request out as failed.
+          console.error("SecondChair:", error);
+        }
       });
       if (campaign !== welcome.campaign) {
         await game.settings.set(MODULE, "campaign", welcome.campaign);

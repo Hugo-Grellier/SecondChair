@@ -270,9 +270,14 @@ def _relay(ws: workspace.Workspace, gesture: dict) -> None:
     except urllib.error.HTTPError as e:
         try:
             message = json.loads(e.read())["error"]
-        except ValueError, KeyError:
+        except ValueError, KeyError, TypeError:
             message = str(e)
         raise DelegationError(message) from e
+    except TimeoutError as e:
+        raise DelegationError(
+            "The Core serving the campaign did not answer in time; check the action log before "
+            "trying again."
+        ) from e
     except OSError as e:  # connection refused: serve is not running
         raise not_served from e
 

@@ -272,7 +272,14 @@ def approve(
                 f"Entry {entry_id} is irreversible: approve it from an authenticated Surface "
                 "(the CLI in an interactive terminal)."
             )
-        _apply(ws, entry, "after")
+        try:
+            _apply(ws, entry, "after")
+        except DelegationError as e:
+            if "op" not in entry:
+                raise
+            entry.update(status="failed", error=str(e))  # a failed action, as in `act`
+            _save(ws, entry)
+            raise DelegationError(f"Failed action, entry {entry_id}: {e}") from e
         interaction = _interaction(ws, "approve", entry_id, channel, authenticated, quote, None)
         entry["status"] = "applied"
         entry["approval"] = {

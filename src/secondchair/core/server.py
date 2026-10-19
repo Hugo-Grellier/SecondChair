@@ -121,6 +121,10 @@ def serve(ws: Workspace, port: int) -> None:
     sock.listen()
     # Where the CLI relays GM gestures to (GM_PATH); derived state, stale once serve stops.
     (ws.root / STATE_DIR).mkdir(exist_ok=True)
-    (ws.root / STATE_DIR / SERVE_FILE).write_text(json.dumps({"port": sock.getsockname()[1]}))
+    serve_file = ws.root / STATE_DIR / SERVE_FILE
+    serve_file.write_text(json.dumps({"port": sock.getsockname()[1]}))
     print(f"Serving {ws.root} on http://{LOOPBACK}:{sock.getsockname()[1]}", flush=True)
-    uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
+    try:
+        uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
+    finally:  # the CLI must not relay a gesture (and the token) to a later listener
+        serve_file.unlink(missing_ok=True)
