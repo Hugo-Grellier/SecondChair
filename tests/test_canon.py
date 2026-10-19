@@ -1,5 +1,6 @@
-"""Facts, events, ranks and the derived index (CAN-01, CAN-03..08, CAN-10, CAN-12), through the
-Core's MCP tools and the CLI, as an agent and the GM reach them."""
+"""Facts, events, ranks and the derived index (CAN-01, CAN-03..08, CAN-10..12), check and
+upgrade (PKG-15, PKG-16), through the Core's MCP tools and the CLI, as an agent and the GM
+reach them."""
 
 import asyncio
 import json
@@ -371,3 +372,155 @@ def test_check_names_an_invalid_canon_file(
 
     assert main(["check", "-w", str(ws.root)]) == 1
     assert "f-broken.md" in capsys.readouterr().err
+
+
+# Hand edits (CAN-11), check (PKG-15) and upgrade (PKG-16)
+
+
+def gm(ws: Workspace, *argv: str, interactive: bool = True) -> int:
+    with patch.object(cli, "interactive", return_value=interactive):
+        return main([*argv, "-w", str(ws.root)])
+
+
+def the_fact(ws: Workspace, fact_id: str) -> dict:
+    [found] = [f for f in read(ws, "search_facts", include_retconned=True) if f["id"] == fact_id]
+    return found
+
+
+def test_a_hand_edited_fact_is_logged_as_an_agent_proposal_until_the_gm_promotes_it(
+    ws: Workspace,
+) -> None:
+    mira = entity(ws, "Mira Pell")
+    played = fact(ws, "Mira sits on the Lock Council.", entities=[mira], origin=SEEN)
+    path = ws.root / f"canon/facts/{played}.md"
+    path.write_text(path.read_text().replace("Lock Council", "Harbour Council"))
+
+    edited = the_fact(ws, played)
+    assert edited["statement"] == "Mira sits on the Harbour Council."
+    assert edited["rank"] == "agent_proposal"  # whatever the front matter says
+    *_, hand_edit = log(ws)
+    assert hand_edit["kind"] == "hand_edit"
+    assert hand_edit["target"] == f"canon/facts/{played}.md"
+    assert hand_edit["rank"] == "agent_proposal"
+    assert "Lock Council" in hand_edit["before"] and "Harbour" in hand_edit["after"]
+    assert edited["admitted_by"] == hand_edit["id"]
+    assert len(log(ws)) == 3  # reading again logs nothing new
+
+    assert gm(ws, "promote", str(hand_edit["id"]), interactive=False) == 1
+    assert the_fact(ws, played)["rank"] == "agent_proposal"
+
+    assert gm(ws, "promote", str(hand_edit["id"])) == 0
+    assert the_fact(ws, played)["rank"] == "gm_decision"
+    *_, promoted, interaction = log(ws)
+    assert promoted["rank"] == "gm_decision" and promoted["promotion"] == interaction["id"]
+    assert (interaction["interaction"], interaction["entry"]) == ("promote", hand_edit["id"])
+    assert interaction["authenticated"] is True
+    assert gm(ws, "promote", str(hand_edit["id"])) == 1  # once only
+
+
+def test_a_new_file_and_a_deleted_file_written_by_hand_are_logged(ws: Workspace) -> None:
+    mira = entity(ws, "Mira Pell")
+    entity_file = next((ws.root / "canon/entities").glob("*.md"))
+    (ws.root / "canon/facts").mkdir()
+    (ws.root / "canon/facts/f-0000beef.md").write_text(
+        f"---\nid: f-0000beef\nentities: [{mira}]\nrank: played\n"
+        "origin: {kind: gm, words: Mira is a smuggler.}\n---\nMira smuggles salt.\n"
+    )
+    assert the_fact(ws, "f-0000beef")["rank"] == "agent_proposal"
+
+    entity_file.unlink()
+    read(ws, "search_entities")
+    deleted = log(ws)[-1]
+    assert (deleted["kind"], deleted["after"]) == ("hand_edit", None)
+    assert deleted["target"] == entity_file.relative_to(ws.root).as_posix()
+
+
+def test_core_writes_undo_and_approval_are_not_hand_edits(ws: Workspace) -> None:
+    mira = entity(ws, "Mira Pell")
+    played = fact(ws, "Mira sits on the Lock Council.", entities=[mira], origin=SEEN)
+    act(
+        ws,
+        "record_event",
+        description="Mira resigns.",
+        date="4725-06",
+        closes=[played],
+        origin=SEEN,
+    )
+    assert gm(ws, "log", "undo", "3", "--reason", "other") == 0
+    read(ws, "search_events")
+    assert [e["kind"] for e in log(ws)] == ["action", "action", "action", "gm_interaction"]
+
+
+def test_check_lists_hand_edits_awaiting_promotion(
+    ws: Workspace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entity(ws, "Mira Pell")
+    path = next((ws.root / "canon/entities").glob("*.md"))
+    path.write_text(path.read_text() + "Tall.\n")
+
+    assert gm(ws, "check") == 0
+    out = capsys.readouterr().out
+    assert "secondchair promote 2" in out and path.name in out
+
+
+def test_check_passes_on_a_valid_workspace_and_names_each_invalid_file(
+    ws: Workspace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entity(ws, "Mira Pell")
+    assert gm(ws, "check") == 0
+    capsys.readouterr()
+
+    (ws.root / "canon/facts").mkdir()
+    (ws.root / "canon/facts/f-broken.md").write_text("no front matter\n")
+    (ws.root / "action-log/000099.yaml").write_text("id: [unclosed\n")
+    (ws.root / "moment.yaml").write_text("moment: lunch\nseq: 1\n")
+    (ws.root / "delegation.yaml").write_text("prep: {}\n")
+    for folder in ("jobs", "calls"):
+        (ws.root / folder).mkdir(exist_ok=True)
+        (ws.root / folder / "000098.yaml").write_text(f"- not a {folder} mapping\n")
+
+    assert gm(ws, "check") == 1
+    err = capsys.readouterr().err
+    for name in ("f-broken.md", "000099.yaml", "moment.yaml", "delegation.yaml"):
+        assert name in err
+    for name in ("jobs/000098.yaml", "calls/000098.yaml"):
+        assert name in err
+
+
+def git(ws: Workspace, *argv: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(ws.root), *argv], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def test_an_older_schema_blocks_serve_until_upgrade_migrates_it_as_a_git_diff(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    git(ws, "init", "-q")
+    git(ws, "add", "-A")
+    git(ws, "-c", "user.name=GM", "-c", "user.email=gm@example.org", "commit", "-qm", "v1")
+
+    def rename_prep(root: Path) -> None:  # a synthetic migration from schema 1 to 2
+        table = root / "delegation.yaml"
+        table.write_text(table.read_text().replace("prep:", "preparation:", 1))
+
+    monkeypatch.setattr(workspace, "SCHEMA_VERSION", 2)
+    monkeypatch.setattr(workspace, "MIGRATIONS", {1: rename_prep})
+
+    assert main(["serve", str(ws.root)]) == 1
+    assert "secondchair upgrade" in capsys.readouterr().err
+
+    assert gm(ws, "upgrade") == 0
+    diff = git(ws, "diff")
+    assert "-schema_version: 1\n+schema_version: 2" in diff
+    assert "+preparation:" in diff
+    assert workspace.load(ws.root).schema_version == 2
+    assert gm(ws, "upgrade") == 0  # already current
+    assert "already" in capsys.readouterr().out.lower()
+
+
+def test_upgrade_refuses_a_newer_schema(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:
+    config = ws.root / "workspace.yaml"
+    config.write_text(config.read_text().replace("schema_version: 1", "schema_version: 9"))
+    assert gm(ws, "upgrade") == 1
+    assert "newer" in capsys.readouterr().err

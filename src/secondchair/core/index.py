@@ -14,8 +14,9 @@ from typing import Any
 
 import yaml
 
+from secondchair.core import delegation
 from secondchair.core.calendar import Calendar, CalendarError
-from secondchair.core.workspace import STATE_DIR, Workspace
+from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
 
 ENTITIES_DIR = "canon/entities"
 FACTS_DIR = "canon/facts"
@@ -133,9 +134,16 @@ def connect(ws: Workspace) -> sqlite3.Connection:
 
 
 def rebuild(ws: Workspace) -> list[str]:
-    """Rebuild the index from the workspace; one message per invalid file, which is skipped."""
-    stamp = _fingerprint(ws)
-    docs, errors = _load(ws)
+    """Rebuild the index from the workspace, first logging any hand edit (CAN-11); one message
+    per invalid file, which is skipped."""
+    with delegation.locked(ws):  # no Core write lands half-logged while we look
+        try:
+            delegation.log_hand_edits(ws)
+            errors = []
+        except WorkspaceError as e:  # a broken moment.yaml; check names it
+            errors = [str(e)]
+        stamp = _fingerprint(ws)
+        docs, load_errors = _load(ws)
     path = ws.root / STATE_DIR / INDEX_FILE
     path.parent.mkdir(exist_ok=True)
     tmp = path.with_name(f"{INDEX_FILE}.{os.getpid()}.tmp")
@@ -145,7 +153,7 @@ def rebuild(ws: Workspace) -> list[str]:
         _fill(ws.calendar, conn, *docs)
         conn.execute("insert into meta values ('fingerprint', ?)", (stamp,))
     tmp.replace(path)  # readers never see a half-built index
-    return errors
+    return errors + load_errors
 
 
 def _fingerprint(ws: Workspace) -> str:
@@ -164,7 +172,7 @@ def _fingerprint(ws: Workspace) -> str:
 
 def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict], list[str]]:
     errors: list[str] = []
-    admitted = _admitted(ws)
+    admitted = _admitted(delegation.read_log(ws)[0])
     relations = relation_types()
     loaded: list[dict] = []
     for folder, check in (
@@ -183,8 +191,11 @@ def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict], list[str]]:
             except (CanonError, CalendarError, yaml.YAMLError, KeyError, TypeError) as e:
                 errors.append(f"{relative}: {e}")
                 continue
-            # The entry that wrote this very content; none after a hand edit (CAN-11, #37).
-            doc["admitted_by"] = admitted.get((relative, text))
+            # The entry that wrote this very content. A hand edit ranks agent_proposal, or
+            # gm_decision once promoted, whatever its front matter claims (CAN-11).
+            doc["admitted_by"], hand_rank = admitted.get((relative, text), (None, None))
+            if hand_rank and "rank" in doc:
+                doc["rank"] = hand_rank
             found[doc["id"]] = doc
         loaded.append(found)
     entities, facts, events = loaded
@@ -201,14 +212,16 @@ def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict], list[str]]:
     return (entities, facts, events), errors
 
 
-def _admitted(ws: Workspace) -> dict[tuple[str, str], int]:
+def _admitted(entries: list[dict]) -> dict[tuple, tuple[int, str | None]]:
+    """(target, content) -> the last entry that wrote it, and the rank a hand edit gives it."""
     found = {}
-    for p in sorted((ws.root / LOG_DIR).glob("*.yaml")):
-        entry = yaml.safe_load(p.read_text())
-        if not isinstance(entry, dict) or not entry.get("after"):
-            continue
-        if entry.get("status") == "applied" or entry.get("interaction") == "confirm":
-            found[(entry["target"], entry["after"])] = entry["id"]
+    for entry in entries:
+        if entry.get("after") and (
+            entry.get("status") == "applied"
+            or entry.get("kind") == "hand_edit"
+            or entry.get("interaction") == "confirm"
+        ):
+            found[(entry.get("target"), entry["after"])] = (entry["id"], entry.get("rank"))
     return found
 
 

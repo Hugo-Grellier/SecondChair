@@ -8,6 +8,7 @@ YAML file per action log entry in `action-log/` (docs/contracts/action-log-entry
 import fcntl
 import functools
 import inspect
+import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -98,7 +99,7 @@ def change_moment(ws: Workspace, moment: str) -> bool:
     (DEL-25). Only an authenticated Surface may call this (DEL-03a)."""
     if moment not in MOMENTS:
         raise DelegationError(f"Unknown moment {moment!r}; expected one of {', '.join(MOMENTS)}.")
-    with _locked(ws):
+    with locked(ws):
         current, seq = current_moment(ws)
         if current == moment:
             return False
@@ -177,7 +178,7 @@ def act(
     """Take one delegated action (ARC-04): refused at manual, held at propose, applied above.
     An action for a started job is bound by the table of the job's moment (ARC-23) and logs the
     job's runner configuration (DEL-24)."""
-    with _locked(ws):
+    with locked(ws):
         moment, seq = current_moment(ws)
         table_moment, runner_configuration = moment, None
         if job is not None:
@@ -239,7 +240,7 @@ def approve(
     with the GM's quoted words, and from an authenticated Surface for an irreversible one."""
     if channel == "via agent" and not (quote and quote.strip()):
         raise DelegationError("An approval relayed by an agent must quote the GM's words.")
-    with _locked(ws):
+    with locked(ws):
         entry = _pending(ws, entry_id)
         if not entry["reversible"] and not authenticated:
             raise DelegationError(
@@ -262,7 +263,7 @@ def approve(
 def reject(ws: Workspace, entry_id: int, reason: str, channel: str, authenticated: bool) -> dict:
     """Reject a pending action with a rejection reason (DEL-26)."""
     _check_reason(reason)
-    with _locked(ws):
+    with locked(ws):
         entry = _pending(ws, entry_id)
         _interaction(ws, "reject", entry_id, channel, authenticated, None, reason)
         entry["status"] = "rejected"
@@ -273,7 +274,7 @@ def reject(ws: Workspace, entry_id: int, reason: str, channel: str, authenticate
 def undo(ws: Workspace, entry_id: int, reason: str, channel: str, authenticated: bool) -> dict:
     """Undo an applied reversible action of the current moment (DEL-25, DEL-26)."""
     _check_reason(reason)
-    with _locked(ws):
+    with locked(ws):
         entry = _entry(ws, entry_id, "action")
         if entry["status"] != "applied":
             raise DelegationError(f"Entry {entry_id} is {entry['status']}, not applied.")
@@ -301,7 +302,7 @@ def confirm(
         raise DelegationError(
             "Confirming a GM decision needs an authenticated Surface (an interactive terminal)."
         )
-    with _locked(ws):
+    with locked(ws):
         path = _target(ws, target)
         before = path.read_text()
         after, entry_id = promote(before)
@@ -337,6 +338,130 @@ def approve_proposal(ws: Workspace) -> Callable[..., ActionResult]:
         return {"entry": entry, "status": "applied"}
 
     return approve_proposal
+
+
+# Hand edits (CAN-11): a canon file changed outside the Core.
+
+CANON_DIR = "canon"
+
+
+def read_log(ws: Workspace) -> tuple[list[dict], list[str]]:
+    """The action log entries in id order, and one message per file that is not one."""
+    entries, errors = [], []
+    for p in sorted((ws.root / LOG_DIR).glob("*.yaml")):
+        try:
+            entry = _read_yaml(p)
+        except WorkspaceError as e:
+            errors.append(str(e))
+            continue
+        if entry.get("id") != (int(p.stem) if p.stem.isdigit() else None):
+            errors.append(f"{p}: id {entry.get('id')!r} does not match the file name.")
+            continue
+        entries.append(entry)
+    return entries, errors
+
+
+def _core_states(entries: list[dict]) -> dict[str, str | None]:
+    """Each target's content as the Core last left it, replaying writes in the order they hit
+    the workspace: an action when applied (at its approval, if any), an undo, a confirmation,
+    a hand edit."""
+    by_id = {e["id"]: e for e in entries}
+    writes = []
+    for e in entries:
+        if e.get("kind") == "action" and e.get("status") in ("applied", "undone"):
+            when = e["approval"]["interaction"] if e.get("approval") else e["id"]
+            writes.append((when, e.get("target"), e.get("after")))
+        elif e.get("kind") == "hand_edit" or e.get("interaction") == "confirm":
+            writes.append((e["id"], e.get("target"), e.get("after")))
+        elif e.get("interaction") == "undo" and e.get("entry") in by_id:
+            undone = by_id[e["entry"]]
+            writes.append((e["id"], undone.get("target"), undone.get("before")))
+    writes.sort(key=lambda w: w[0])
+    return {target: content for _, target, content in writes if isinstance(target, str)}
+
+
+def log_hand_edits(ws: Workspace) -> list[dict]:
+    """Log every canon file whose content differs from what the Core last wrote there, at the
+    agent-proposal rank (CAN-11). The GM promotes one with `promote`."""
+    with locked(ws):
+        entries, _ = read_log(ws)
+        known = _core_states(entries)
+        current = {
+            p.relative_to(ws.root).as_posix(): p.read_text()
+            for p in sorted((ws.root / CANON_DIR).rglob("*.md"))
+            if p.is_file()
+        }
+        changed = [
+            target
+            for target in sorted(current.keys() | {t for t, c in known.items() if c is not None})
+            if current.get(target) != known.get(target)
+        ]
+        if not changed:
+            return []
+        moment, seq = current_moment(ws)
+        return [
+            _append(
+                ws,
+                {
+                    "kind": "hand_edit",
+                    "moment": moment,
+                    "moment_seq": seq,
+                    "target": target,
+                    "before": known.get(target),
+                    "after": current.get(target),
+                    "rank": "agent_proposal",
+                    "promotion": None,
+                },
+            )
+            for target in changed
+        ]
+
+
+def promote(ws: Workspace, entry_id: int, channel: str, authenticated: bool) -> dict:
+    """Make a hand edit a GM decision: one gesture on an authenticated Surface (CAN-11, DEL-29).
+    Refused once the file changed again: the newer hand edit is the one to promote."""
+    if not authenticated:
+        raise DelegationError(
+            "Promoting a hand edit to a GM decision needs an authenticated Surface "
+            "(the CLI in an interactive terminal)."
+        )
+    with locked(ws):
+        entry = _entry(ws, entry_id, "hand_edit")
+        if entry["rank"] == "gm_decision":
+            raise DelegationError(f"Entry {entry_id} is already a GM decision.")
+        path = ws.root / entry["target"]
+        if (path.read_text() if path.exists() else None) != entry["after"]:
+            raise DelegationError(
+                f"{entry['target']} changed since entry {entry_id}; promote the newer hand edit."
+            )
+        interaction = _interaction(ws, "promote", entry_id, channel, authenticated, None, None)
+        entry["rank"] = "gm_decision"
+        entry["promotion"] = interaction["id"]
+        _save(ws, entry)
+        return entry
+
+
+def check(ws: Workspace) -> list[str]:
+    """One message per invalid delegation table, moment, action log, job or call file."""
+    errors = read_log(ws)[1]
+    for p in sorted((ws.root / JOBS_DIR).glob("*.yaml")) + sorted(
+        (ws.root / CALLS_DIR).glob("*.yaml")
+    ):
+        try:
+            _read_yaml(p)
+        except WorkspaceError as e:
+            errors.append(str(e))
+    try:
+        current_moment(ws)
+    except WorkspaceError as e:
+        errors.append(str(e))
+    try:
+        for moment in MOMENTS:
+            for responsibility in RESPONSIBILITIES:
+                effective_level(ws, responsibility, moment, reversible=True)
+    except WorkspaceError as e:
+        errors.append(str(e))
+    return errors
 
 
 def _check_reason(reason: str) -> None:
@@ -451,7 +576,8 @@ def _entry(ws: Workspace, entry_id: int, kind: str) -> dict:
         raise DelegationError(f"No action log entry {entry_id}.")
     entry = _read_yaml(path)
     if entry.get("kind") != kind:
-        raise DelegationError(f"Entry {entry_id} is not a delegated action.")
+        what = "a delegated action" if kind == "action" else "a hand edit"
+        raise DelegationError(f"Entry {entry_id} is not {what}.")
     return entry
 
 
@@ -468,15 +594,28 @@ def _for_agent() -> Generator[None]:
         raise ToolError(str(e)) from e
 
 
+_held = threading.local()
+
+
 @contextmanager
-def _locked(ws: Workspace) -> Generator[None]:
-    """One writer at a time across `serve` and the CLI.
+def locked(ws: Workspace) -> Generator[None]:
+    """One writer at a time across `serve` and the CLI; reentrant within a thread, since an
+    action reads the index, which may log hand edits.
     ponytail: one workspace-wide lock; finer locks if agents ever queue behind it."""
+    held: set[Path] = _held.__dict__.setdefault("roots", set())
+    root = ws.root.resolve()
+    if root in held:
+        yield
+        return
     lock = ws.root / STATE_DIR / "delegation.lock"
     lock.parent.mkdir(exist_ok=True)
     with lock.open("w") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
-        yield
+        held.add(root)
+        try:
+            yield
+        finally:
+            held.discard(root)
 
 
 def _write(path: Path, text: str) -> None:
