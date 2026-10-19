@@ -27,6 +27,12 @@ Decisions: [ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md), [ADR 0012]
 | **Cost, latency** | Tokens, cost, p50 / p95 latency per job and per moment; live latency capped by the call's deadline | Cheapest runner configuration meeting every floor |
 
 - **MET-05** Relative criteria (GM effort, interruptions) are stated against a **baseline**: the same scenario with every responsibility at manual. Invariants are absolute zeros. Floors and numeric targets are set after the first baseline measurement, not in this spec.
+- **MET-05a** Floors are set in planning (settled 2026-10-19):
+  - until they exist, the bench gates only on the invariants and the v3 contracts carried as unit tests; every other metric is reported, not gated;
+  - a dedicated "Set floors" planning ticket follows the first delegated run of S0, S1 and S3 on the reference runner configuration (N = 3). The GM sets each floor from the median and min–max; the starting rule is the minimum of the three runs, rounded down. The agreement-rate floor waits for S4;
+  - the numbers are recorded in this file and in the bench configuration the harness gates on;
+  - floors may rise freely; lowering one is a GM decision written here with its reason;
+  - "gain vs baseline" means the delegated median is strictly below the baseline median.
 - **MET-06** Interruptions are counted at the Core, so the count does not depend on the Surface ([ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md)).
 
 ## Test bench
