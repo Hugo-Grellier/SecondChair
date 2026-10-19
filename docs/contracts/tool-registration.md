@@ -56,6 +56,7 @@ The Core wraps every delegated action (ARC-04). A delegated action's `fn` does n
 ```python
 from secondchair.core.tools import Change
 
+
 def create_note(title: str) -> Change:
     """Create a note."""
     return Change(path=f"notes/{title}.md", after=f"# {title}\n")
