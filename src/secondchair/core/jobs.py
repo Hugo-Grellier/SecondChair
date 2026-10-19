@@ -19,10 +19,10 @@ from secondchair.core.delegation import (
     DelegationError,
     _append,
     _for_agent,
-    locked,
     _read_yaml,
     _save,
     current_moment,
+    locked,
 )
 from secondchair.core.tools import RESPONSIBILITIES
 from secondchair.core.workspace import Workspace
