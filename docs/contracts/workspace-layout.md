@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, BVE-02, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-15, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-15, PKG-16.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -18,7 +18,8 @@ my-campaign/
 │   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 │   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
 │   ├── events/        # one Markdown file per event: v-1a2b3c4d.md
-│   └── mysteries/     # one Markdown file per mystery graph, named by the mystery entity's id
+│   ├── mysteries/     # one Markdown file per mystery graph, named by the mystery entity's id
+│   └── knowledge/     # one Markdown file per knowledge record: k-1a2b3c4d.md
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
 └── .secondchair/      # derived state (index.sqlite, caches, the write lock); git-ignored, rebuildable
@@ -178,6 +179,7 @@ Mira Pell sits on the Lock Council.
 | `valid_from`, `valid_to` | Fictional validity (CAN-04), campaign dates, partial allowed; null when open. An event that opens or closes the fact sets its start or end instead. Validity is start-inclusive, end-exclusive. |
 | `rank` | `played`, `gm_decision`, `cited_source` or `agent_proposal`, highest first (CAN-06). Set by the Core from the origin, never by the caller. |
 | `origin` | Provenance (CAN-07), by `kind`: `observation` (`quote` verbatim, `locator`) ranks played; `source` (`source`, `page`) ranks cited_source; `gm` (`words`) ranks agent_proposal when an agent records it, and gm_decision once the GM confirms it with `secondchair confirm <id>` in an interactive terminal (CAN-09, DEL-29), which rewrites the rank and logs a `confirm` GM interaction; `job` (`job`) ranks agent_proposal and cannot be confirmed. Approving a proposal never raises its rank (CAN-08). |
+| `never_true` | Optional, `true` for a **belief** (CAN-15): a statement that is never true, which knowers can only believe or suspect. It has no validity, no event opens or closes it, and searches at a date leave it out. Absent means false. |
 
 The record time is not in the file: the index takes it from the action log entry whose `after` is the file's current content (`admitted_by`), which carries the real time and the moment. A file changed by hand is admitted by its `hand_edit` entry (below).
 
@@ -227,13 +229,35 @@ clues:
 - The file holds no state. A clue is **lost** when its fact no longer holds (closed by an event, or retconned), **found** when the party knows its fact. A conclusion is **solved** when the party knows its fact.
 - `check_mystery` reports, while a conclusion is unsolved, the v3 warnings: `mystery-entry` (no entry), `mystery-unreachable` (a node not reachable from the entries through live clues), `mystery-node-clues` (fewer than 3 clues point to a node that is not an entry, the inverted three-clue rule), `mystery-conclusion` (no live clue on a reachable node), `mystery-three-clues` (fewer than 3 live clues, or on reachable nodes), `mystery-single-node` (all of a conclusion's clues on one node).
 
+## `canon/knowledge/`
+
+A knowledge record says a **knower** knows, believes or suspects a fact, and when it learned it (CAN-13, CAN-14). The file is front matter only.
+
+```markdown
+---
+id: k-3c4d5e6f
+knower: e-1a2b3c4d      # "party" for the party as a whole, else an entity id
+fact: f-5e6f7a8b
+mode: believes          # knows, believes or suspects
+date: "4725-04-25"      # the campaign date it learned it
+event: null             # or the event it learned it at
+rank: cited_source
+origin: {kind: source, source: bible.md, page: "B14"}
+---
+```
+
+- Knowers are the party as a whole (`party`; individual PCs are not knowers), an NPC or a faction. A record whose knower is a place is that place's **common knowledge**.
+- Knowledge is closed-world: a knower holds only its own records, plus those of the factions it is a `member_of` and the places it `lives_in` (one level; a faction never inherits from its members). With a date, only relations valid then and records learned by then count. A fact held several ways takes its strongest mode (knows, then believes, then suspects).
+- A never-true fact is believed or suspected, never known. Records on retconned facts are ignored.
+- Content written for an audience (an NPC line, a disclosure, an entity description) cites the ids of the facts it uses and goes through `check_audience_content` (CAN-16): refused when a cited id is not in canon, when the audience does not hold a cited fact, or when the text carries a canary (`CANARY-<zone>-<n>`) or an entity name (or alias) that appears in no fact the audience holds, the audience's own names excepted. Names match whole-word and case-sensitive; paraphrased leaks are not blocked, the test bench measures them.
+
 ## Hand edits
 
 A hand edit of `canon/` bypasses the Core (CAN-11). When it rebuilds the index, the Core compares each Markdown file under `canon/` with the content it last left there (replaying applied actions, undos, confirmations and earlier hand edits in the order they hit the workspace) and logs each difference, a new, changed or deleted file, as one `kind: hand_edit` action log entry with the content before and after. The index ranks that content `agent_proposal`, whatever the file's front matter says. `secondchair promote <entry>` in an interactive terminal (an authenticated Surface, DEL-29) makes it a GM decision: the entry's `rank` becomes `gm_decision`, recorded as a `promote` GM interaction; the file itself is not rewritten. A promotion is refused once the file has changed again: the newer hand edit is the one to promote.
 
 ## `.secondchair/index.sqlite`
 
-The derived index (CAN-10): entities, facts and events with their derived validity and status, and full-text tables over names, statements and descriptions (CAN-12). It records a fingerprint of `workspace.yaml`, `canon/` and `action-log/`, and any read rebuilds it when they changed. `secondchair check` (in the workspace, or with `-w <workspace>`) rebuilds it from the directory alone, with no Foundry and no Source (PKG-15), logs any hand edit, also validates `moment.yaml`, `delegation.yaml`, the action log, job and call files, names each invalid file and exits 1 if there is one. It lists the hand edits awaiting promotion. Deleting `.secondchair/` loses nothing.
+The derived index (CAN-10): entities, facts, events and knowledge with their derived validity and status, and full-text tables over names, statements and descriptions (CAN-12). It records a fingerprint of `workspace.yaml`, `canon/` and `action-log/`, and any read rebuilds it when they changed. `secondchair check` (in the workspace, or with `-w <workspace>`) rebuilds it from the directory alone, with no Foundry and no Source (PKG-15), logs any hand edit, also validates `moment.yaml`, `delegation.yaml`, the action log, job and call files, names each invalid file and exits 1 if there is one. It lists the hand edits awaiting promotion. Deleting `.secondchair/` loses nothing.
 
 ## What is not in the workspace
 
