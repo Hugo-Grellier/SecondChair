@@ -146,6 +146,10 @@ _Avoid_: combat AI, monster AI, bot
 The one language, chosen per campaign, that everything SecondChair generates is written in. Sources may be in any language.
 _Avoid_: locale, GM language, UI language
 
+**Campaign calendar**:
+The one calendar, chosen per campaign, that dates its fictional time: months, a leap rule, a week and an era. Either a named calendar a system extension provides (Absalom Reckoning) or one the campaign declares itself. Month and weekday names are display labels only.
+_Avoid_: date system, clock
+
 **Source**:
 A document the user supplies and the tool only reads, never ships: rulebooks, a previous campaign bible, session recordings, VTT exports.
 _Avoid_: corpus, import, data
