@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/call.schema.json",
+  "title": "Call on the GM",
+  "description": "A call on the GM (DEL-30..33, ADR 0005): a pending proposal or a surfaced exception, stored as YAML in `calls/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. The Core gives it a deadline and applies its safe default when the deadline passes; Surfaces only display it (ARC-11). Ceiling refusals join with the ceiling (#49).",
+  "type": "object",
+  "required": ["id", "at", "kind", "moment", "moment_seq", "session", "responsibility", "blocking", "deadline", "interruption", "entry", "job", "message", "status", "shown"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "integer", "minimum": 1, "description": "Increasing, unique among the workspace's calls."},
+    "at": {"type": "string", "format": "date-time", "description": "Real time the call was raised."},
+    "kind": {"enum": ["proposal", "exception"]},
+    "moment": {"enum": ["prep", "live-session", "between-sessions"], "description": "The moment the call was raised in."},
+    "moment_seq": {"type": "integer", "minimum": 1},
+    "session": {"type": ["integer", "null"], "description": "The live session's id (moment.yaml), null outside a live session."},
+    "responsibility": {"enum": ["prep", "memory", "vtt_operations", "rules_and_combat", "living_world", "npcs", "narrative_direction", "disclosure"]},
+    "blocking": {"type": "boolean", "description": "Whether it blocks the current turn or scene, as the acting agent or its job declared it."},
+    "deadline": {"enum": ["now", "break"], "description": "now when blocking, otherwise the next break, unless the delegation table cell's deadline mode forces one (DEL-30, DEL-07). A job's call inherits the job's deadline (ARC-28)."},
+    "interruption": {"type": "boolean", "description": "Due now during a live session: shown to the GM without the GM asking (DEL-33, MET-06). A call held for the break is not one."},
+    "entry": {"type": ["integer", "null"], "description": "A proposal's pending action log entry."},
+    "job": {"type": ["integer", "null"], "description": "The job the call comes from, if any."},
+    "message": {"type": ["string", "null"], "description": "An exception's text."},
+    "status": {"enum": ["open", "answered", "defaulted"], "description": "answered when the GM approved or rejected the proposal; defaulted when its deadline passed first: a proposal is rejected, an exception takes no action, logged as a `safe_default` action log entry (DEL-32). A blocking call forced to break is defaulted at once (DEL-31)."},
+    "shown": {"type": "boolean", "description": "Whether a defaulted call was shown again at a break."}
+  }
+}

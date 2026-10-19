@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from secondchair import runner
-from secondchair.core import canon, delegation, index, jobs, machine, workspace
+from secondchair.core import calls, canon, delegation, index, jobs, machine, workspace
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.server import GM_PATH, LOOPBACK, MCP_PATH, SERVE_FILE, serve
@@ -139,6 +139,25 @@ def _gm_command(args: argparse.Namespace) -> str:
         if not delegation.change_moment(ws, args.moment):
             return f"Already in {args.moment}."
         return f"Moment: {args.moment}. The previous moment's action log is frozen."
+    if args.command == "session":
+        if not auth:  # DEL-03a
+            raise DelegationError("Starting or ending a session needs an interactive terminal.")
+        live = delegation.current_session(ws)
+        if args.action == "start":
+            if live is not None:  # DEL-03b
+                raise DelegationError(f"Session {live} is already open; end it first.")
+            delegation.change_moment(ws, "live-session")
+            return f"Session {delegation.current_session(ws)} started: moment live-session."
+        if live is None:
+            raise DelegationError("No live session is open.")
+        delegation.change_moment(ws, "between-sessions")
+        return (
+            f"Session {live} ended: moment between-sessions. "
+            'Job "wrap a session" queued (secondchair jobs).'
+        )
+    if args.command == "break":
+        pile = calls.take_break(ws)
+        return "\n".join(_describe_call(c) for c in pile) or "Nothing held for the break."
     if args.command == "confirm":
         if not auth:  # DEL-29
             raise DelegationError("Confirming a GM decision needs an interactive terminal.")
@@ -162,6 +181,16 @@ def _gm_command(args: argparse.Namespace) -> str:
     else:
         delegation.undo(ws, args.entry, args.reason, "cli", auth)
     return f"Undid entry {args.entry} ({args.reason})."
+
+
+def _describe_call(call: dict) -> str:
+    what = (
+        f"entry {call['entry']}"
+        if call["entry"] is not None
+        else call["message"] or f"job {call['job']}"
+    )
+    state = "safe default applied" if call["status"] == "defaulted" else "to answer"
+    return f"Call {call['id']}  {call['kind']}  {call['responsibility']}  {state}: {what}"
 
 
 def check(ws: workspace.Workspace) -> int:
@@ -315,6 +344,13 @@ def main(argv: list[str] | None = None) -> int:
         "moment", parents=[in_workspace], help="change the current moment (interactive only)"
     )
     moment_cmd.add_argument("moment", choices=delegation.MOMENTS)
+    session_cmd = commands.add_parser(
+        "session", parents=[in_workspace], help="start or end the live session (interactive only)"
+    )
+    session_cmd.add_argument("action", choices=("start", "end"))
+    commands.add_parser(
+        "break", parents=[in_workspace], help="signal a break and show the calls held for it"
+    )
     for name, help_text, parents in (
         ("approve", "approve a pending action", [in_workspace]),
         ("reject", "reject a pending action", [in_workspace, reason]),

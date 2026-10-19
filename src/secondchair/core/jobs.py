@@ -14,7 +14,6 @@ from typing import Any
 
 from secondchair.core import canon
 from secondchair.core.delegation import (
-    CALLS_DIR,
     JOBS_DIR,
     DelegationError,
     _append,
@@ -39,15 +38,25 @@ def queue(
     expected_output: str,
     responsibility: str,
     tier: str,
+    blocking: bool = False,
 ) -> dict:
-    """Queue a job in the current moment; the Core starts nothing itself (ARC-23)."""
+    """Queue a job in the current moment; the Core starts nothing itself (ARC-23). A live job
+    gets the deadline of the call it prepares as its latency cap (ARC-28); a blocking one forced
+    to break misses it at once (DEL-31)."""
+    from secondchair.core import calls  # it builds on this module
+
     if tier not in TIERS:
         raise DelegationError(f"Tier {tier!r}: expected one of {', '.join(TIERS)}.")
     if responsibility not in RESPONSIBILITIES:
         raise DelegationError(f"Unknown responsibility {responsibility!r}.")
     with locked(ws):
         moment, _ = current_moment(ws)
-        return _append(
+        due, at_once = (
+            calls.deadline(ws, responsibility, moment, blocking)
+            if moment == "live-session"
+            else (None, False)
+        )
+        job = _append(
             ws,
             {
                 "playbook": playbook,
@@ -59,11 +68,16 @@ def queue(
                 "campaign_language": ws.campaign_language,
                 # ponytail: the whole vocabulary; a narrower slice when a playbook needs one.
                 "vocabulary": canon.vocabulary(ws),
+                "blocking": blocking,
+                "deadline": due,
                 "status": "queued",
                 "attempts": [],
             },
             JOBS_DIR,
         )
+        if at_once:
+            calls._miss(ws, job)
+        return job
 
 
 def read(ws: Workspace, job_id: int) -> dict:
@@ -75,9 +89,9 @@ def read(ws: Workspace, job_id: int) -> dict:
 
 
 def pending(ws: Workspace) -> list[dict]:
-    """Every job not done, oldest first."""
+    """Every job still to do (queued or started), oldest first."""
     jobs = [_read_yaml(p) for p in sorted((ws.root / JOBS_DIR).glob("*.yaml"))]
-    return [job for job in jobs if job["status"] != "done"]
+    return [job for job in jobs if job["status"] in ("queued", "started")]
 
 
 def start(ws: Workspace, job_id: int, config: dict[str, str], manual: bool) -> dict:
@@ -118,25 +132,10 @@ def end(ws: Workspace, job_id: int, error: str | None = None) -> dict:
 
 
 def raise_exception(ws: Workspace, job_id: int, message: str) -> dict:
-    """An exception as a call on the GM, held for the break (ARC-27, DEL-30); the job stays
-    queued. ponytail: a bare call record; #42 schedules calls and adds their deadlines."""
-    with locked(ws):
-        job = read(ws, job_id)
-        moment, seq = current_moment(ws)
-        return _append(
-            ws,
-            {
-                "kind": "exception",
-                "moment": moment,
-                "moment_seq": seq,
-                "responsibility": job["responsibility"],
-                "deadline": "break",
-                "job": job_id,
-                "message": message,
-                "status": "open",
-            },
-            CALLS_DIR,
-        )
+    """An exception as a call on the GM (ARC-27, DEL-30); the job stays queued."""
+    from secondchair.core import calls
+
+    return calls.raise_exception(ws, read(ws, job_id)["responsibility"], message, job=job_id)
 
 
 def agent_tools(ws: Workspace) -> list[Callable[..., Any]]:

@@ -1,0 +1,25 @@
+# A scripted live session for the Core's interruption count (DEL-30..33, MET-06). The expected
+# counts were worked out by hand from the spec, not from the code.
+
+live-session:  # delegation table cells changed from the play base profile
+  npcs: {level: propose}
+  rules_and_combat: {level: propose, deadline: now}
+  disclosure: {level: propose, deadline: break}
+
+steps:
+  - {propose: npcs, blocking: true}              # call 1: due now, an interruption
+  - {propose: npcs, blocking: false}             # call 2: held for the break
+  - {propose: disclosure, blocking: true}        # call 3: forced to break, safe default at once
+  - {propose: rules_and_combat, blocking: false} # call 4: forced to now, an interruption
+  - {exception: memory, blocking: true}          # call 5: due now, an interruption
+  - {approve: 1}                                 # the GM answers call 1 (action entry 1)
+  - move on                                      # calls 4 and 5 take their safe default
+  - break                                        # call 2 is shown, not an interruption
+  - {propose: memory, blocking: false}           # call 6: held for the break
+                                                 # the session ends: calls 2 and 6 default
+
+expected:
+  interruptions:
+    total: 3
+    by_responsibility: {npcs: 1, rules_and_combat: 1, memory: 1}
+  defaulted: [2, 3, 4, 5, 6]

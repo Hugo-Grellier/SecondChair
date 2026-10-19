@@ -19,6 +19,9 @@ Every delegated action goes through the Core, at the level the campaign's delega
 
 ```sh
 secondchair moment between-sessions        # interactive terminal only
+secondchair session start                  # open the live session (interactive terminal only)
+secondchair break                          # signal a break: show the calls held for it
+secondchair session end                    # end it and queue "wrap a session"
 secondchair approve 3                      # apply a pending proposal
 secondchair reject 3 --reason tone         # contradiction, rules, tone or other
 secondchair log undo 2 --reason rules      # undo an action of the current moment
