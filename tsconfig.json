@@ -1,0 +1,15 @@
+{
+  // Type checking only, for the Foundry modules' JavaScript (PKG-22).
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "target": "es2023",
+    "module": "nodenext",
+    "lib": ["es2023", "dom"],
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": ["foundry/**/*.js", "foundry/**/*.d.ts"]
+}

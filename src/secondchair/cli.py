@@ -1,13 +1,12 @@
 """The `secondchair` command line."""
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 import yaml
 
-from secondchair.core import delegation, workspace
+from secondchair.core import delegation, machine, workspace
 from secondchair.core.delegation import DelegationError
 from secondchair.core.server import LOOPBACK, MCP_PATH, serve
 from secondchair.core.tools import RegistrationError
@@ -16,18 +15,12 @@ from secondchair.core.workspace import WorkspaceError
 DEFAULT_PORT = 7240
 
 
-def machine_config_dir() -> Path:
-    """The machine configuration (PKG-13): never inside a workspace."""
-    base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
-    return Path(base) / "secondchair"
-
-
 class MachineConfigError(Exception):
     """A machine configuration `serve` cannot use."""
 
 
 def configured_port() -> int:
-    path = machine_config_dir() / "config.yaml"
+    path = machine.config_dir() / "config.yaml"
     if not path.is_file():
         return DEFAULT_PORT
     try:
@@ -114,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     serve_cmd = commands.add_parser("serve", help="serve a campaign workspace on 127.0.0.1")
     serve_cmd.add_argument("workspace", type=Path)
+    commands.add_parser(
+        "token", help="print the token the Foundry module connects with, creating it once"
+    )
     host_cmd = commands.add_parser("host", help="agent host configuration")
     host_sub = host_cmd.add_subparsers(dest="host_command", required=True)
     setup_cmd = host_sub.add_parser("setup", help="print the configuration for an agent host")
@@ -148,6 +144,9 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"Created campaign workspace {ws.root} (campaign language {ws.campaign_language})"
             )
+        elif args.command == "token":
+            print("Foundry token (keep it secret; paste it into the SecondChair module settings):")
+            print(machine.ensure_foundry_token())
         elif args.command == "host":
             print(host_setup(args.host), end="")
         elif args.command == "serve":

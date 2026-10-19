@@ -1,19 +1,34 @@
 """`secondchair serve`: the Core's MCP server over Streamable HTTP on loopback (PKG-05)."""
 
 import socket
+from importlib.metadata import entry_points
 
 import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.routing import BaseRoute
 
 from secondchair.core import PROTOCOL_VERSION, delegation
-from secondchair.core.tools import load_tools
+from secondchair.core.tools import RegistrationError, load_tools
 from secondchair.core.workspace import Workspace
 
 LOOPBACK = "127.0.0.1"
 MCP_PATH = "/mcp"
+CONNECTOR_GROUP = "secondchair.connectors"
+
+
+def load_connector_routes(ws: Workspace) -> list[BaseRoute]:
+    """The routes VTT connectors serve next to the MCP endpoint (ARC-02, ARC-06), each from a
+    `secondchair.connectors` entry point called with the served workspace."""
+    routes: list[BaseRoute] = []
+    for ep in entry_points(group=CONNECTOR_GROUP):
+        try:
+            routes.extend(ep.load()(ws))
+        except Exception as e:  # a connector's failure stops `serve` cleanly, as for tools
+            raise RegistrationError(f"connector {ep.name!r} ({ep.value}): refused: {e}") from e
+    return routes
 
 
 def build_server(ws: Workspace) -> MCPServer:
@@ -57,6 +72,7 @@ def serve(ws: Workspace, port: int) -> None:
     # Loopback only, unauthenticated (PKG-05, PKG-06); binding beyond it is deferred (PKG-20).
     # The SDK turns on Host/Origin checks against DNS rebinding for a loopback host.
     app = server.streamable_http_app(streamable_http_path=MCP_PATH, host=LOOPBACK)
+    app.router.routes.extend(load_connector_routes(ws))
     sock = socket.socket()
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((LOOPBACK, port))

@@ -38,6 +38,25 @@ jobs:
       - name: pytest
         run: uv run pytest
 
+  javascript:
+    name: Foundry modules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - name: Biome lint and format
+        run: npx biome ci --reporter=github
+      - name: tsc --checkJs
+        run: npx tsc --project tsconfig.json
+      - name: node --test
+        run: node --test "foundry/**/*.test.js"
+
   guards:
     name: Guards and workflow checks
     runs-on: ubuntu-latest
