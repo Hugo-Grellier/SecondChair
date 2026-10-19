@@ -74,7 +74,8 @@ Hooks.once("ready", () => {
       socket.addEventListener("message", async (event) => {
         try {
           const request = JSON.parse(String(event.data));
-          if (request.type === "request") socket.send(JSON.stringify(await actions.handle(request)));
+          if (request.type === "request")
+            socket.send(JSON.stringify(await actions.handle(request)));
         } catch (error) {
           // A malformed frame or a closed socket: the Core times the request out as failed.
           console.error("SecondChair:", error);
