@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/action-log-entry.schema.json",
   "title": "Action log entry",
-  "description": "One entry of a campaign's action log (DEL-24, DEL-27), stored as YAML in `action-log/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. Either a delegated action taken through the Core (`kind: action`) or a GM interaction on one (`kind: gm_interaction`), each counted in GM effort.",
+  "description": "One entry of a campaign's action log (DEL-24, DEL-27), stored as YAML in `action-log/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. Either a delegated action taken through the Core (`kind: action`) or a GM interaction on one or on a canon file (`kind: gm_interaction`), each counted in GM effort.",
   "type": "object",
   "oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/gm_interaction"}],
   "$defs": {
@@ -60,13 +60,19 @@
       "required": ["interaction", "entry", "channel", "authenticated", "quote", "reason"],
       "properties": {
         "kind": {"const": "gm_interaction"},
-        "interaction": {"enum": ["approve", "reject", "undo"]},
-        "entry": {"type": "integer", "description": "The action entry acted on."},
+        "interaction": {"enum": ["approve", "reject", "undo", "confirm"], "description": "confirm promotes a fact or event recorded from the GM's words to the gm_decision rank (CAN-09, DEL-29); it is accepted only from an authenticated Surface and rewrites `target` from `before` to `after`."},
+        "entry": {"type": ["integer", "null"], "description": "The action entry acted on; for confirm, the one that wrote the confirmed file, null after a hand edit."},
+        "target": {"type": "string", "description": "confirm only: the canon file it rewrites."},
+        "before": {"type": "string", "description": "confirm only: that file's content before."},
+        "after": {"type": "string", "description": "confirm only: that file's content after, at the gm_decision rank."},
         "channel": {"enum": ["cli", "via agent"], "description": "The Surface it came through."},
         "authenticated": {"type": "boolean", "description": "Whether that Surface was authenticated (ARC-13): the CLI in an interactive terminal."},
         "quote": {"type": ["string", "null"], "description": "The GM's quoted words when relayed by an agent."},
         "reason": {"enum": ["contradiction", "rules", "tone", "other", null], "description": "The rejection reason (DEL-26), required for reject and undo."}
       },
+      "if": {"properties": {"interaction": {"const": "confirm"}}},
+      "then": {"required": ["target", "before", "after"], "properties": {"authenticated": {"const": true}}},
+      "else": {"properties": {"entry": {"type": "integer"}, "target": false, "before": false, "after": false}},
       "unevaluatedProperties": false
     }
   }

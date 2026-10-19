@@ -112,7 +112,7 @@ Only `secondchair moment <moment>` in an interactive terminal changes it (DEL-03
 
 ## `action-log/`
 
-One YAML file per entry, named by its id on six digits, following [`action-log-entry.schema.json`](action-log-entry.schema.json): delegated actions (`kind: action`) and the GM interactions on them (`kind: gm_interaction`: approve, reject, undo). An action records the workspace file it writes (`target`) and that file's content before and after, which is what undo restores. The Core refuses to approve or undo when the file no longer holds the content the entry expects, such as after a hand edit, so nothing is overwritten unseen.
+One YAML file per entry, named by its id on six digits, following [`action-log-entry.schema.json`](action-log-entry.schema.json): delegated actions (`kind: action`) and the GM interactions on them (`kind: gm_interaction`: approve, reject, undo, confirm). An action records the workspace file it writes (`target`) and that file's content before and after, which is what undo restores. The Core refuses to approve or undo when the file no longer holds the content the entry expects, such as after a hand edit, so nothing is overwritten unseen. A `confirm` interaction rewrites a canon file itself and carries its own `target`, `before` and `after`.
 
 ## `canon/entities/`
 
@@ -151,7 +151,7 @@ Mira Pell sits on the Lock Council.
 | `relation` | Optional (CAN-03): `type`, `subject`, `object`. The type is one of the Core list `member_of`, `leads`, `lives_in`, `located_in`, `owns`, `knows`, `allied_with`, `opposes`, `serves`, `kin_of`, or one a System extension registers as an iterable of names under the `secondchair.relations` entry point group. Any other type is refused. |
 | `valid_from`, `valid_to` | Fictional validity (CAN-04), campaign dates, partial allowed; null when open. An event that opens or closes the fact sets its start or end instead. Validity is start-inclusive, end-exclusive. |
 | `rank` | `played`, `gm_decision`, `cited_source` or `agent_proposal`, highest first (CAN-06). Set by the Core from the origin, never by the caller. |
-| `origin` | Provenance (CAN-07), by `kind`: `observation` (`quote` verbatim, `locator`) ranks played; `source` (`source`, `page`) ranks cited_source; `gm` (`words`) ranks gm_decision only from an authenticated Surface (DEL-29, #38), else agent_proposal; `job` (`job`) ranks agent_proposal. Approving a proposal never raises its rank (CAN-08). |
+| `origin` | Provenance (CAN-07), by `kind`: `observation` (`quote` verbatim, `locator`) ranks played; `source` (`source`, `page`) ranks cited_source; `gm` (`words`) ranks agent_proposal when an agent records it, and gm_decision once the GM confirms it with `secondchair confirm <id>` in an interactive terminal (CAN-09, DEL-29), which rewrites the rank and logs a `confirm` GM interaction; `job` (`job`) ranks agent_proposal and cannot be confirmed. Approving a proposal never raises its rank (CAN-08). |
 
 The record time is not in the file: the index takes it from the action log entry whose `after` is the file's current content (`admitted_by`), which carries the real time and the moment. A file no entry wrote, such as after a hand edit, has none (CAN-11, #37).
 
@@ -175,7 +175,7 @@ The party opened the bypass.
 
 - An **evolution** is one event that closes the old fact and opens the new one. Closing a fact that ranks above the event, has already ended, or starts after the event is refused as a contradiction.
 - A **correction** rewrites a fact file in place, with no event. It is refused when the fact is played or ranks above the correction; the previous version stays in the action log entry's `before`.
-- A **retcon** is an event whose `replaces` names an earlier event, with the GM's words as origin. The earlier event stays on record. The retcon takes effect only at the `gm_decision` rank; until then it is `pending_retcon` and the earlier event stays `canon`. Once in effect, the earlier event is `replaced` and the facts only it opened are `retconned`: kept, but left out of searches by default.
+- A **retcon** is an event whose `replaces` names an earlier event, with the GM's words as origin. The earlier event stays on record. The retcon takes effect only at the `gm_decision` rank, once the GM confirms it; until then it is `pending_retcon` and the earlier event stays `canon`. Once in effect, the earlier event is `replaced` and the facts only it opened are `retconned`: kept, but left out of searches by default.
 - Nothing is deleted.
 
 ## `.secondchair/index.sqlite`

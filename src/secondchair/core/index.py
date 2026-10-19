@@ -205,7 +205,9 @@ def _admitted(ws: Workspace) -> dict[tuple[str, str], int]:
     found = {}
     for p in sorted((ws.root / LOG_DIR).glob("*.yaml")):
         entry = yaml.safe_load(p.read_text())
-        if isinstance(entry, dict) and entry.get("status") == "applied" and entry.get("after"):
+        if not isinstance(entry, dict) or not entry.get("after"):
+            continue
+        if entry.get("status") == "applied" or entry.get("interaction") == "confirm":
             found[(entry["target"], entry["after"])] = entry["id"]
     return found
 

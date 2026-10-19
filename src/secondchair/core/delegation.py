@@ -260,6 +260,45 @@ def undo(ws: Workspace, entry_id: int, reason: str, channel: str, authenticated:
         return entry
 
 
+def confirm(
+    ws: Workspace,
+    target: str,
+    promote: Callable[[str], tuple[str, int | None]],
+    channel: str,
+    authenticated: bool,
+) -> dict:
+    """Confirm a decision into canon at the GM-decision rank (DEL-29): only from an authenticated
+    Surface. `promote` turns the target's content into its confirmed version and names the action
+    entry that wrote it; the rewrite is logged as a GM interaction carrying before and after."""
+    if not authenticated:
+        raise DelegationError(
+            "Confirming a GM decision needs an authenticated Surface (an interactive terminal)."
+        )
+    with _locked(ws):
+        path = _target(ws, target)
+        before = path.read_text()
+        after, entry_id = promote(before)
+        _write(path, after)
+        moment, seq = current_moment(ws)
+        return _append(
+            ws,
+            {
+                "kind": "gm_interaction",
+                "moment": moment,
+                "moment_seq": seq,
+                "interaction": "confirm",
+                "entry": entry_id,
+                "channel": channel,
+                "authenticated": authenticated,
+                "quote": None,
+                "reason": None,
+                "target": target,
+                "before": before,
+                "after": after,
+            },
+        )
+
+
 def approve_proposal(ws: Workspace) -> Callable[..., ActionResult]:
     """The agent relay of a GM approval (DEL-28), served by the Core next to block tools."""
 
