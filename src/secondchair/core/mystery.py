@@ -62,7 +62,7 @@ def check(
         return f["status"] == "canon" and f["valid_to"] is None
 
     def fact_of(lid: str, value: Any) -> str | None:
-        if value not in facts:
+        if not isinstance(value, str) or value not in facts:
             problems.append(f"{lid}: fact {value} is not in canon")
             return None
         return value
@@ -80,7 +80,7 @@ def check(
         entity, proactive = n.get("entity"), n.get("proactive")
         if not entity and not proactive:
             problems.append(f"{nid}: an entity or a proactive fact is required")
-        if entity and entity not in entities:
+        if entity and (not isinstance(entity, str) or entity not in entities):
             problems.append(f"{nid}: entity {entity} is not in canon")
         if proactive and fact_of(nid, proactive) and holds(proactive):
             roots.add(nid)

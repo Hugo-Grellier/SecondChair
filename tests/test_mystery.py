@@ -105,6 +105,15 @@ def test_malformed_clue_shapes_are_reported_not_raised(change: dict, needle: str
     assert any(needle in p for p in problems), problems
 
 
+def test_unhashable_references_are_reported_not_raised() -> None:
+    nodes = [*NODES, {"id": "node-x", "entity": ["e-inn"]}, {"id": "node-y", "proactive": {"x": 1}}]
+    clues = [SOUND[0] | {"fact": ["f-clue1"]}, *SOUND[1:]]
+    conclusions = [{"id": C1, "fact": {"f": 1}}]
+    problems = check(doc(clues=clues, nodes=nodes, conclusions=conclusions))["problems"]
+    for needle in (f"{C1}: fact", "node-x: entity", "node-y: ", "clue-1: fact"):
+        assert any(p.startswith(needle) for p in problems), (needle, problems)
+
+
 def test_malformed_documents_are_reported_not_raised() -> None:
     for bad in ({"id": "e-mystery", "clues": "x"}, {"id": "e-mystery", "nodes": [3]}, []):
         assert check(bad)["problems"]
