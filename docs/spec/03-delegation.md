@@ -64,6 +64,7 @@ Decisions: [ADR 0003](../adr/0003-core-is-the-only-gateway.md), [ADR 0005](../ad
 
 - **DEL-08** Narrative direction cannot go above *propose* in v4. This is a setting, not an architectural constraint. No other responsibility is capped by the tool.
 - **DEL-09** An **irreversible action** (a disclosure, a public line) is held at *propose* unless the GM explicitly lifts that limit for the responsibility. Each irreversible action still needs an authenticated approval while held (DEL-29).
+- **DEL-09a** The hold is a flag on each delegation-table cell (responsibility × moment), set in every base profile. Lifting it requires an authenticated Surface, since it stands for approving every future irreversible action of that cell; restoring it is accepted from any Surface, an agent relay included, and takes effect at once. Once lifted, an irreversible action runs at the cell's effective level, still bounded by entity overrides, the ceiling and the narrative-direction cap; it takes effect at once, is logged, and cannot be undone. A safe default never applies one. Lifting and restoring are logged GM interactions (DEL-27). Settled in planning, 2026-10-19.
 
 ### Entity overrides ([#19](https://github.com/Hugo-Grellier/SecondChair/issues/19))
 
