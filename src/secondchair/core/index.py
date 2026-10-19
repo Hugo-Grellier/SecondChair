@@ -262,7 +262,26 @@ def _strings(value: Any, what: str) -> list[str]:
 def _entity(front: dict, body: str) -> dict:
     _strings(front["names"], "names")
     _strings(front.get("aliases") or [], "aliases")
+    if front.get("official_reference") is not None:
+        official_reference(front["official_reference"])
     return {**front, "description": body}
+
+
+def official_reference(value: Any) -> dict:
+    """An official reference (CAN-19) as stored: the System extension's stable English key, plus
+    its pack only when the key collides across packs, never the translated name."""
+    if not isinstance(value, dict) or not set(value) <= {"key", "pack"}:
+        raise CanonError("official_reference has a key and, on a collision, a pack; nothing else")
+    key, pack = value.get("key"), value.get("pack")
+    # ponytail: an ASCII slug-or-name check; a translation that happens to be ASCII gets through.
+    if not isinstance(key, str) or not key.strip() or not key.isascii():
+        raise CanonError(
+            "official_reference key must be the System extension's stable English key (PF2e: "
+            "system.slug, else flags.babele.originalName), never the translated name"
+        )
+    if pack is not None and (not isinstance(pack, str) or not pack.strip()):
+        raise CanonError("official_reference pack must be a compendium pack id, or null")
+    return {"key": key, "pack": pack}
 
 
 def _fact(calendar: Calendar, relations: set[str], front: dict, body: str) -> dict:
@@ -349,7 +368,7 @@ def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events,
                 e["id"],
                 json.dumps(e["names"]),
                 json.dumps(e.get("aliases") or []),
-                e.get("official_reference"),
+                json.dumps(e.get("official_reference")),
                 e["description"],
             ),
         )
@@ -445,7 +464,8 @@ def _rows(conn: sqlite3.Connection, sql: str, args: list) -> list[dict]:
 
 
 def _decode(row: dict, *keys: str) -> dict:
-    return {**row, **{k: json.loads(row[k]) for k in keys}}
+    # A null from an index built before a column held JSON decodes to None.
+    return {**row, **{k: None if row[k] is None else json.loads(row[k]) for k in keys}}
 
 
 def search_entities(ws: Workspace, text: str = "") -> list[dict]:
@@ -454,7 +474,7 @@ def search_entities(ws: Workspace, text: str = "") -> list[dict]:
         sql += " join entities_fts t on t.id = e.id where entities_fts match ?"
         args.append(_match(text))
     rows = _rows(connect(ws), sql + " order by e.id", args)
-    return [_decode(r, "names", "aliases") for r in rows]
+    return [_decode(r, "names", "aliases", "official_reference") for r in rows]
 
 
 def search_facts(

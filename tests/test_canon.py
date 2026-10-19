@@ -374,6 +374,40 @@ def test_check_names_an_invalid_canon_file(
     assert "f-broken.md" in capsys.readouterr().err
 
 
+def test_an_official_reference_stores_the_english_key_and_the_pack_only_on_collision(
+    ws: Workspace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    act(ws, "create_entity", names=["Gobelin guerrier"], official_reference={"key": "goblin"})
+    act(
+        ws,
+        "create_entity",
+        names=["Gobelin guerrier"],
+        aliases=["Grak"],
+        official_reference={"key": "goblin", "pack": "pf2e.pathfinder-bestiary"},
+    )
+    refs = [e["official_reference"] for e in read(ws, "search_entities", text="Gobelin")]
+    assert sorted(refs, key=lambda r: r["pack"] or "") == [
+        {"key": "goblin", "pack": None},
+        {"key": "goblin", "pack": "pf2e.pathfinder-bestiary"},
+    ]
+
+    # A translated name is never stored as the key; nor is anything but the key and its pack.
+    assert "English key" in refused(
+        ws, "create_entity", names=["Gobelin"], official_reference={"key": "Gobelin guerrière"}
+    )
+    assert "key" in refused(
+        ws,
+        "create_entity",
+        names=["Gobelin"],
+        official_reference={"key": "goblin", "name": "Gobelin guerrier"},
+    )
+    # The index refuses a hand-edited file that stores a translation too.
+    [path, *_] = sorted((ws.root / "canon/entities").glob("*.md"))
+    path.write_text(path.read_text().replace("key: goblin", "key: Gobelin guerrière"))
+    assert main(["check", "-w", str(ws.root)]) == 1
+    assert path.name in capsys.readouterr().err
+
+
 # Hand edits (CAN-11), check (PKG-15) and upgrade (PKG-16)
 
 

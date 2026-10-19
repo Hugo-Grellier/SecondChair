@@ -19,11 +19,14 @@ ENTITIES_DIR = index.ENTITIES_DIR
 def create_entity(
     names: list[str],
     aliases: list[str] | None = None,
-    official_reference: str | None = None,
+    official_reference: dict[str, str | None] | None = None,
     description: str = "",
 ) -> Change:
     """Create a canon entity: identity only (names, aliases, an optional official reference and a
-    player-facing description with no truth value). What is true about it is stated by facts."""
+    player-facing description with no truth value). What is true about it is stated by facts.
+    `official_reference` is {"key": the System extension's stable English key (PF2e: system.slug,
+    else flags.babele.originalName), "pack": the compendium pack, only when the key collides};
+    never the translated name, which goes in `names`."""
     if not names or not all(isinstance(n, str) and n.strip() for n in names):
         raise ValueError("An entity needs at least one non-empty name.")
     entity_id = f"e-{secrets.token_hex(4)}"
@@ -31,7 +34,9 @@ def create_entity(
         "id": entity_id,
         "names": names,
         "aliases": aliases or [],
-        "official_reference": official_reference,
+        "official_reference": (
+            None if official_reference is None else index.official_reference(official_reference)
+        ),
     }
     front = yaml.safe_dump(identity, sort_keys=False, allow_unicode=True)
     return Change(path=f"{ENTITIES_DIR}/{entity_id}.md", after=f"---\n{front}---\n{description}\n")
@@ -263,6 +268,12 @@ def tools(ws: Workspace) -> list[Tool]:
     ]
 
 
-def vocabulary(ws: Workspace) -> list[str]:
-    """The campaign vocabulary (CAN-22): every entity's names and aliases, sorted."""
-    return sorted({w for e in index.search_entities(ws) for w in e["names"] + e["aliases"]})
+def vocabulary(ws: Workspace, entities: list[str] | None = None) -> list[str]:
+    """The campaign vocabulary (CAN-22), sorted: the names and aliases of the given entity ids,
+    or of every entity."""
+    found = index.search_entities(ws)
+    if entities is not None:
+        if unknown := sorted(set(entities) - {e["id"] for e in found}):
+            raise CanonError(f"Unknown entities {unknown}.")
+        found = [e for e in found if e["id"] in entities]
+    return sorted({w for e in found for w in e["names"] + e["aliases"]})

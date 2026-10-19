@@ -315,3 +315,19 @@ def test_failed_probes_and_refused_contradictions_are_continuity_errors(tmp_path
     assert errors["failed_probes"] == len(s0.PROBES)
     assert errors["total"] == 1 + len(s0.PROBES)
     assert report["passed"]  # continuity is reported, not gated, until floors exist (MET-05a)
+
+
+def test_the_s0_report_measures_language_drift_without_blocking_it(tmp_path: Path) -> None:
+    ws, _, _ = rebuild(tmp_path)
+    clean = s0.score_probes(ws, GOLD, {})["language_drift"]
+    assert clean == {"share": 0.0, "drifted": []}
+
+    french = "Mira Pell garde la caisse des réparations dans une réserve secrète du péage."
+    fact = record(ws, french, "B04")  # applied, not blocked
+
+    report = s0.score_probes(ws, GOLD, {})
+    drift = report["language_drift"]
+    assert drift["drifted"] == [{"id": fact, "language": "fr"}]
+    assert 0 < drift["share"] < 1
+    assert report["passed"]  # tracked, never gated
+    assert drift == s0.score_probes(ws, GOLD, {})["language_drift"]  # deterministic
