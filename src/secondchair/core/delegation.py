@@ -168,6 +168,17 @@ def wrap(ws: Workspace, tool: Tool) -> Callable[..., ActionResult]:
     return run
 
 
+def wrap_read(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """The MCP function for a read: its refusals reach the agent with their message."""
+
+    @functools.wraps(fn)
+    def run(*args: Any, **kwargs: Any) -> Any:
+        with _for_agent():
+            return fn(*args, **kwargs)
+
+    return run
+
+
 def act(
     ws: Workspace,
     tool: Tool,

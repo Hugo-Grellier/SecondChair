@@ -21,6 +21,7 @@ from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
 ENTITIES_DIR = "canon/entities"
 FACTS_DIR = "canon/facts"
 EVENTS_DIR = "canon/events"
+KNOWLEDGE_DIR = "canon/knowledge"
 LOG_DIR = "action-log"
 INDEX_FILE = "index.sqlite"
 
@@ -47,6 +48,10 @@ ORIGIN_KEYS = {
     "job": ("job",),
 }
 EVENT_KINDS = ("played", "offscreen")
+# CAN-13, CAN-14: the party as a whole is a knower with this reserved id; every other knower is
+# an entity (an NPC, a faction, or a place whose knowledge is its common knowledge).
+PARTY = "party"
+MODES = ("knows", "believes", "suspects")  # strongest first
 
 _SCHEMA = """
 create table meta(key text primary key, value text);
@@ -54,11 +59,13 @@ create table entities(id text primary key, names text, aliases text, official_re
                       description text);
 create table facts(id text primary key, statement text, entities text, relation text,
                    relation_type text, valid_from text, valid_to text, from_key int, to_key int,
-                   rank text, origin text, status text, admitted_by int);
+                   rank text, origin text, status text, admitted_by int, never_true int);
 create table fact_entities(fact text, entity text);
 create table events(id text primary key, date text, kind text, description text, opens text,
                     closes text, replaces text, replaced_by text, status text, rank text,
                     origin text, admitted_by int);
+create table knowledge(id text primary key, knower text, fact text, mode text, date text,
+                       date_key int, event text, rank text, origin text, admitted_by int);
 create virtual table entities_fts using fts5(id unindexed, names);
 create virtual table facts_fts using fts5(id unindexed, statement);
 create virtual table events_fts using fts5(id unindexed, description);
@@ -170,7 +177,7 @@ def _fingerprint(ws: Workspace) -> str:
 # Loading and validating documents
 
 
-def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict], list[str]]:
+def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict, dict], list[str]]:
     errors: list[str] = []
     admitted = _admitted(delegation.read_log(ws)[0])
     relations = relation_types()
@@ -179,6 +186,7 @@ def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict], list[str]]:
         (ENTITIES_DIR, _entity),
         (FACTS_DIR, lambda d, b: _fact(ws.calendar, relations, d, b)),
         (EVENTS_DIR, lambda d, b: _event(ws.calendar, d, b)),
+        (KNOWLEDGE_DIR, lambda d, b: _knowledge(ws.calendar, d)),
     ):
         found: dict[str, dict] = {}
         for p in sorted((ws.root / folder).glob("*.md")):
@@ -198,7 +206,7 @@ def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict], list[str]]:
                 doc["rank"] = hand_rank
             found[doc["id"]] = doc
         loaded.append(found)
-    entities, facts, events = loaded
+    entities, facts, events, knowledge = loaded
     for f in facts.values():
         for e in f["entities"]:
             if e not in entities:
@@ -209,7 +217,27 @@ def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict], list[str]]:
             for i in ids:
                 if i not in among:
                     errors.append(f"{EVENTS_DIR}/{ev['id']}.md: {key} unknown {i!r}")
-    return (entities, facts, events), errors
+                elif key != "replaces" and among[i].get("never_true"):
+                    errors.append(f"{EVENTS_DIR}/{ev['id']}.md: {i} is never true")
+    for k in list(knowledge.values()):
+        problem = knowledge_problem(k, entities, facts, events)
+        if problem:
+            errors.append(f"{KNOWLEDGE_DIR}/{k['id']}.md: {problem}")
+            del knowledge[k["id"]]
+    return (entities, facts, events, knowledge), errors
+
+
+def knowledge_problem(k: dict, entities: dict, facts: dict, events: dict) -> str | None:
+    """Why a knowledge record cannot stand against canon, or None (CAN-13..15)."""
+    if k["knower"] != PARTY and k["knower"] not in entities:
+        return f"knower {k['knower']!r} is neither {PARTY!r} nor an entity"
+    if k["fact"] not in facts:
+        return f"unknown fact {k['fact']!r}"
+    if k.get("event") is not None and k["event"] not in events:
+        return f"unknown event {k['event']!r}"
+    if k["mode"] == "knows" and facts[k["fact"]].get("never_true"):
+        return f"{k['fact']} is never true: it can be believed or suspected, not known"
+    return None
 
 
 def _admitted(entries: list[dict]) -> dict[tuple, tuple[int, str | None]]:
@@ -256,6 +284,10 @@ def _fact(calendar: Calendar, relations: set[str], front: dict, body: str) -> di
     if front.get("rank") not in RANKS:
         raise CanonError(f"rank must be one of {', '.join(RANKS)}")
     rank_of(front["origin"], authenticated=True)
+    if front.get("never_true", False) not in (True, False):
+        raise CanonError("never_true must be true or false")
+    if front.get("never_true") and (front.get("valid_from") or front.get("valid_to")):
+        raise CanonError("a never-true fact (a belief, CAN-15) has no validity")
     return {**front, "statement": body}
 
 
@@ -273,10 +305,22 @@ def _event(calendar: Calendar, front: dict, body: str) -> dict:
     return {**front, "description": body}
 
 
+def _knowledge(calendar: Calendar, front: dict) -> dict:
+    if not isinstance(front["knower"], str) or not isinstance(front["fact"], str):
+        raise CanonError("knower and fact must be ids")
+    if front.get("mode") not in MODES:
+        raise CanonError(f"mode must be one of {', '.join(MODES)}")
+    calendar.parse(front["date"], partial=True)
+    if front.get("rank") not in RANKS:
+        raise CanonError(f"rank must be one of {', '.join(RANKS)}")
+    rank_of(front["origin"], authenticated=True)
+    return front
+
+
 # Deriving validity from events (CAN-04, CAN-05)
 
 
-def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events) -> None:
+def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events, knowledge):
     # A retcon takes effect only at the GM-decision rank (CAN-05, CAN-09); below that it stays
     # on record, awaiting the GM's confirmation (#38).
     replaced_by = {
@@ -327,7 +371,7 @@ def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events)
             )
         )
         conn.execute(
-            "insert into facts values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "insert into facts values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 f["id"],
                 f["statement"],
@@ -342,6 +386,7 @@ def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events)
                 json.dumps(f["origin"]),
                 fact_status,
                 f["admitted_by"],
+                bool(f.get("never_true")),
             ),
         )
         conn.executemany(
@@ -367,6 +412,22 @@ def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events)
             ),
         )
         conn.execute("insert into events_fts values (?, ?)", (ev["id"], ev["description"]))
+    for k in knowledge.values():
+        conn.execute(
+            "insert into knowledge values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                k["id"],
+                k["knower"],
+                k["fact"],
+                k["mode"],
+                k["date"],
+                date_key(calendar, k["date"]),
+                k.get("event"),
+                k["rank"],
+                json.dumps(k["origin"]),
+                k["admitted_by"],
+            ),
+        )
 
 
 # Queries
@@ -422,6 +483,7 @@ def search_facts(
             "(f.from_key is null or f.from_key <= ?) and (f.to_key is null or f.to_key > ?)"
         )
         args += [key, key]
+        where.append("not f.never_true")  # a belief is never valid (CAN-15)
     if not include_retconned:
         where.append("f.status = 'canon'")
     if where:
@@ -429,9 +491,12 @@ def search_facts(
     rows = _rows(connect(ws), sql + " order by f.id", args)
     return [
         {
-            k: v
-            for k, v in _decode(r, "entities", "relation", "origin").items()
-            if k not in ("from_key", "to_key", "relation_type")
+            **{
+                k: v
+                for k, v in _decode(r, "entities", "relation", "origin").items()
+                if k not in ("from_key", "to_key", "relation_type")
+            },
+            "never_true": bool(r["never_true"]),
         }
         for r in rows
     ]
@@ -462,3 +527,18 @@ def counts(ws: Workspace) -> tuple[int, int, int]:
             conn.execute(f"select count(*) from {t}").fetchone()[0]
             for t in ("entities", "facts", "events")
         )
+
+
+def search_knowledge(ws: Workspace, knowers: list[str], at: str | None = None) -> list[dict]:
+    """Knowledge records of the given knowers about canon facts, learned on or before `at`."""
+    marks = ", ".join("?" * len(knowers))
+    sql = (
+        "select k.*, f.statement, f.never_true from knowledge k join facts f on f.id = k.fact"
+        f" where f.status = 'canon' and k.knower in ({marks})"
+    )
+    args: list = list(knowers)
+    if at:
+        sql += " and k.date_key <= ?"
+        args.append(date_key(ws.calendar, at))
+    rows = _rows(connect(ws), sql + " order by k.date_key, k.id", args)
+    return [{**_decode(r, "origin"), "never_true": bool(r["never_true"])} for r in rows]

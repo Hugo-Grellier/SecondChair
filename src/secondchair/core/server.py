@@ -36,7 +36,7 @@ def build_server(ws: Workspace) -> MCPServer:
     server = MCPServer("secondchair", version=PROTOCOL_VERSION, log_level="WARNING")
     for tool in load_tools(ws):
         server.add_tool(
-            delegation.wrap(ws, tool) if tool.delegated_action else tool.fn,
+            delegation.wrap(ws, tool) if tool.delegated_action else delegation.wrap_read(tool.fn),
             annotations=ToolAnnotations(
                 read_only_hint=not tool.delegated_action,
                 destructive_hint=tool.delegated_action and not tool.reversible,

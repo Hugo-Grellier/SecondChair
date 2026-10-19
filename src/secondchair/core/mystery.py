@@ -16,8 +16,8 @@ from collections import deque
 from collections.abc import Collection, Sequence
 from typing import Any
 
-from secondchair.core import index
-from secondchair.core.index import CanonError
+from secondchair.core import index, knowledge
+from secondchair.core.index import PARTY, CanonError
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
 
@@ -241,7 +241,8 @@ def tools(ws: Workspace) -> list[Tool]:
     def report(doc: dict, lose: list[str]) -> dict[str, Any]:
         facts = {f["id"]: f for f in index.search_facts(ws, include_retconned=True)}
         entities = {e["id"] for e in index.search_entities(ws)}
-        known: set[str] = set()  # ponytail: what the party knows comes with knowers (#39)
+        held = knowledge.known(ws, PARTY)
+        known = {f for f, h in held.items() if h["mode"] == "knows"}  # a suspicion finds nothing
         return check(doc, facts, entities, known, lose)
 
     def record_mystery(

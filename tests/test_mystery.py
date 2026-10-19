@@ -291,6 +291,27 @@ def test_the_core_records_a_mystery_and_flags_a_lost_clue(ws) -> None:
     assert {c["id"]: c["state"] for c in report["clues"]}["clue-4"] == "lost"
 
 
+def test_a_clue_the_party_knows_is_found_and_a_suspected_one_is_not(ws) -> None:
+    who = entity(ws, "Who")
+    inn = entity(ws, "Hanged Inn")
+    sabotage = fact(ws, "Someone sabotages the inn.")
+    clues = [fact(ws, f"Clue number {n}.") for n in (1, 2)]
+    act(
+        ws,
+        "record_mystery",
+        mystery=who,
+        conclusions=[{"id": C1, "fact": sabotage}],
+        nodes=[{"id": N1, "entity": inn, "entry": True}],
+        clues=[clue(n, N1, C1) | {"fact": f} for n, f in zip((1, 2), clues, strict=True)],
+    )
+    learned = {"origin": BIBLE, "date": "4726-01-01"}
+    act(ws, "record_knowledge", knower="party", fact=clues[0], **learned)
+    act(ws, "record_knowledge", knower="party", fact=clues[1], mode="suspects", **learned)
+    report = call(ws, "check_mystery", mystery=who).structured_content
+    states = {c["id"]: c["state"] for c in report["clues"]}
+    assert states == {"clue-1": "found", "clue-2": "hidden"}
+
+
 def test_the_core_refuses_a_mystery_whose_references_do_not_resolve(ws) -> None:
     who = entity(ws, "Who")
     bad = [{"id": C1, "fact": "f-nope"}]

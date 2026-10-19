@@ -78,6 +78,7 @@ def tools(ws: Workspace) -> list[Tool]:
         relation: dict[str, str] | None,
         valid_from: str | None,
         valid_to: str | None,
+        never_true: bool = False,
     ) -> str:
         if not statement.strip():
             raise CanonError("A fact needs a statement in the campaign language.")
@@ -95,6 +96,8 @@ def tools(ws: Workspace) -> list[Tool]:
             involved += [relation["subject"], relation["object"]]
         if unknown := [e for e in involved if e not in known]:
             raise CanonError(f"Unknown entities {unknown}; create them first.")
+        if never_true and (valid_from or valid_to):
+            raise CanonError("A never-true fact (a belief, CAN-15) has no validity dates.")
         dates = {}
         for key, value in (("valid_from", valid_from), ("valid_to", valid_to)):
             dates[key] = ws.calendar.canonical(value, partial=True) if value else None
@@ -105,6 +108,7 @@ def tools(ws: Workspace) -> list[Tool]:
             **dates,
             "rank": rank,
             "origin": origin,
+            **({"never_true": True} if never_true else {}),
         }
         return index.join_doc(front, statement.strip())
 
@@ -115,6 +119,7 @@ def tools(ws: Workspace) -> list[Tool]:
         relation: dict[str, str] | None = None,
         valid_from: str | None = None,
         valid_to: str | None = None,
+        never_true: bool = False,
     ) -> Change:
         """Record a fact: one statement in the campaign language about the given entity ids.
         `origin` is its provenance and sets its rank: {"kind": "observation", "quote", "locator"}
@@ -125,9 +130,13 @@ def tools(ws: Workspace) -> list[Tool]:
         `relation` is optional: {"type", "subject", "object"} with a type from the Core list
         (member_of, leads, lives_in, located_in, owns, knows, allied_with, opposes, serves,
         kin_of) or one a System extension registers. `valid_from` / `valid_to` are campaign
-        dates (YYYY-MM-DD, YYYY-MM or YYYY); leave them empty when an event opens or closes it."""
+        dates (YYYY-MM-DD, YYYY-MM or YYYY); leave them empty when an event opens or closes it.
+        `never_true` records a false statement someone believes (a belief): it has no validity,
+        no event opens it, and knowers can only believe or suspect it (record_knowledge)."""
         fact_id = f"f-{secrets.token_hex(4)}"
-        after = fact_doc(fact_id, statement, entities, origin, relation, valid_from, valid_to)
+        after = fact_doc(
+            fact_id, statement, entities, origin, relation, valid_from, valid_to, never_true
+        )
         return Change(path=f"{FACTS_DIR}/{fact_id}.md", after=after, source=_source(origin))
 
     def correct_fact(
@@ -138,6 +147,7 @@ def tools(ws: Workspace) -> list[Tool]:
         relation: dict[str, str] | None = None,
         valid_from: str | None = None,
         valid_to: str | None = None,
+        never_true: bool = False,
     ) -> Change:
         """Correct a wrongly recorded fact in place, with no event: the arguments are its whole
         new version, as for record_fact. Refused when the fact was played, or ranks above your
@@ -152,7 +162,9 @@ def tools(ws: Workspace) -> list[Tool]:
             raise Contradiction(path, f"{fact} was played; a correction cannot contradict play.")
         if _outranks(current["rank"], rank):
             raise Contradiction(path, f"{fact} ranks {current['rank']}, above this {rank}.")
-        after = fact_doc(fact, statement, entities, origin, relation, valid_from, valid_to)
+        after = fact_doc(
+            fact, statement, entities, origin, relation, valid_from, valid_to, never_true
+        )
         return Change(path=path, after=after, source=_source(origin))
 
     def record_event(
@@ -181,6 +193,8 @@ def tools(ws: Workspace) -> list[Tool]:
         opens, closes = list(opens or []), list(closes or [])
         if unknown := [f for f in opens + closes if f not in facts]:
             raise CanonError(f"Unknown facts {unknown}.")
+        if beliefs := [f for f in opens + closes if facts[f]["never_true"]]:
+            raise CanonError(f"Facts {beliefs} are never true; no event opens or closes them.")
         if replaces is not None:
             if replaces not in {e["id"] for e in index.search_events(ws)}:
                 raise CanonError(f"No event {replaces!r} in canon.")
