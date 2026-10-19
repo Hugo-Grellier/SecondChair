@@ -18,7 +18,7 @@ import yaml
 from mcp.server.mcpserver.exceptions import ToolError
 
 from secondchair.core.tools import RESPONSIBILITIES, Change, RegistrationError, Tool
-from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
+from secondchair.core.workspace import CONFIG_FILE, STATE_DIR, Workspace, WorkspaceError
 
 LEVELS = ("manual", "propose", "act-then-review", "autonomous")  # DEL-02, loosest last
 MOMENTS = ("prep", "live-session", "between-sessions")  # DEL-03
@@ -314,6 +314,9 @@ def _target(ws: Workspace, relative: str) -> Path:
     path = (ws.root / relative).resolve()
     if Path(relative).is_absolute() or not path.is_relative_to(ws.root.resolve()):
         raise DelegationError(f"{relative!r} is outside the campaign workspace.")
+    parts = path.relative_to(ws.root.resolve()).parts
+    if parts and parts[0] in (CONFIG_FILE, TABLE_FILE, MOMENT_FILE, LOG_DIR, STATE_DIR):
+        raise DelegationError(f"{relative!r} belongs to the Core; no delegated action writes it.")
     return path
 
 
