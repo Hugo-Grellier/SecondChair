@@ -14,9 +14,17 @@ from secondchair.core import index
 from secondchair.core.delegation import LOG_DIR
 from secondchair.core.workspace import Workspace
 
-# Probes answered from facts alone. The knowledge and belief probes come with #39, the mystery
-# structure with #40.
-FACT_PROBES = ("factions", "hidden-name", "mystery-answer", "planned-treasure", "situations")
+# Probes answered from facts, and from the mystery graph on facts (mystery-structure, answered
+# with the mystery's own conclusion, node and clue ids). The knowledge and belief probes come
+# with #39.
+FACT_PROBES = (
+    "factions",
+    "hidden-name",
+    "mystery-structure",
+    "mystery-answer",
+    "planned-treasure",
+    "situations",
+)
 
 
 def score_fact_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:

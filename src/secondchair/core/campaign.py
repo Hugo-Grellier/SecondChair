@@ -2,7 +2,7 @@
 
 from typing import TypedDict
 
-from secondchair.core import PROTOCOL_VERSION, canon
+from secondchair.core import PROTOCOL_VERSION, canon, mystery
 from secondchair.core.tools import Tool
 from secondchair.core.workspace import Workspace
 
@@ -26,4 +26,5 @@ def tools(ws: Workspace) -> list[Tool]:
     return [
         Tool(fn=campaign_info, responsibility="memory", delegated_action=False, reversible=True),
         *canon.tools(ws),
+        *mystery.tools(ws),
     ]

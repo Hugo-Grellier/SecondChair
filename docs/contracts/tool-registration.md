@@ -81,6 +81,7 @@ An irreversible action is held at propose (DEL-09) and only an authenticated Sur
 A delegated action's `fn` that finds its change would contradict canon raises `secondchair.core.tools.Contradiction(path, message)`. The Core writes nothing, logs the action with `status: refused` and the message as `refusal` (a continuity error, MET-01), and returns an MCP error.
 
 The Core's own delegated actions are all under memory and reversible: `create_entity`, `record_fact`, `correct_fact` and `record_event` ([workspace layout](workspace-layout.md#canonfacts)).
+The mystery graph adds `record_mystery`, under prep and reversible ([workspace layout](workspace-layout.md#canonmysteries)).
 
 ## GM interactions relayed by agents
 
@@ -104,7 +105,7 @@ Each tool in `tools/list` carries its declarations in `_meta`, and the matching 
 }
 ```
 
-The Core's own reads, all under memory: `campaign_info` returns the campaign language, the workspace schema version and the protocol version; `search_entities(text)`, `search_facts(text, entity, relation, at, include_retconned)` and `search_events(text, fact)` search the derived index, structured and full text (every word of `text` must match).
+The Core's own reads, all under memory: `campaign_info` returns the campaign language, the workspace schema version and the protocol version; `search_entities(text)`, `search_facts(text, entity, relation, at, include_retconned)` and `search_events(text, fact)` search the derived index, structured and full text (every word of `text` must match). The mystery graph adds `check_mystery(mystery, lose)`, under prep: the graph with each element's state, its problems and warnings, `lose` simulating the loss of clues without writing.
 
 ## Versioning
 
