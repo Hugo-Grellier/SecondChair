@@ -120,6 +120,10 @@ _Avoid_: NPC card, prompt
 A document the user supplies and the tool only reads, never ships: rulebooks, a previous campaign bible, session recordings, VTT exports.
 _Avoid_: corpus, import, data
 
+**Campaign workspace**:
+The directory holding one campaign's canon, decisions and action log. It lives outside the tool and is named by the GM, who may keep it in a private repository of their own. The tool never ships one.
+_Avoid_: campaign repo, vault, bible
+
 **Observation**:
 A timestamped record, captured from the VTT, of live mechanical state or of what happened at the table. Never canon by itself; it becomes canon only through memory.
 _Avoid_: fact, event (when meaning canon), log
