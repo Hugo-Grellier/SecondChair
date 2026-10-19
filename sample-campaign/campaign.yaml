@@ -1,0 +1,19 @@
+# Material for import, not a campaign workspace configuration.
+campaign_language: en
+calendar:
+  months:
+    - {name: Rillwake, days: 30}
+    - {name: Sowing, days: 30}
+    - {name: Reedrise, days: 30}
+    - {name: Brightwater, days: 30}
+    - {name: Bellnight, days: 1}
+    - {name: Siltgold, days: 30}
+    - {name: Netfall, days: 30}
+    - {name: Longrain, days: 30}
+    - {name: Whitebank, days: 30}
+    - {name: Stillwater, days: 30}
+  leap: {interval: 5, first_year: 2, month: 10}
+  week:
+    days: [Mend, Haul, Sound, Trade, Watch, Rest]
+    anchor: {date: "0302-04-25", weekday: 1}
+  era: RB

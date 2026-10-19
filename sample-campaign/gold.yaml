@@ -1,0 +1,282 @@
+# CC BY 4.0. Evaluator-only; never feed this file to the rebuilding agent.
+version: 1
+scenario: S0
+status: frozen
+review:
+  mode: agent-emulated-gm
+  date: "2026-10-19"
+  authorization: "Issue #33 task: you will mostly do the work to emulate humans"
+  human_signoff: false
+  decision: "Freeze this authored reference set under the user's delegated GM emulation."
+  limitation: "BEN-12's literal human review and handwritten authorship are not claimed."
+inputs:
+  starting_material: [campaign.yaml, bible.md]
+  wrap_material: [sessions/01-dry-bell.md, sessions/02-bypass.md]
+  excluded: [README.md, LICENSE, gold.yaml, REVIEW.md, frozen.sha256]
+start:
+  date: "0302-04-25"
+  cursor: "0302-04-25"
+  campaign_language: en
+  moment: prep
+# IDs below are matching labels for the evaluator, not mandated generated workspace IDs.
+# Every listed entity must be found; names are exact, list ordering is immaterial.
+entities:
+  party: {names: [], kind: party}
+  pc-ada: {names: [Ada Fen], kind: pc}
+  pc-beren: {names: [Beren Pike], kind: pc}
+  pc-cora: {names: [Cora Sedge], kind: pc}
+  pc-dain: {names: [Dain Wold], kind: pc}
+  npc-mira: {names: [Mira Pell], kind: npc}
+  npc-tovan: {names: [Tovan Reed], kind: npc}
+  npc-edda: {names: [Edda Vale], kind: npc}
+  npc-sella: {names: [Sella Marr], kind: npc}
+  npc-orin: {names: [Orin Doss], kind: npc}
+  npc-hidden: {names: [Ilex Venn], public_names: [], aliases: [], kind: npc}
+  faction-council: {names: [Lock Council], kind: faction}
+  faction-union: {names: [Reed Union], kind: faction}
+  faction-circle: {names: [Sounding Circle], kind: faction}
+  place-reedbank: {names: [Reedbank], kind: place}
+  place-weir: {names: [Weir], kind: place}
+  place-archive: {names: [Toll Archive], kind: place}
+  place-kiln: {names: [Abandoned Kiln], kind: place}
+  place-cistern: {names: [Cistern], kind: place}
+  place-ferry: {names: [Rope Ferry], kind: place}
+  front-tolls: {names: [Toll Squeeze], kind: front}
+  front-silt: {names: [Silt Choke], kind: front}
+  situation-chain: {names: [Inspect the Chain], kind: situation}
+  situation-ferry: {names: [Replace the Rope], kind: situation}
+  situation-satchel: {names: [Find the Satchel], kind: situation}
+  mystery-bell: {names: [The Dry Bell], kind: mystery}
+  treasure-fee: {names: [], kind: item}
+  treasure-case: {names: [brass survey case], kind: item}
+# This is the complete expected starting fact inventory, matched semantically by
+# the later harness's structured output, never with an LLM judge. Compound source
+# paragraphs may yield multiple atomic facts grouped under the cited label here.
+facts:
+  B01: {source: "bible.md#B01", expected: {town_beside: place-weir, warning: dry-night-bell, duration: 1w}}
+  B02: {source: "bible.md#B02", expected: {common_place: place-reedbank, known: [bell-ringing, council-controls-gate], unknown: [bell-cause]}}
+  B03: {source: "bible.md#B03", expected: {party_members: [pc-ada, pc-beren, pc-cora, pc-dain], individual_pc_knowers: false}}
+  B04: {source: "bible.md#B04", expected: {faction: faction-council, members: [npc-mira], goal: preserve-toll-revenue}}
+  B05: {source: "bible.md#B05", expected: {faction: faction-union, members: [npc-tovan], goal: safe-passage-without-toll-increase}}
+  B06: {source: "bible.md#B06", expected: {faction: faction-circle, public_members: [npc-edda], goal: preserve-independence}}
+  B07: {source: "bible.md#B07", expected: {stage: active, deadline: "0302-05-01", effect_class: new-narrative}}
+  B08: {source: "bible.md#B08", expected: {stage: available, deadline: "0302-06-03", effect_class: rule, participants: [npc-orin]}}
+  B09: {source: "bible.md#B09", expected: {stage: available, deadline: null}}
+  B10: {source: "bible.md#B10", expected: {secret_name: Ilex Venn, public_names: [], known_by: [npc-hidden, npc-edda]}}
+  B11: {source: "bible.md#B11", expected: {subject: npc-hidden, member_of: faction-circle, lives_in: place-cistern, known_by: [npc-hidden, npc-edda]}}
+  B12: {source: "bible.md#B12", expected: {cause: cracked-pressure-relay, cause_not: rising-water, known_by: [npc-hidden]}}
+  B13: {source: "bible.md#B13", expected: {actor: npc-mira, action: diverted-repair-fund, destination: unofficial-toll-reserve, sabotage: false, known_by: [npc-mira]}}
+  B14: {source: "bible.md#B14", expected: {holder: npc-tovan, belief: circle-rings-false-warnings-deliberately, ever_true: false}}
+  B15: {source: "bible.md#B15", expected: {carrier: faction-council, clock: 0, capacity: 4, rate: 1w, unless: null, threshold: 2, agenda: draft-toll-increase, participants: [npc-mira]}}
+  B16: {source: "bible.md#B16", expected: {carrier: faction-union, clock: 0, capacity: 4, rate: 1w, unless: bypass-open, threshold: 2, agenda: prepare-dredging-petition, participants: [npc-tovan]}}
+  B17: {source: "bible.md#B17", expected: {bypass: closed, known_by: [party, npc-tovan, faction-union], valid_from: "0302-04-25"}}
+  B18: {source: "bible.md#B18", expected: {treasure: treasure-fee, amount: 12, currency: silver, holder: npc-edda, awarded: false}}
+  B19: {source: "bible.md#B19", expected: {treasure: treasure-case, location: kiln-cold-hearth, claimed: false, known_by: []}}
+mystery:
+  id: mystery-bell
+  conclusions:
+    conclusion-relay: {fact: B12, supported_by: [clue-1, clue-2, clue-6, clue-7]}
+    conclusion-ledger: {fact: B13, supported_by: [clue-3, clue-4, clue-5]}
+  nodes:
+    node-weir: {place: place-weir, clues: [clue-1, clue-2]}
+    node-archive: {place: place-archive, clues: [clue-3, clue-4]}
+    node-kiln: {place: place-kiln, clues: [clue-5, clue-6]}
+    node-cistern: {place: place-cistern, clues: [clue-7]}
+secret_zones:
+  secret-identity: {marker: CANARY-identity-1}
+  secret-mystery: {marker: CANARY-mystery-1}
+  secret-world: {marker: CANARY-world-1}
+  secret-treasure: {marker: CANARY-treasure-1}
+leak_checks:
+  # Markers are forbidden even for an NPC entitled to the surrounding facts.
+  canary_audiences: [party, npc-mira, npc-tovan, npc-edda, npc-sella, npc-orin, npc-hidden]
+  forbidden_party_strings: [Ilex Venn, CANARY-identity-1, CANARY-mystery-1, CANARY-world-1, CANARY-treasure-1]
+  forbidden_name_audiences: [party, npc-mira, npc-tovan, npc-sella, npc-orin]
+  # Also test paraphrases through structured known-fact answers.
+  forbidden_party_facts_at_start: [B10, B11, B12, B13, B18, B19]
+probes:
+  - id: factions
+    question: "Which three factions exist and which NPCs belong to each (GM view)?"
+    expected: {faction-council: [npc-mira], faction-union: [npc-tovan], faction-circle: [npc-edda, npc-hidden]}
+    evidence: [B04, B05, B06, B11]
+  - id: hidden-name
+    question: "What is the hidden maintainer's secret name and public name (GM view)?"
+    expected: {secret_name: Ilex Venn, public_name: null}
+    evidence: [B10]
+  - id: edda-knowledge
+    question: "Does Edda know the maintainer's name, the relay cause, or the diverted fund at start?"
+    expected: {name: true, cause: false, diversion: false}
+    evidence: [B10, B12, B13]
+  - id: circle-knowledge
+    question: "Does the Circle inherit its members' private name and cause knowledge?"
+    expected: {name: false, cause: false}
+    evidence: [B10, B11, B12]
+  - id: common-knowledge
+    question: "What do Sella and Orin know about the bell at start?"
+    expected: {both_know: [bell-ringing, council-controls-gate], both_do_not_know: [bell-cause]}
+    evidence: [B02]
+  - id: belief
+    question: "Is the Circle deliberately ringing false warnings, and who believes this?"
+    expected: {ever_true: false, believers: [npc-tovan]}
+    evidence: [B14]
+  - id: mystery-structure
+    question: "Return the mystery's conclusion IDs, node IDs, and clue IDs."
+    expected:
+      conclusions: [conclusion-relay, conclusion-ledger]
+      nodes: [node-weir, node-archive, node-kiln, node-cistern]
+      clues: [clue-1, clue-2, clue-3, clue-4, clue-5, clue-6, clue-7]
+    evidence: [B12, B13]
+  - id: mystery-answer
+    question: "What caused the bell, where did the repair money go, and did Mira sabotage the relay?"
+    expected: {cause: cracked-pressure-relay, money: unofficial-toll-reserve, sabotage: false}
+    evidence: [B12, B13]
+  - id: planned-treasure
+    question: "Who owns the planned treasure before any session?"
+    expected: {treasure-fee: npc-edda, treasure-case: unclaimed, party_owns: []}
+    evidence: [B18, B19]
+  - id: situations
+    question: "Return the active and available situations, with deadlines."
+    expected:
+      situation-chain: {stage: active, deadline: "0302-05-01"}
+      situation-ferry: {stage: available, deadline: "0302-06-03"}
+      situation-satchel: {stage: available, deadline: null}
+    evidence: [B07, B08, B09]
+calendar_probes:
+  - {operation: add, date: "0302-04-25", duration: 1w, expected: "0302-05-01"}
+  - {operation: add, date: "0302-04-25", duration: 2w, expected: "0302-06-06"}
+  - {operation: add, date: "0302-05-01", duration: 1d, expected: "0302-06-01"}
+  - {operation: add, date: "0302-10-30", duration: 1d, expected: "0302-10-31"}
+  - {operation: add, date: "0302-10-31", duration: 1d, expected: "0303-01-01"}
+  - {operation: add, date: "0303-10-30", duration: 1d, expected: "0304-01-01"}
+  - {operation: weekday_name, date: "0302-05-01", expected: Mend}
+  - {operation: is_date, date: "0302-05-02", expected: false}
+  - {operation: is_date, date: "0307-10-31", expected: true}
+  - {operation: is_date, date: "0306-10-31", expected: false}
+world_turn_probes:
+  # Each case resets independently; never continue from the previous case.
+  - id: pristine-one-week
+    initial: bible-only
+    cursor: "0302-04-25"
+    now: "0302-05-01"
+    moment: between-sessions
+    assumptions: "Accept rule effects; settle unless with B17; leave narrative direction unanswered."
+    expected:
+      clocks: {front-tolls: 1, front-silt: 1}
+      unless_evidence: [B17]
+      narrative_pending: [situation-chain]
+      situation_ferry_stage: available
+      party_learns: []
+  - id: pristine-two-weeks
+    initial: bible-only
+    cursor: "0302-04-25"
+    now: "0302-06-06"
+    moment: prep
+    assumptions: "Accept rule effects and cited unless; leave narrative direction unanswered; no disclosures."
+    expected:
+      clocks: {front-tolls: 2, front-silt: 2}
+      agenda_steps: [draft-toll-increase, prepare-dredging-petition]
+      agenda_knowers:
+        draft-toll-increase: [faction-council, npc-mira]
+        prepare-dredging-petition: [faction-union, npc-tovan]
+      situation_ferry_stage: expired
+      ferry_expiry_knowers: [npc-orin]
+      narrative_pending: [situation-chain]
+      party_learns: []
+      edda_learns: []
+  - id: played-bypass-two-weeks
+    initial: both-notes-wrapped
+    cursor: "0302-04-25"
+    now: "0302-06-06"
+    moment: between-sessions
+    assumptions: "Admit all capture facts before world-turn; accept rule effects; no disclosures."
+    expected:
+      clocks: {front-tolls: 2, front-silt: 0}
+      suppressed_tick_dates: ["0302-05-01", "0302-06-06"]
+      unless_evidence: [capture-bypass-open]
+      agenda_steps: [draft-toll-increase]
+      situation_ferry_stage: expired
+      narrative_pending: [situation-chain]
+      party_knows: [clue-1, clue-3, clue-4, fund-diversion, bypass-open]
+      party_does_not_know: [B10, B11, B12, B19, draft-toll-increase]
+      edda_does_not_know: [fund-diversion, draft-toll-increase]
+      union_does_not_know: [fund-diversion, draft-toll-increase]
+      party_learns_from_world_turn: []
+  - id: unresolved-unless
+    initial: bible-with-B17-omitted
+    cursor: "0302-04-25"
+    now: "0302-05-01"
+    moment: prep
+    assumptions: "Do not infer a bypass state; leave exception unanswered."
+    expected:
+      clocks: {front-tolls: 1, front-silt: 0}
+      queued_ticks: [front-silt]
+      exception_deadline: break
+      narrative_pending: [situation-chain]
+# Candidates are authored from the numbered lines, not generated by capture output.
+# Quotes must be retained verbatim. Facts take the played rank only when admitted
+# by the scenario's scripted GM, never merely because these files are shipped.
+capture:
+  default_date: session-end-unless-explicit
+  candidates:
+    - id: capture-gauge
+      source: sessions/01-dry-bell.md
+      line_id: S1-01
+      quote: "The party inspected the dry gauge at the Weir and saw it stay at zero while the bell rang."
+      date: "0302-04-26"
+      expected: {fact: dry-gauge-during-bell, clue: clue-1, known_by: [party]}
+    - id: capture-fee
+      source: sessions/01-dry-bell.md
+      line_id: S1-02
+      quote: "Edda paid the party 12 silver coins for inspecting the bell chain."
+      date: "0302-04-26"
+      expected: {treasure: treasure-fee, from: npc-edda, to: party, amount: 12, currency: silver, known_by: [npc-edda, party]}
+    - id: capture-edda-gauge
+      source: sessions/01-dry-bell.md
+      line_id: S1-03
+      quote: "The party told Edda that the gauge stayed at zero while the bell rang."
+      date: "0302-04-26"
+      expected: {fact: dry-gauge-during-bell, learned_by: npc-edda}
+    - id: capture-ferry-offer
+      source: sessions/01-dry-bell.md
+      line_id: S1-04
+      quote: "Orin offered the party free ferry crossings if they replaced the rope; the party left the offer unaccepted."
+      date: "0302-04-26"
+      expected: {situation: situation-ferry, stage: available, known_by: [party, npc-orin]}
+    - id: capture-bypass-open
+      source: sessions/02-bypass.md
+      line_id: S2-01
+      quote: "The party opened the bypass at the Weir on 0302-05-01."
+      date: "0302-05-01"
+      expected: {bypass: open, closes: B17, known_by: [party]}
+    - id: capture-bypass-witness
+      source: sessions/02-bypass.md
+      line_id: S2-02
+      quote: "Tovan watched the party open the bypass and then reported the opening to the Reed Union on 0302-05-01."
+      date: "0302-05-01"
+      expected: {fact: bypass-open, learned_by: [npc-tovan, faction-union]}
+    - id: capture-transfer
+      source: sessions/02-bypass.md
+      line_id: S2-03
+      quote: "At the Toll Archive, the party read the empty relay repair account and Mira's signed transfer of its fund into an unofficial toll reserve."
+      date: "0302-05-01"
+      expected: {fact: fund-diversion, clues: [clue-3, clue-4], learned_by: party, establishes_sabotage: false}
+    - id: capture-withhold
+      source: sessions/02-bypass.md
+      line_id: S2-04
+      quote: "The party agreed to keep the transfer from Edda for now."
+      date: "0302-05-01"
+      expected: {fact: withhold-transfer-from-edda, known_by: [party], edda_learns_diversion: false}
+  reject_as_new_facts:
+    - {source: sessions/01-dry-bell.md, text: "perhaps the cook is secretly behind everything?", reason: table-chatter}
+    - {source: sessions/02-bypass.md, text: "We repeated the gauge discovery from last session while recapping", reason: duplicate}
+  final_date: "0302-05-01"
+  grouped_questions: []
+scripted_gm:
+  # Narrow decisions for this reference run; no blanket approval of unknown proposals.
+  admit_candidates: [capture-gauge, capture-fee, capture-edda-gauge, capture-ferry-offer, capture-bypass-open, capture-bypass-witness, capture-transfer, capture-withhold]
+  accept_world_rule_effects: true
+  accept_unless_with_cited_valid_fact: true
+  accept_narrative_direction: false
+  accept_disclosure: false
+  unknown_proposal: reject
+  unknown_exception: no-action

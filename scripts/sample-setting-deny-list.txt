@@ -1,0 +1,80 @@
+# LIC-10 / LIC-13: curated setting names, deities, and calendar labels.
+# Case-insensitive whole terms; this is a guard, not proof of originality.
+Golarion
+Absalom
+Otari
+Sandpoint
+Magnimar
+Korvosa
+Varisia
+Cheliax
+Andoran
+Taldor
+Nidal
+Numeria
+Ustalav
+Geb
+Nex
+Alkenstar
+Mwangi
+Galt
+Irrisen
+Brevoy
+Ravounel
+Avistan
+Garund
+Tian Xia
+Arcadia
+Azlant
+Starstone
+Inner Sea
+Isle of Kortos
+Gauntlight
+Belcorra
+Menace Under Otari
+Abomination Vaults
+Abadar
+Asmodeus
+Calistria
+Cayden Cailean
+Desna
+Erastil
+Gorum
+Gozreh
+Iomedae
+Irori
+Lamashtu
+Nethys
+Norgorber
+Pharasma
+Rovagug
+Sarenrae
+Shelyn
+Torag
+Urgathoa
+Zon-Kuthon
+Aroden
+Achaekek
+Groetus
+Nocticula
+Tsukiyo
+Shizuru
+Abadius
+Calistril
+Pharast
+Gozran
+Desnus
+Sarenith
+Erastus
+Arodus
+Rova
+Lamashan
+Neth
+Kuthona
+Moonday
+Toilday
+Wealday
+Oathday
+Fireday
+Starday
+Absalom Reckoning
