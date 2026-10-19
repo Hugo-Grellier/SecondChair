@@ -1,14 +1,16 @@
 # CC BY 4.0. Evaluator-only; never feed this file to the rebuilding agent.
-version: 1
+version: 2
 scenario: S0
 status: frozen
 review:
   mode: agent-emulated-gm
   date: "2026-10-19"
   authorization: "Issue #33 task: you will mostly do the work to emulate humans"
-  human_signoff: false
-  decision: "Freeze this authored reference set under the user's delegated GM emulation."
-  limitation: "BEN-12's literal human review and handwritten authorship are not claimed."
+  human_signoff: true
+  human_signoff_quote: "ok tout est von pour moi"
+  gold_authorship: agent
+  decision: "User approved the delivered campaign and frozen reference set; expected answers unchanged."
+  limitation: "Gold authorship was delegated to the agent; literal handwritten authorship is not claimed."
 inputs:
   starting_material: [campaign.yaml, bible.md]
   wrap_material: [sessions/01-dry-bell.md, sessions/02-bypass.md]

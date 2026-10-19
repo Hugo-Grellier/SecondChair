@@ -51,11 +51,12 @@ one day even in leap years; Stillwater receives the leap day.
    authorizes narrative direction or party disclosure. Re-running a completed
    interval must create no additional effects or knowledge.
 
-The reference set is hand-authored directly from the material, independently of any
-rebuild/capture run. Its GM role was **agent-emulated at the user's request**; no
-human authorship or personal sign-off is asserted. The review records the resulting
-BEN-12/MET-02 limitation. It is frozen for implementation and replay; meeting the
-literal human gate requires a real GM review and a separately versioned decision.
+The reference set is authored directly from the material, independently of any
+rebuild/capture run. Its GM role was **agent-emulated at the user's request**; the
+user subsequently approved the delivered campaign and frozen reference set. Version 2
+records that human acceptance; expected answers are unchanged from version 1.
+The review retains the BEN-12/MET-02 limitation that gold authorship was delegated
+to the agent rather than handwritten by the GM.
 There is no harness or new metric floor in this issue; this folder defines its inputs
 and expected results for the later harness.
 

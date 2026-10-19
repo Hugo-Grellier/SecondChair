@@ -1,11 +1,15 @@
 # S0 author and GM review
 
-Date: 2026-10-19. Reviewer: Codex acting as the GM, under the user's instruction to
-mostly do the work to emulate humans for issue #33. This is an agent review, not a
-human signature. Version 1 of `gold.yaml` is frozen under that delegated emulation.
-BEN-12's literal human review and handwritten gold-set gate, and MET-02's literal
-handwritten authorship, remain unsatisfied; the synthetic reference is usable without
-claiming those gates passed. No measured agent output was used to write the answers.
+Date: 2026-10-19. Initial author and reviewer: Codex acting as the GM, under
+the user's instruction to mostly do the work to emulate humans for issue #33.
+The user subsequently approved the delivered result: "ok tout est von pour moi".
+That approval is the human sign-off on the campaign and frozen reference set.
+Gold authorship remains agent-authored; literal handwritten authorship under
+BEN-12/MET-02 is not claimed. No measured agent output was used to write the answers.
+
+Version 2 records this approval and changes no campaign material or expected answers.
+Version 1 remains in git at commit `f2aaa05`. The freeze manifest was renewed only
+for these review/provenance changes, not in response to a benchmark result.
 
 ## BEN-10 checklist (checked by the emulated GM)
 
@@ -35,8 +39,9 @@ claiming those gates passed. No measured agent output was used to write the answ
 - [x] Only carriers and named participants learn offscreen effects; no party disclosure.
 - [x] On the festival tick, the played bypass opening suppresses Silt Choke.
 - [x] Missing `unless` evidence leaves its tick queued with no default application.
-- [x] Frozen version 1 approved by the emulated GM; inputs and answers bound together.
-- [ ] Actual human GM review, handwritten gold authorship and personal sign-off.
+- [x] Frozen reference set approved by the user; inputs and answers bound together.
+- [x] Human acceptance of the delivered campaign and reference set recorded above.
+- [ ] Literal handwritten gold authorship (agent-authored at the user's request).
 
 The code checks enforce the calendar, quotations, structural counts, marker inventory,
 freeze and deny-list. The narrative and semantic checks above are this authored

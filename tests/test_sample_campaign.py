@@ -77,7 +77,8 @@ def test_capture_quotes_are_in_the_real_notes_and_cover_numbered_events() -> Non
 def test_freeze_binds_the_complete_material_and_reference_set() -> None:
     assert GOLD["status"] == "frozen"
     assert GOLD["review"]["mode"] == "agent-emulated-gm"
-    assert GOLD["review"]["human_signoff"] is False
+    assert GOLD["review"]["human_signoff"] is True
+    assert GOLD["review"]["gold_authorship"] == "agent"
     manifest = {}
     for line in (SAMPLE / "frozen.sha256").read_text().splitlines():
         digest, relative = line.split("  ", 1)
