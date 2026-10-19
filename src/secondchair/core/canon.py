@@ -247,3 +247,8 @@ def tools(ws: Workspace) -> list[Tool]:
         read(search_facts),
         read(search_events),
     ]
+
+
+def vocabulary(ws: Workspace) -> list[str]:
+    """The campaign vocabulary (CAN-22): every entity's names and aliases, sorted."""
+    return sorted({w for e in index.search_entities(ws) for w in e["names"] + e["aliases"]})

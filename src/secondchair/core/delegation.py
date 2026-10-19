@@ -33,6 +33,8 @@ REASONS = ("contradiction", "rules", "tone", "other")  # DEL-26
 TABLE_FILE = "delegation.yaml"
 MOMENT_FILE = "moment.yaml"
 LOG_DIR = "action-log"
+JOBS_DIR = "jobs"
+CALLS_DIR = "calls"
 
 # The base profiles (DEL-06), in RESPONSIBILITIES order; every cell's deadline mode is auto.
 _PROFILE_LEVELS = {
@@ -138,34 +140,58 @@ def wrap(ws: Workspace, tool: Tool) -> Callable[..., ActionResult]:
     """The MCP function for a delegated action: the block's `fn` describes the change, the Core
     checks the effective level, logs it, then applies it or holds it for approval."""
     signature = inspect.signature(tool.fn)
-    if "agent" in signature.parameters:
-        raise RegistrationError(f"{tool.name}: `agent` is reserved for the Core")
+    for reserved in ("agent", "job"):
+        if reserved in signature.parameters:
+            raise RegistrationError(f"{tool.name}: `{reserved}` is reserved for the Core")
 
     @functools.wraps(tool.fn)
-    def run(*args: Any, agent: str, **kwargs: Any) -> ActionResult:
+    def run(*args: Any, agent: str, job: int | None = None, **kwargs: Any) -> ActionResult:
         with _for_agent():
-            return act(ws, tool, agent, lambda: tool.fn(*args, **kwargs))
+            return act(ws, tool, agent, lambda: tool.fn(*args, **kwargs), job)
 
-    agent_param = inspect.Parameter("agent", inspect.Parameter.KEYWORD_ONLY, annotation=str)
+    added = [
+        inspect.Parameter("agent", inspect.Parameter.KEYWORD_ONLY, annotation=str),
+        inspect.Parameter(
+            "job", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=int | None
+        ),
+    ]
     run.__signature__ = signature.replace(  # ty: ignore[unresolved-attribute]
-        parameters=[*signature.parameters.values(), agent_param], return_annotation=ActionResult
+        parameters=[*signature.parameters.values(), *added], return_annotation=ActionResult
     )
     del run.__wrapped__  # the MCP schema comes from __signature__, not from the block's fn
     run.__doc__ = (
         f"{inspect.getdoc(tool.fn) or ''}\n\n`agent`: your name as an agent, recorded in the "
-        "action log for traceability only."
+        "action log for traceability only. `job`: the SecondChair job you are running, if any; "
+        "the action is then bound by the delegation table of the job's moment."
     )
     return run
 
 
-def act(ws: Workspace, tool: Tool, agent: str, describe: Callable[[], Change]) -> ActionResult:
-    """Take one delegated action (ARC-04): refused at manual, held at propose, applied above."""
+def act(
+    ws: Workspace,
+    tool: Tool,
+    agent: str,
+    describe: Callable[[], Change],
+    job: int | None = None,
+) -> ActionResult:
+    """Take one delegated action (ARC-04): refused at manual, held at propose, applied above.
+    An action for a started job is bound by the table of the job's moment (ARC-23) and logs the
+    job's runner configuration (DEL-24)."""
     with _locked(ws):
         moment, seq = current_moment(ws)
-        level = effective_level(ws, tool.responsibility, moment, tool.reversible)
+        table_moment, runner_configuration = moment, None
+        if job is not None:
+            from secondchair.core import jobs  # it builds on this module
+
+            record = jobs.read(ws, job)
+            if record["status"] != "started":
+                raise DelegationError(f"Job {job} is {record['status']}, not started.")
+            table_moment = record["moment"]
+            runner_configuration = record["attempts"][-1]["runner_configuration"]
+        level = effective_level(ws, tool.responsibility, table_moment, tool.reversible)
         if level == "manual":
             raise DelegationError(
-                f"{tool.responsibility} is at manual in {moment}: agents take no action, "
+                f"{tool.responsibility} is at manual in {table_moment}: agents take no action, "
                 "they only answer when asked."
             )
         try:
@@ -186,7 +212,8 @@ def act(ws: Workspace, tool: Tool, agent: str, describe: Callable[[], Change]) -
             "reversible": tool.reversible,
             "agent": agent,
             "source": change.source,
-            "runner_configuration": None,  # job work comes with the runner (#32)
+            "job": job,
+            "runner_configuration": runner_configuration,
             "target": change.path,
             "before": path.read_text() if path.exists() else None,
             "after": change.after,
@@ -367,7 +394,15 @@ def _target(ws: Workspace, relative: str) -> Path:
     if Path(relative).is_absolute() or not path.is_relative_to(ws.root.resolve()):
         raise DelegationError(f"{relative!r} is outside the campaign workspace.")
     parts = path.relative_to(ws.root.resolve()).parts
-    if parts and parts[0] in (CONFIG_FILE, TABLE_FILE, MOMENT_FILE, LOG_DIR, STATE_DIR):
+    if parts and parts[0] in (
+        CONFIG_FILE,
+        TABLE_FILE,
+        MOMENT_FILE,
+        LOG_DIR,
+        JOBS_DIR,
+        CALLS_DIR,
+        STATE_DIR,
+    ):
         raise DelegationError(f"{relative!r} belongs to the Core; no delegated action writes it.")
     return path
 
@@ -395,17 +430,19 @@ def _log_path(ws: Workspace, entry_id: int) -> Path:
     return ws.root / LOG_DIR / f"{entry_id:06d}.yaml"
 
 
-def _append(ws: Workspace, entry: dict) -> dict:
-    """Give the entry the next id and its real time, and write it. Callers hold the lock."""
-    (ws.root / LOG_DIR).mkdir(exist_ok=True)
-    ids = [int(p.stem) for p in (ws.root / LOG_DIR).glob("*.yaml") if p.stem.isdigit()]
+def _append(ws: Workspace, entry: dict, directory: str = LOG_DIR) -> dict:
+    """Give the record the next id in `directory` (the action log by default) and its real
+    time, and write it. Callers hold the lock."""
+    (ws.root / directory).mkdir(exist_ok=True)
+    ids = [int(p.stem) for p in (ws.root / directory).glob("*.yaml") if p.stem.isdigit()]
     entry = {"id": max(ids, default=0) + 1, "at": datetime.now(UTC).isoformat(), **entry}
-    _save(ws, entry)
+    _save(ws, entry, directory)
     return entry
 
 
-def _save(ws: Workspace, entry: dict) -> None:
-    _write(_log_path(ws, entry["id"]), yaml.safe_dump(entry, sort_keys=False, allow_unicode=True))
+def _save(ws: Workspace, entry: dict, directory: str = LOG_DIR) -> None:
+    path = ws.root / directory / f"{entry['id']:06d}.yaml"
+    _write(path, yaml.safe_dump(entry, sort_keys=False, allow_unicode=True))
 
 
 def _entry(ws: Workspace, entry_id: int, kind: str) -> dict:

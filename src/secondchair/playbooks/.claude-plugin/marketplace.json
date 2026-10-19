@@ -1,0 +1,13 @@
+{
+  "name": "secondchair",
+  "owner": {"name": "Hugo Grellier"},
+  "description": "SecondChair playbooks for Claude Code.",
+  "plugins": [
+    {
+      "name": "secondchair",
+      "source": "./",
+      "author": {"name": "Hugo Grellier"},
+      "description": "SecondChair playbooks: the procedures agents follow for SecondChair jobs."
+    }
+  ]
+}

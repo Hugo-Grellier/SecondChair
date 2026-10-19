@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from secondchair import runner
 from secondchair.cli import main
 
 
@@ -31,7 +32,7 @@ def test_host_setup_codex_prints_a_config_toml_entry(
 ) -> None:
     assert main(["host", "setup", "codex"]) == 0
     out = capsys.readouterr().out
-    toml = out[out.index("[mcp_servers.secondchair]") :]
+    toml = out[out.index("[mcp_servers.secondchair]") : out.index("\nInstall")]
     assert tomllib.loads(toml) == {
         "mcp_servers": {"secondchair": {"url": "http://127.0.0.1:7300/mcp"}}
     }
@@ -52,3 +53,13 @@ def test_host_setup_writes_no_host_file(home: Path, tmp_path: Path, host: str) -
     before = _snapshot(tmp_path)
     assert main(["host", "setup", host]) == 0
     assert _snapshot(tmp_path) == before
+
+
+def test_host_setup_prints_how_to_install_the_playbooks(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    main(["host", "setup", "claude"])
+    assert f"claude plugin marketplace add {runner.PLAYBOOKS}" in capsys.readouterr().out
+    main(["host", "setup", "codex"])
+    skill = runner.SKILLS / "rebuild-entities-from-a-bible"
+    assert f"ln -sfn {skill} ~/.codex/skills/{skill.name}" in capsys.readouterr().out

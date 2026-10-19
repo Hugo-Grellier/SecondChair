@@ -26,6 +26,24 @@ secondchair log undo 2 --reason rules      # undo an action of the current momen
 
 To connect Foundry VTT, run `secondchair token` and install the `secondchair-foundry` module as described in [`foundry/README.md`](foundry/README.md). Your browser may ask once whether the Foundry site may connect to services on your computer: allow it.
 
+Work that needs a model is a **job**: the Core queues it with its contract ([`docs/contracts/job.schema.json`](docs/contracts/job.schema.json)) and never calls a model itself. A runner starts it in Claude Code or Codex with the host, model and effort your machine configuration gives its tier (fast, standard or deep), trying each entry in order; without one, ask your own agent host session to start the job.
+
+```sh
+secondchair jobs queue rebuild-entities-from-a-bible --input bible=~/sources/bible.md
+secondchair jobs                           # pending jobs and their tier
+secondchair jobs run                       # start queued jobs with the configured runner
+```
+
+```yaml
+# ~/.config/secondchair/config.yaml
+runners:
+  standard:                                # fast, standard or deep
+    - {host: claude, model: <model>, effort: high}
+    - {host: codex, model: <model>, effort: medium}   # tried if the first fails
+```
+
+The playbooks ship as a Claude Code plugin and a Codex skill bundle; `secondchair host setup` prints how to install them.
+
 ## Development
 
 ```sh
