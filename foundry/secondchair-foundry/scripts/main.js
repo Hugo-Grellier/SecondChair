@@ -1,9 +1,22 @@
 // secondchair-foundry: the active GM's browser dials the loopback Core (ADR 0010).
+import { createActions } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
+
+/** @typedef {import("./actions.js").Adapter} Adapter @typedef {import("./actions.js").Doc} Doc */
 
 const MODULE = "secondchair-foundry";
 
+/** The system adapter, once one registered (ARC-08); without it mechanical actions fail (ARC-09). */
+/** @type {Adapter | null} */
+let adapter = null;
+
 Hooks.once("init", () => {
+  /** @type {{api?: object}} */ (game.modules.get(MODULE)).api = {
+    /** @param {Adapter} systemAdapter */
+    registerAdapter: (systemAdapter) => {
+      adapter = systemAdapter;
+    },
+  };
   // Client settings live in this browser only: the token never reaches the Foundry server.
   game.settings.register(MODULE, "token", {
     name: "Core token",
@@ -44,11 +57,30 @@ Hooks.once("ready", () => {
   }
   const url = coreUrl(Number(game.settings.get(MODULE, "port")));
   const campaign = String(game.settings.get(MODULE, "campaign") ?? "");
-  // ponytail: no reconnection yet; reload the world to dial again (the bridge grows with #48).
+  // ponytail: no reconnection yet; reload the world to dial again.
   connect({
     url,
     hello: hello({ token, world: game.world.id, campaign }),
-    onWelcome: async (welcome) => {
+    onWelcome: async (welcome, socket) => {
+      const actions = createActions({
+        resolve: async (uuid) => /** @type {Doc | null} */ (await fromUuid(uuid)),
+        // Handled requests live on the GM user, so a reload still knows them (BVE-02).
+        store: {
+          load: () => /** @type {unknown[]} */ (game.user.getFlag(MODULE, "requests") ?? []),
+          save: (list) => game.user.setFlag(MODULE, "requests", list),
+        },
+        adapter: () => adapter,
+      });
+      socket.addEventListener("message", async (event) => {
+        try {
+          const request = JSON.parse(String(event.data));
+          if (request.type === "request")
+            socket.send(JSON.stringify(await actions.handle(request)));
+        } catch (error) {
+          // A malformed frame or a closed socket: the Core times the request out as failed.
+          console.error("SecondChair:", error);
+        }
+      });
       if (campaign !== welcome.campaign) {
         await game.settings.set(MODULE, "campaign", welcome.campaign);
       }

@@ -68,6 +68,26 @@ def create_note(title: str) -> Change:
 | `after` | string or null | The file's new content; null deletes it. |
 | `source` | string or null | What the action draws on, recorded in the log (DEL-24). |
 
+An action that acts in the VTT returns a `VttAction` instead, which the Core logs and has the VTT connector take ([foundry-bridge.md](foundry-bridge.md#actions-arc-04-arc-07-arc-09)). The Core reads none of its fields; the connector gives them their meaning.
+
+```python
+from secondchair.core.tools import VttAction
+
+
+def move_token(token: str, x: int, y: int) -> VttAction:
+    """Move a token on its scene."""
+    return VttAction(op="move_token", target=token, params={"x": x, "y": y})
+```
+
+| `VttAction` field | Type | Rule |
+|---|---|---|
+| `op` | string | The connector's operation, generic or mechanical. |
+| `target` | string | The document acted on, as the connector names it (a Foundry UUID). |
+| `params` | object | The fields to set. |
+| `source` | string or null | As for `Change`. |
+
+The log entry of a VTT action carries `op`, and the fields the VTT reported `before` and `after` it. A VTT action the VTT did not take is a **failed action**: logged with status `failed` and its `error`, and returned to the agent as an MCP error. The Foundry connector registers `move_token` and `set_door` (VTT operations, reversible).
+
 The Core adds a required `agent` string argument to every delegated action's MCP input schema: the agent's name, recorded for traceability only (ARC-22). It also adds an optional `job` integer: the job the agent is running (see below). A block's `fn` must not have an `agent` or a `job` parameter. On each call the Core reads the current moment and the delegation table, then:
 
 | Effective level | What happens | Result |
@@ -88,6 +108,8 @@ The mystery graph adds `record_mystery`, under prep and reversible ([workspace l
 `approve_proposal(entry, gm_words)` is served by the Core itself, outside block registration, with `_meta: {"secondchair/gm_interaction": true}`. An agent calls it only when the GM approved a pending reversible action in conversation, quoting the GM's words; the approval is logged "via agent" with the quote (DEL-28). An irreversible action cannot be approved this way.
 
 On the CLI, in the workspace (or with `-w <workspace>`): `secondchair approve <entry>`, `secondchair reject <entry> --reason <reason>`, `secondchair log undo <entry> --reason <reason>`, the reason one of contradiction, rules, tone, other (DEL-26), and `secondchair moment <prep|live-session|between-sessions>`, which needs an interactive terminal (DEL-03a). The log records whether each GM interaction came from an interactive terminal (`authenticated`).
+
+Approving or undoing a VTT action needs the GM client, which only the `serve` process holds. The CLI therefore relays those two gestures to `POST /gm` on the Core serving the campaign, found through `.secondchair/serve.json`: `{"gesture": "approve" | "undo", "entry", "reason", "authenticated", "workspace"}` with `Authorization: Bearer <token>`, the token `secondchair token` prints. The Core refuses a wrong token (401), a malformed gesture (400) and another workspace's gesture (409), and answers a refused gesture with 409 and its message. With no Core serving the campaign, the CLI says to run `secondchair serve`.
 
 ## Jobs
 

@@ -1,7 +1,10 @@
 """The `secondchair` command line."""
 
 import argparse
+import json
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import yaml
@@ -10,9 +13,9 @@ from secondchair import runner
 from secondchair.core import canon, delegation, index, jobs, machine, workspace
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
-from secondchair.core.server import LOOPBACK, MCP_PATH, serve
+from secondchair.core.server import GM_PATH, LOOPBACK, MCP_PATH, SERVE_FILE, serve
 from secondchair.core.tools import RegistrationError
-from secondchair.core.workspace import WorkspaceError
+from secondchair.core.workspace import STATE_DIR, WorkspaceError
 
 DEFAULT_PORT = 7240
 
@@ -145,12 +148,19 @@ def _gm_command(args: argparse.Namespace) -> str:
         delegation.promote(ws, args.entry, "cli", auth)
         return f"Promoted hand edit {args.entry} to a GM decision."
     if args.command == "approve":
-        delegation.approve(ws, args.entry, "cli", auth)
+        if _in_vtt(ws, args.entry):
+            _relay(ws, {"gesture": "approve", "entry": args.entry, "authenticated": auth})
+        else:
+            delegation.approve(ws, args.entry, "cli", auth)
         return f"Approved and applied entry {args.entry}."
     if args.command == "reject":
         delegation.reject(ws, args.entry, args.reason, "cli", auth)
         return f"Rejected entry {args.entry} ({args.reason})."
-    delegation.undo(ws, args.entry, args.reason, "cli", auth)
+    if _in_vtt(ws, args.entry):
+        gesture = {"gesture": "undo", "entry": args.entry, "reason": args.reason}
+        _relay(ws, {**gesture, "authenticated": auth})
+    else:
+        delegation.undo(ws, args.entry, args.reason, "cli", auth)
     return f"Undid entry {args.entry} ({args.reason})."
 
 
@@ -231,6 +241,45 @@ def _jobs_command(args: argparse.Namespace) -> int:
         else:
             print(_describe(done))
     return status
+
+
+def _in_vtt(ws: workspace.Workspace, entry_id: int) -> bool:
+    path = ws.root / delegation.LOG_DIR / f"{entry_id:06d}.yaml"
+    return path.is_file() and "op" in delegation.read_entry(ws, entry_id)
+
+
+def _relay(ws: workspace.Workspace, gesture: dict) -> None:
+    """Have the Core serving the campaign take a GM gesture on a VTT action: only that process
+    holds the GM client (PKG-10)."""
+    not_served = DelegationError(
+        "This entry is a VTT action: `secondchair serve` the campaign, with its world open as GM, "
+        "then try again."
+    )
+    token = machine.foundry_token()
+    try:
+        port = json.loads((ws.root / STATE_DIR / SERVE_FILE).read_text())["port"]
+    except (OSError, ValueError, KeyError) as e:
+        raise not_served from e
+    request = urllib.request.Request(
+        f"http://{LOOPBACK}:{port}{GM_PATH}",
+        data=json.dumps({**gesture, "workspace": str(ws.root.resolve())}).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    try:
+        urllib.request.urlopen(request, timeout=60).close()
+    except urllib.error.HTTPError as e:
+        try:
+            message = json.loads(e.read())["error"]
+        except ValueError, KeyError, TypeError:
+            message = str(e)
+        raise DelegationError(message) from e
+    except TimeoutError as e:
+        raise DelegationError(
+            "The Core serving the campaign did not answer in time; check the action log before "
+            "trying again."
+        ) from e
+    except OSError as e:  # connection refused: serve is not running
+        raise not_served from e
 
 
 def main(argv: list[str] | None = None) -> int:

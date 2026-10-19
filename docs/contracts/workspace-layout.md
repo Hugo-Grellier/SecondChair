@@ -22,7 +22,7 @@ my-campaign/
 │   └── knowledge/     # one Markdown file per knowledge record: k-1a2b3c4d.md
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
-└── .secondchair/      # derived state (index.sqlite, caches, the write lock); git-ignored, rebuildable
+└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on); git-ignored, rebuildable
 ```
 
 Later contracts add decisions, the speaker table and friction reports, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.

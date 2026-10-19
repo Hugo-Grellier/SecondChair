@@ -57,8 +57,7 @@ class Tool:
 @dataclass(frozen=True)
 class Change:
     """What a delegated action's `fn` returns: the workspace file it writes. The Core, not the
-    block, logs it and applies it at the effective level (ARC-04).
-    ponytail: one workspace file per action; VTT actions extend this with the connector (#47)."""
+    block, logs it and applies it at the effective level (ARC-04)."""
 
     path: str  # relative to the workspace root
     after: str | None  # the file's new content, None to delete it
@@ -73,6 +72,19 @@ class Contradiction(Exception):
     def __init__(self, path: str, message: str) -> None:
         super().__init__(message)
         self.path = path  # the workspace file the refused change targeted
+
+
+@dataclass(frozen=True, kw_only=True)
+class VttAction:
+    """What a delegated action's `fn` returns to act in the VTT: one operation on one document,
+    which the Core logs and has the VTT connector take at the effective level (ARC-04, ARC-16).
+    The Core reads none of it: the connector and its modules give `op` and `target` their
+    meaning (docs/contracts/foundry-bridge.md)."""
+
+    op: str  # the connector's operation, generic (move_token) or mechanical (system adapter)
+    target: str  # the document acted on, as the connector names it
+    params: dict[str, Any]  # the fields to set
+    source: str | None = None  # what the action draws on, recorded in the log (DEL-24)
 
 
 def load_tools(ws: Workspace) -> list[Tool]:

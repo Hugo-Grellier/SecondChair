@@ -17,10 +17,18 @@ declare const game: {
     get(module: string, key: string): unknown;
     set(module: string, key: string, value: unknown): Promise<unknown>;
   };
-  user: { id: string; isGM: boolean };
+  user: {
+    id: string;
+    isGM: boolean;
+    getFlag(scope: string, key: string): unknown;
+    setFlag(scope: string, key: string, value: unknown): Promise<unknown>;
+  };
   users: { activeGM: { id: string } | null };
   world: { id: string };
+  modules: { get(id: string): object | undefined };
 };
+
+declare function fromUuid(uuid: string): Promise<object | null>;
 
 declare const Hooks: {
   once(hook: string, fn: () => unknown): number;

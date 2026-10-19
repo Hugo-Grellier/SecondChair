@@ -1,21 +1,27 @@
 """`secondchair serve`: the Core's MCP server over Streamable HTTP on loopback (PKG-05)."""
 
+import hmac
+import json
 import socket
 from importlib.metadata import entry_points
 
 import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute
 
-from secondchair.core import PROTOCOL_VERSION, delegation, jobs
+from secondchair.core import PROTOCOL_VERSION, delegation, jobs, machine
+from secondchair.core.delegation import DelegationError
 from secondchair.core.tools import RegistrationError, load_tools
-from secondchair.core.workspace import Workspace
+from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
 
 LOOPBACK = "127.0.0.1"
 MCP_PATH = "/mcp"
+GM_PATH = "/gm"
+SERVE_FILE = "serve.json"
 CONNECTOR_GROUP = "secondchair.connectors"
 
 
@@ -71,6 +77,35 @@ def build_server(ws: Workspace) -> MCPServer:
             }
         )
 
+    @server.custom_route(GM_PATH, methods=["POST"])
+    async def gm_gesture(request: Request) -> JSONResponse:
+        """A GM gesture the CLI relays: only this process holds the GM client a VTT action
+        needs. Authenticated by the machine's token, which only the GM's account can read."""
+        token = machine.foundry_token()
+        given = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if token is None or not hmac.compare_digest(given.encode(), token.encode()):
+            return JSONResponse({"error": "Wrong or missing token."}, status_code=401)
+        try:
+            body = await request.json()
+            gesture, entry, auth = body["gesture"], body["entry"], body["authenticated"]
+            if type(entry) is not int or type(auth) is not bool:
+                raise TypeError
+        except ValueError, KeyError, TypeError:
+            return JSONResponse({"error": "Malformed gesture."}, status_code=400)
+        if body.get("workspace") != str(ws.root.resolve()):
+            return JSONResponse({"error": f"This Core serves {ws.root}."}, status_code=409)
+        gestures = {
+            "approve": lambda: delegation.approve(ws, entry, "cli", auth),
+            "undo": lambda: delegation.undo(ws, entry, str(body.get("reason")), "cli", auth),
+        }
+        if gesture not in gestures:
+            return JSONResponse({"error": f"Unknown gesture {gesture!r}."}, status_code=400)
+        try:  # in a worker thread: the VTT action waits on this event loop
+            await run_in_threadpool(gestures[gesture])
+        except (DelegationError, WorkspaceError) as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
+        return JSONResponse({"ok": True})
+
     return server
 
 
@@ -84,5 +119,12 @@ def serve(ws: Workspace, port: int) -> None:
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((LOOPBACK, port))
     sock.listen()
+    # Where the CLI relays GM gestures to (GM_PATH); derived state, stale once serve stops.
+    (ws.root / STATE_DIR).mkdir(exist_ok=True)
+    serve_file = ws.root / STATE_DIR / SERVE_FILE
+    serve_file.write_text(json.dumps({"port": sock.getsockname()[1]}))
     print(f"Serving {ws.root} on http://{LOOPBACK}:{sock.getsockname()[1]}", flush=True)
-    uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
+    try:
+        uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
+    finally:  # the CLI must not relay a gesture (and the token) to a later listener
+        serve_file.unlink(missing_ok=True)
