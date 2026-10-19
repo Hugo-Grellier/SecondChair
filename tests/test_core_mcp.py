@@ -51,6 +51,20 @@ def test_campaign_info_answers_several_agents_at_once(core: str) -> None:
         }
 
 
+def test_agents_create_entities_over_http_each_logged_once(core: str, tmp_path: Path) -> None:
+    async def create(name: str) -> dict:
+        async with Client(core) as client:
+            result = await client.call_tool("create_entity", {"names": [name], "agent": name})
+            return result.structured_content
+
+    async def both() -> tuple[dict, dict]:
+        return await asyncio.gather(create("a"), create("b"))
+
+    results = asyncio.run(both())
+    assert sorted(r["entry"] for r in results) == [1, 2]
+    assert len(list((tmp_path / "campaign/canon/entities").iterdir())) == 2
+
+
 def test_a_block_tool_is_listed_with_its_declarations(core: str) -> None:
     async def list_tools():
         async with Client(core) as client:

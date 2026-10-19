@@ -722,6 +722,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "actionlint-py" },
+    { name = "jsonschema" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -740,6 +741,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "actionlint-py" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },

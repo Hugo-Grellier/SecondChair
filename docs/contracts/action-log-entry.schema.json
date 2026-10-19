@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/action-log-entry.schema.json",
+  "title": "Action log entry",
+  "description": "One entry of a campaign's action log (DEL-24, DEL-27), stored as YAML in `action-log/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. Either a delegated action taken through the Core (`kind: action`) or a GM interaction on one (`kind: gm_interaction`), each counted in GM effort.",
+  "type": "object",
+  "oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/gm_interaction"}],
+  "$defs": {
+    "common": {
+      "type": "object",
+      "required": ["id", "at", "kind", "moment", "moment_seq"],
+      "properties": {
+        "id": {"type": "integer", "minimum": 1, "description": "Increasing, unique in the log."},
+        "at": {"type": "string", "format": "date-time", "description": "Real time the entry was written."},
+        "kind": {"enum": ["action", "gm_interaction"]},
+        "moment": {"enum": ["prep", "live-session", "between-sessions"]},
+        "moment_seq": {"type": "integer", "minimum": 1, "description": "The moment's sequence number in `moment.yaml`. Once the moment changes, the entries of earlier sequence numbers are frozen (DEL-25)."}
+      }
+    },
+    "action": {
+      "allOf": [{"$ref": "#/$defs/common"}],
+      "required": ["tool", "responsibility", "effective_level", "override_lowered", "reversible", "agent", "source", "runner_configuration", "target", "before", "after", "status", "approval"],
+      "properties": {
+        "kind": {"const": "action"},
+        "tool": {"type": "string", "description": "The registered tool that took the action."},
+        "responsibility": {"enum": ["prep", "memory", "vtt_operations", "rules_and_combat", "living_world", "npcs", "narrative_direction", "disclosure"]},
+        "effective_level": {"enum": ["propose", "act-then-review", "autonomous"], "description": "Manual refuses the action: nothing is logged."},
+        "override_lowered": {"type": "boolean", "description": "Whether an entity override lowered the level."},
+        "reversible": {"type": "boolean", "description": "As declared at tool registration."},
+        "agent": {"type": "string", "description": "The acting agent, as it names itself; traceability only (ARC-22)."},
+        "source": {"type": ["string", "null"]},
+        "runner_configuration": {"type": ["object", "null"], "description": "The runner configuration used, for job work."},
+        "target": {"type": "string", "description": "The workspace file the action writes, relative to the workspace root."},
+        "before": {"type": ["string", "null"], "description": "The target's content before the action; null when absent."},
+        "after": {"type": ["string", "null"], "description": "The target's content after the action; null when deleted."},
+        "status": {"enum": ["pending", "applied", "rejected", "undone"], "description": "pending at propose until approved or rejected; applied at once above propose."},
+        "approval": {
+          "description": "How a proposal was approved; null when none was needed or given.",
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["channel", "authenticated", "quote", "interaction"],
+              "additionalProperties": false,
+              "properties": {
+                "channel": {"enum": ["cli", "via agent"]},
+                "authenticated": {"type": "boolean"},
+                "quote": {"type": ["string", "null"], "description": "The GM's words, required via agent (DEL-28)."},
+                "interaction": {"type": "integer", "description": "The gm_interaction entry recording the approval."}
+              }
+            }
+          ]
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "gm_interaction": {
+      "allOf": [{"$ref": "#/$defs/common"}],
+      "required": ["interaction", "entry", "channel", "authenticated", "quote", "reason"],
+      "properties": {
+        "kind": {"const": "gm_interaction"},
+        "interaction": {"enum": ["approve", "reject", "undo"]},
+        "entry": {"type": "integer", "description": "The action entry acted on."},
+        "channel": {"enum": ["cli", "via agent"], "description": "The Surface it came through."},
+        "authenticated": {"type": "boolean", "description": "Whether that Surface was authenticated (ARC-13): the CLI in an interactive terminal."},
+        "quote": {"type": ["string", "null"], "description": "The GM's quoted words when relayed by an agent."},
+        "reason": {"enum": ["contradiction", "rules", "tone", "other", null], "description": "The rejection reason (DEL-26), required for reject and undo."}
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

@@ -8,7 +8,7 @@ from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from secondchair.core import PROTOCOL_VERSION
+from secondchair.core import PROTOCOL_VERSION, delegation
 from secondchair.core.tools import load_tools
 from secondchair.core.workspace import Workspace
 
@@ -21,7 +21,7 @@ def build_server(ws: Workspace) -> MCPServer:
     server = MCPServer("secondchair", version=PROTOCOL_VERSION, log_level="WARNING")
     for tool in load_tools(ws):
         server.add_tool(
-            tool.fn,
+            delegation.wrap(ws, tool) if tool.delegated_action else tool.fn,
             annotations=ToolAnnotations(
                 read_only_hint=not tool.delegated_action,
                 destructive_hint=tool.delegated_action and not tool.reversible,
@@ -32,6 +32,12 @@ def build_server(ws: Workspace) -> MCPServer:
                 "secondchair/reversible": tool.reversible,
             },
         )
+    # A GM interaction relayed by an agent: neither a read nor a delegated action (DEL-27).
+    server.add_tool(
+        delegation.approve_proposal(ws),
+        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+        meta={"secondchair/gm_interaction": True},
+    )
 
     @server.custom_route("/", methods=["GET"])
     async def about(_: Request) -> JSONResponse:
