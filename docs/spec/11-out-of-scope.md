@@ -37,7 +37,7 @@ Each item is excluded from v4 only; none is excluded by the architecture.
 
 None of these contradicts a decision; each is a detail the map left unspecified.
 
-1. **Base profile values.** The full read / prep / play values for all 8 responsibilities × 3 moments, and the default deadline modes. Known: living world ([#15](https://github.com/Hugo-Grellier/SecondChair/issues/15)), memory between sessions ([#14](https://github.com/Hugo-Grellier/SecondChair/issues/14)), the narrative-direction cap ([03](03-delegation.md)).
+1. ~~**Base profile values.**~~ Settled 2026-10-19: [03](03-delegation.md), DEL-06 to DEL-06b.
 2. **Moment transitions.** Which concrete gesture starts and stops "session capture" and so opens *live session* and *between sessions* (DEL-03), given that transcription runs after the session and observation capture runs live.
 3. **Ceiling defaults.** The ceiling's default level on a fresh world and where in Foundry the GM sets it (DEL-19).
 4. **Disclosure hold lift.** Which Surface may lift the irreversible hold for a responsibility (DEL-09); loosening an override needs an authenticated Surface, and the same rule is the natural default.

@@ -36,7 +36,22 @@ Decisions: [ADR 0003](../adr/0003-core-is-the-only-gateway.md), [ADR 0005](../ad
 ## Delegation table
 
 - **DEL-05** One **delegation table** per campaign, stored in its campaign workspace: 8 responsibilities × 3 moments. Each column is the **delegation profile** of one moment.
-- **DEL-06** The tool ships three **base profiles**, *read*, *prep* and *play*, as starting points for a column. The GM then edits single cells. Known base values: living world is manual in *read*, act-then-review in *prep* and *play* ([#15](https://github.com/Hugo-Grellier/SecondChair/issues/15)); memory between sessions is act-then-review by default ([#14](https://github.com/Hugo-Grellier/SecondChair/issues/14)). The remaining cells are an open question for planning ([11](11-out-of-scope.md)).
+- **DEL-06** The tool ships three **base profiles**, *read*, *prep* and *play*, as starting points for a column. The GM then edits single cells. Values (settled in planning, 2026-10-19; living world from [#15](https://github.com/Hugo-Grellier/SecondChair/issues/15), memory between sessions from [#14](https://github.com/Hugo-Grellier/SecondChair/issues/14)):
+
+  | Responsibility | read | prep | play |
+  |---|---|---|---|
+  | Prep | manual | act-then-review | propose |
+  | Memory | manual | act-then-review | propose |
+  | VTT operations | manual | act-then-review | act-then-review |
+  | Rules and combat | manual | manual | act-then-review |
+  | Living world | manual | act-then-review | act-then-review |
+  | NPCs | manual | propose | propose |
+  | Narrative direction | manual | propose | propose |
+  | Disclosure | manual | propose | propose |
+
+  Every cell of every base profile has deadline mode *auto*.
+- **DEL-06a** A new campaign's delegation table is seeded with *prep* in the prep column, *play* in the live-session column and *prep* in the between-sessions column.
+- **DEL-06b** *read* is every responsibility at manual: filling all three columns with it gives the test bench's **baseline** ([10](10-success-bench.md), MET-05).
 - **DEL-07** Each cell also carries a **deadline mode**: auto (default), now or break ([ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md)).
 
 ### Tool caps
