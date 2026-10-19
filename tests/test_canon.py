@@ -475,10 +475,15 @@ def test_check_passes_on_a_valid_workspace_and_names_each_invalid_file(
     (ws.root / "action-log/000099.yaml").write_text("id: [unclosed\n")
     (ws.root / "moment.yaml").write_text("moment: lunch\nseq: 1\n")
     (ws.root / "delegation.yaml").write_text("prep: {}\n")
+    for folder in ("jobs", "calls"):
+        (ws.root / folder).mkdir(exist_ok=True)
+        (ws.root / folder / "000098.yaml").write_text(f"- not a {folder} mapping\n")
 
     assert gm(ws, "check") == 1
     err = capsys.readouterr().err
     for name in ("f-broken.md", "000099.yaml", "moment.yaml", "delegation.yaml"):
+        assert name in err
+    for name in ("jobs/000098.yaml", "calls/000098.yaml"):
         assert name in err
 
 

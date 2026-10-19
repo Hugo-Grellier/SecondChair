@@ -442,8 +442,15 @@ def promote(ws: Workspace, entry_id: int, channel: str, authenticated: bool) -> 
 
 
 def check(ws: Workspace) -> list[str]:
-    """One message per invalid delegation table, moment or action log file."""
+    """One message per invalid delegation table, moment, action log, job or call file."""
     errors = read_log(ws)[1]
+    for p in sorted((ws.root / JOBS_DIR).glob("*.yaml")) + sorted(
+        (ws.root / CALLS_DIR).glob("*.yaml")
+    ):
+        try:
+            _read_yaml(p)
+        except WorkspaceError as e:
+            errors.append(str(e))
     try:
         current_moment(ws)
     except WorkspaceError as e:
