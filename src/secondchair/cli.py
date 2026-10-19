@@ -23,13 +23,21 @@ def machine_config_dir() -> Path:
     return Path(base) / "secondchair"
 
 
+class MachineConfigError(Exception):
+    """A machine configuration `serve` cannot use."""
+
+
 def configured_port() -> int:
     path = machine_config_dir() / "config.yaml"
     if not path.is_file():
         return DEFAULT_PORT
-    port = (yaml.safe_load(path.read_text()) or {}).get("port", DEFAULT_PORT)
-    if not isinstance(port, int) or not 0 <= port <= 65535:
-        raise WorkspaceError(f"{path}: port must be an integer between 0 and 65535.")
+    try:
+        config = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise MachineConfigError(f"{path} is not valid YAML: {e}") from e
+    port = config.get("port", DEFAULT_PORT) if isinstance(config, dict) else None
+    if type(port) is not int or not 0 <= port <= 65535:
+        raise MachineConfigError(f"{path}: port must be an integer between 0 and 65535.")
     return port
 
 
@@ -73,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             serve(workspace.load(args.workspace), configured_port())
-    except (WorkspaceError, OSError) as e:
+    except (WorkspaceError, MachineConfigError, OSError) as e:
         print(f"secondchair: {e}", file=sys.stderr)
         return 1
     return 0

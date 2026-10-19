@@ -107,3 +107,17 @@ def test_serve_refuses_a_directory_that_is_not_a_workspace(
 ) -> None:
     assert main(["serve", str(tmp_path)]) == 1
     assert "not a campaign workspace" in capsys.readouterr().err
+
+
+def test_serve_refuses_an_invalid_port_in_the_machine_configuration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_home = tmp_path / "config"
+    (config_home / "secondchair").mkdir(parents=True)
+    (config_home / "secondchair" / "config.yaml").write_text("port: 70000\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    ws = tmp_path / "campaign"
+    main(["init", str(ws), "--language", "fr"])
+
+    assert main(["serve", str(ws)]) == 1
+    assert "port must be an integer" in capsys.readouterr().err
