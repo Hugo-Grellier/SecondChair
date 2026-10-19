@@ -6,13 +6,21 @@ readme = "README.md"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 requires-python = ">=3.14"
-dependencies = ["pyyaml>=6.0.2"]
+dependencies = [
+    "mcp>=2.3.0",
+    "pyyaml>=6.0.2",
+    "starlette>=1.9.0",
+    "uvicorn>=0.54.0",
+]
 
 [project.scripts]
 secondchair = "secondchair.cli:main"
 
 [project.entry-points."secondchair.calendars"]
 absalom = "secondchair_pf2e.calendar:ABSALOM"
+
+[project.entry-points."secondchair.tools"]
+core = "secondchair.core.campaign:tools"
 
 [dependency-groups]
 dev = [

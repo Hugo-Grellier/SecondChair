@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from secondchair.calendar import Calendar, CalendarError, from_config
+from secondchair.core.calendar import Calendar, CalendarError, from_config
 
 SCHEMA_VERSION = 1
 CONFIG_FILE = "workspace.yaml"

@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from secondchair.calendar import Calendar, CalendarError, from_config
+from secondchair.core.calendar import Calendar, CalendarError, from_config
 from secondchair_pf2e.calendar import ABSALOM
 
 AR = ABSALOM

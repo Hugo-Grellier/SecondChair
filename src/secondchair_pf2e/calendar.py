@@ -5,7 +5,7 @@ Paizo's rule, not the PF2e system's Gregorian world clock: Calistril gains a day
 1 Abadius 4726 AR is Oathday, so the table and the Core agree before 4800 AR.
 """
 
-from secondchair.calendar import Calendar, LeapRule, Month
+from secondchair.core.calendar import Calendar, LeapRule, Month
 
 ABSALOM = Calendar(
     months=(

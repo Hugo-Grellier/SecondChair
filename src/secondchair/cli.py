@@ -1,20 +1,18 @@
 """The `secondchair` command line."""
 
 import argparse
-import contextlib
-import json
 import os
 import sys
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import yaml
 
-from secondchair import workspace
-from secondchair.workspace import Workspace, WorkspaceError
+from secondchair.core import workspace
+from secondchair.core.server import LOOPBACK, MCP_PATH, serve
+from secondchair.core.tools import RegistrationError
+from secondchair.core.workspace import WorkspaceError
 
 DEFAULT_PORT = 7240
-LOOPBACK = "127.0.0.1"
 
 
 def machine_config_dir() -> Path:
@@ -41,24 +39,26 @@ def configured_port() -> int:
     return port
 
 
-def serve(ws: Workspace, port: int) -> None:
-    body = json.dumps({"service": "secondchair", "campaign_language": ws.campaign_language})
+HOST_SETUP = {
+    "claude": """Add SecondChair to Claude Code for every project with:
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            if self.path != "/":
-                self.send_error(404)
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body.encode())
+  claude mcp add --scope user --transport http secondchair {url}
 
-    # Loopback only (PKG-05); binding beyond it is deferred (PKG-20).
-    with ThreadingHTTPServer((LOOPBACK, port), Handler) as server:
-        print(f"Serving {ws.root} on http://{LOOPBACK}:{server.server_port}", flush=True)
-        with contextlib.suppress(KeyboardInterrupt):
-            server.serve_forever()
+or, for one project, put this in its .mcp.json:
+
+{{"mcpServers": {{"secondchair": {{"type": "http", "url": "{url}"}}}}}}
+""",
+    "codex": """Add SecondChair to Codex by putting this in ~/.codex/config.toml:
+
+[mcp_servers.secondchair]
+url = "{url}"
+""",
+}
+
+
+def host_setup(host: str) -> str:
+    """The host configuration for the Core on this machine; never written anywhere (PKG-19)."""
+    return HOST_SETUP[host].format(url=f"http://{LOOPBACK}:{configured_port()}{MCP_PATH}")
 
 
 def _calendar_arg(value: str) -> str | dict:
@@ -88,6 +88,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     serve_cmd = commands.add_parser("serve", help="serve a campaign workspace on 127.0.0.1")
     serve_cmd.add_argument("workspace", type=Path)
+    host_cmd = commands.add_parser("host", help="agent host configuration")
+    host_sub = host_cmd.add_subparsers(dest="host_command", required=True)
+    setup_cmd = host_sub.add_parser("setup", help="print the configuration for an agent host")
+    setup_cmd.add_argument("host", choices=sorted(HOST_SETUP))
     args = parser.parse_args(argv)
 
     try:
@@ -97,9 +101,11 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"Created campaign workspace {ws.root} (campaign language {ws.campaign_language})"
             )
+        elif args.command == "host":
+            print(host_setup(args.host), end="")
         else:
             serve(workspace.load(args.workspace), configured_port())
-    except (WorkspaceError, MachineConfigError, OSError) as e:
+    except (WorkspaceError, MachineConfigError, RegistrationError, OSError) as e:
         print(f"secondchair: {e}", file=sys.stderr)
         return 1
     return 0

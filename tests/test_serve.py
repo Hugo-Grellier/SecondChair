@@ -1,15 +1,13 @@
 import json
-import os
 import socket
-import subprocess
-import sys
+import urllib.error
 import urllib.request
-from collections.abc import Generator, Iterator
-from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 import yaml
+from conftest import Serving
 
 from secondchair.cli import main
 
@@ -26,43 +24,32 @@ def _non_loopback_address() -> str | None:
 
 
 @pytest.fixture
-def machine_config(tmp_path: Path) -> dict[str, str]:
-    """A machine configuration asking for an OS-chosen port."""
-    config_home = tmp_path / "config"
-    (config_home / "secondchair").mkdir(parents=True)
-    (config_home / "secondchair" / "config.yaml").write_text("port: 0\n")
-    return {**os.environ, "XDG_CONFIG_HOME": str(config_home)}
-
-
-@contextmanager
-def _serving(ws: Path, env: dict[str, str]) -> Generator[str]:
-    """Run `secondchair serve` on `ws` and yield its first output line."""
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "secondchair.cli", "serve", str(ws)],
-        env=env,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert proc.stdout is not None
-        yield proc.stdout.readline().strip()
-    finally:
-        proc.terminate()
-        proc.wait(timeout=5)
-
-
-@pytest.fixture
-def served(tmp_path: Path, machine_config: dict[str, str]) -> Iterator[int]:
+def served(tmp_path: Path, machine_config: dict[str, str], serving: Serving) -> Iterator[int]:
     ws = tmp_path / "campaign"
     main(["init", str(ws), "--language", "fr", "--calendar", "absalom"])
-    with _serving(ws, machine_config) as line:
+    with serving(ws, machine_config) as line:
         assert line.startswith("Serving "), line
         yield int(line.rsplit(":", 1)[1])
 
 
 def test_serve_answers_on_loopback(served: int) -> None:
     with urllib.request.urlopen(f"http://127.0.0.1:{served}/", timeout=5) as response:
-        assert json.load(response) == {"service": "secondchair", "campaign_language": "fr"}
+        assert json.load(response) == {
+            "service": "secondchair",
+            "campaign_language": "fr",
+            "protocol_version": "0.1.0",
+        }
+
+
+def test_the_mcp_endpoint_refuses_a_foreign_host_header(served: int) -> None:
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{served}/mcp",
+        data=b"{}",
+        headers={"Host": "attacker.example", "Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5)
+    assert refused.value.code == 421
 
 
 def test_serve_does_not_answer_on_other_interfaces(served: int) -> None:
@@ -74,7 +61,7 @@ def test_serve_does_not_answer_on_other_interfaces(served: int) -> None:
 
 
 def test_serve_uses_the_port_from_the_machine_configuration(
-    tmp_path: Path, machine_config: dict[str, str]
+    tmp_path: Path, machine_config: dict[str, str], serving: Serving
 ) -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -83,7 +70,7 @@ def test_serve_uses_the_port_from_the_machine_configuration(
     config.write_text(f"port: {port}\n")
     ws = tmp_path / "campaign"
     main(["init", str(ws), "--language", "fr", "--calendar", "absalom"])
-    with _serving(ws, machine_config) as line:
+    with serving(ws, machine_config) as line:
         assert line.endswith(f"http://127.0.0.1:{port}")
 
 
