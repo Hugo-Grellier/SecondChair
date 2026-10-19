@@ -388,7 +388,7 @@ def log_hand_edits(ws: Workspace) -> list[dict]:
         known = _core_states(entries)
         current = {
             p.relative_to(ws.root).as_posix(): p.read_text()
-            for p in sorted((ws.root / CANON_DIR).rglob("*"))
+            for p in sorted((ws.root / CANON_DIR).rglob("*.md"))
             if p.is_file()
         }
         changed = [

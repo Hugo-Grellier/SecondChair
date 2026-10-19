@@ -65,18 +65,7 @@ def init(root: Path, language: str, calendar: str | dict) -> Workspace:
 
 def load(root: Path) -> Workspace:
     """Open the workspace in `root`, refusing a schema this version cannot serve."""
-    config = root / CONFIG_FILE
-    if not config.is_file():
-        raise WorkspaceError(f"{root} is not a campaign workspace: {CONFIG_FILE} is missing.")
-    data = _read(config)
-    version = data.get("schema_version")
-    if not isinstance(version, int):
-        raise WorkspaceError(f"{config} has no integer schema_version.")
-    if version > SCHEMA_VERSION:
-        raise WorkspaceError(
-            f"{config} declares schema version {version}, newer than the {SCHEMA_VERSION} "
-            "this SecondChair supports. Upgrade SecondChair to serve this workspace."
-        )
+    config, data, version = _versioned(root)
     if version < SCHEMA_VERSION:
         raise WorkspaceError(
             f"{config} declares schema version {version}, older than {SCHEMA_VERSION}. "
@@ -93,18 +82,8 @@ def load(root: Path) -> Workspace:
 def upgrade(root: Path) -> tuple[int, int]:
     """Migrate the workspace in `root` in place to the current schema (PKG-16), one version at a
     time, leaving the change as a diff for the GM to review; the versions before and after."""
-    config = root / CONFIG_FILE
-    if not config.is_file():
-        raise WorkspaceError(f"{root} is not a campaign workspace: {CONFIG_FILE} is missing.")
-    version = _read(config).get("schema_version")
-    if not isinstance(version, int):
-        raise WorkspaceError(f"{config} has no integer schema_version.")
+    config, _, version = _versioned(root)
     start = version
-    if version > SCHEMA_VERSION:
-        raise WorkspaceError(
-            f"{config} declares schema version {version}, newer than the {SCHEMA_VERSION} "
-            "this SecondChair supports. Upgrade SecondChair instead."
-        )
     while version < SCHEMA_VERSION:
         if version not in MIGRATIONS:
             raise WorkspaceError(f"No migration from workspace schema version {version}.")
@@ -122,6 +101,23 @@ def upgrade(root: Path) -> tuple[int, int]:
         )
     load(root)
     return start, version
+
+
+def _versioned(root: Path) -> tuple[Path, dict, int]:
+    """`workspace.yaml`, its content and its schema version, refusing a newer one."""
+    config = root / CONFIG_FILE
+    if not config.is_file():
+        raise WorkspaceError(f"{root} is not a campaign workspace: {CONFIG_FILE} is missing.")
+    data = _read(config)
+    version = data.get("schema_version")
+    if not isinstance(version, int):
+        raise WorkspaceError(f"{config} has no integer schema_version.")
+    if version > SCHEMA_VERSION:
+        raise WorkspaceError(
+            f"{config} declares schema version {version}, newer than the {SCHEMA_VERSION} "
+            "this SecondChair supports. Upgrade SecondChair to serve this workspace."
+        )
+    return config, data, version
 
 
 def _calendar(value: object, where: str) -> Calendar:
