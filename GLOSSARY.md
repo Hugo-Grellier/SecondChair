@@ -128,6 +128,10 @@ _Avoid_: corpus, import, data
 The directory holding one campaign's canon, decisions and action log. It lives outside the tool and is named by the GM, who may keep it in a private repository of their own. The tool never ships one.
 _Avoid_: campaign repo, vault, bible
 
+**Machine configuration**:
+What belongs to the GM's machine rather than to a campaign: the runner configuration, where the Sources are kept, and how the VTT reaches the Core. It never travels with the campaign workspace.
+_Avoid_: settings, profile, user config
+
 **Observation**:
 A timestamped record, captured from the VTT, of live mechanical state or of what happened at the table. Never canon by itself; it becomes canon only through memory.
 _Avoid_: fact, event (when meaning canon), log
