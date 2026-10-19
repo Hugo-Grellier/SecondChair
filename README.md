@@ -24,3 +24,6 @@ uv run pre-commit run --all-files   # ruff, ty, pytest, the LIC-10 guard, action
 ```
 
 CI runs the same checks on Python 3.14 and 3.15. The spec is in [`docs/spec/`](docs/spec/README.md).
+
+The original [sample campaign](sample-campaign/README.md) supplies S0 material,
+synthetic session notes and a frozen reference set under CC BY 4.0.

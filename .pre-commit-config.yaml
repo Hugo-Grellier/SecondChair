@@ -28,6 +28,12 @@ repos:
         name: no campaign workspace or Source (LIC-10)
         entry: uv run python scripts/guard_no_workspace.py
         language: system
+      - id: guard-sample-campaign
+        name: original sample campaign (LIC-10, LIC-13)
+        entry: uv run python scripts/guard_sample_campaign.py
+        language: system
+        pass_filenames: false
+        files: ^(sample-campaign/|scripts/(guard_sample_campaign\.py|sample-setting-deny-list\.txt))
       - id: actionlint
         name: actionlint
         entry: uv run actionlint
