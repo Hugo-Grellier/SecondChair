@@ -65,6 +65,16 @@ class Change:
     source: str | None = None  # what the action draws on, recorded in the log (DEL-24)
 
 
+class Contradiction(Exception):
+    """Raised by a delegated action's `fn` when its change would contradict canon (a correction
+    of something played, an event closing a higher-ranked fact). The Core refuses the action and
+    logs the refusal, a continuity error (MET-01)."""
+
+    def __init__(self, path: str, message: str) -> None:
+        super().__init__(message)
+        self.path = path  # the workspace file the refused change targeted
+
+
 def load_tools(ws: Workspace) -> list[Tool]:
     """Every tool the installed blocks register, or `RegistrationError` naming the block."""
     tools: dict[str, Tool] = {}

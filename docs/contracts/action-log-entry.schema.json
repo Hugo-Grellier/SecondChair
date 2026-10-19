@@ -33,7 +33,8 @@
         "target": {"type": "string", "description": "The workspace file the action writes, relative to the workspace root."},
         "before": {"type": ["string", "null"], "description": "The target's content before the action; null when absent."},
         "after": {"type": ["string", "null"], "description": "The target's content after the action; null when deleted."},
-        "status": {"enum": ["pending", "applied", "rejected", "undone"], "description": "pending at propose until approved or rejected; applied at once above propose."},
+        "status": {"enum": ["pending", "applied", "rejected", "undone", "refused"], "description": "pending at propose until approved or rejected; applied at once above propose; refused when the Core found the change contradicts canon (nothing written)."},
+        "refusal": {"type": "string", "description": "Why the Core refused the action as a contradiction with canon; present only when `status` is refused. Counted as a continuity error (MET-01)."},
         "approval": {
           "description": "How a proposal was approved; null when none was needed or given.",
           "oneOf": [

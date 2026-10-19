@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from secondchair.core import delegation, machine, workspace
+from secondchair.core import delegation, index, machine, workspace
 from secondchair.core.delegation import DelegationError
 from secondchair.core.server import LOOPBACK, MCP_PATH, serve
 from secondchair.core.tools import RegistrationError
@@ -91,6 +91,16 @@ def _gm_command(args: argparse.Namespace) -> str:
     return f"Undid entry {args.entry} ({args.reason})."
 
 
+def check(ws: workspace.Workspace) -> int:
+    """Rebuild the derived index from the workspace alone (CAN-10); 1 if a file is invalid."""
+    errors = index.rebuild(ws)
+    for error in errors:
+        print(f"secondchair: {error}", file=sys.stderr)
+    entities, facts, events = index.counts(ws)
+    print(f"Indexed {entities} entities, {facts} facts, {events} events from {ws.root}.")
+    return 1 if errors else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="secondchair")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -129,6 +139,9 @@ def main(argv: list[str] | None = None) -> int:
         ("reject", "reject a pending action", [in_workspace, reason]),
     ):
         commands.add_parser(name, parents=parents, help=help_text).add_argument("entry", type=int)
+    commands.add_parser(
+        "check", parents=[in_workspace], help="rebuild the derived index and report invalid files"
+    )
     log_cmd = commands.add_parser("log", help="the action log")
     log_sub = log_cmd.add_subparsers(dest="log_command", required=True)
     undo_cmd = log_sub.add_parser(
@@ -149,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
             print(machine.ensure_foundry_token())
         elif args.command == "host":
             print(host_setup(args.host), end="")
+        elif args.command == "check":
+            return check(workspace.load(args.workspace))
         elif args.command == "serve":
             serve(workspace.load(args.workspace), configured_port())
         else:

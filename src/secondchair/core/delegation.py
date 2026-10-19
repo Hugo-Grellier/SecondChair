@@ -17,7 +17,13 @@ from typing import Any, TypedDict
 import yaml
 from mcp.server.mcpserver.exceptions import ToolError
 
-from secondchair.core.tools import RESPONSIBILITIES, Change, RegistrationError, Tool
+from secondchair.core.tools import (
+    RESPONSIBILITIES,
+    Change,
+    Contradiction,
+    RegistrationError,
+    Tool,
+)
 from secondchair.core.workspace import CONFIG_FILE, STATE_DIR, Workspace, WorkspaceError
 
 LEVELS = ("manual", "propose", "act-then-review", "autonomous")  # DEL-02, loosest last
@@ -162,7 +168,10 @@ def act(ws: Workspace, tool: Tool, agent: str, describe: Callable[[], Change]) -
                 f"{tool.responsibility} is at manual in {moment}: agents take no action, "
                 "they only answer when asked."
             )
-        change = describe()
+        try:
+            change, refusal = describe(), None
+        except Contradiction as c:  # logged: a Core-detected contradiction with canon (MET-01)
+            change, refusal = Change(path=c.path, after=None), str(c)
         if not isinstance(change, Change):
             raise DelegationError(f"{tool.name} returned {change!r}, not a Change")
         path = _target(ws, change.path)
@@ -184,6 +193,10 @@ def act(ws: Workspace, tool: Tool, agent: str, describe: Callable[[], Change]) -
             "status": "pending" if level == "propose" else "applied",
             "approval": None,
         }
+        if refusal is not None:
+            entry.update(status="refused", refusal=refusal)
+            logged = _append(ws, entry)["id"]
+            raise DelegationError(f"Refused, it contradicts canon: {refusal} (entry {logged}).")
         if entry["status"] == "applied":
             _apply(ws, entry, "after")
         return {"entry": _append(ws, entry)["id"], "status": entry["status"]}

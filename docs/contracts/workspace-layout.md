@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-17a, CAN-02, CAN-10, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-17a, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-12, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-16.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -13,13 +13,15 @@ my-campaign/
 ├── moment.yaml        # the current moment; seeded by `init`, changed by `secondchair moment`
 ├── action-log/        # one YAML file per action log entry: 000001.yaml, 000002.yaml, …
 ├── canon/
-│   └── entities/      # one Markdown file per entity: e-1a2b3c4d.md
+│   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
+│   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
+│   └── events/        # one Markdown file per event: v-1a2b3c4d.md
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
-└── .secondchair/      # derived state (SQLite index, caches, the write lock); git-ignored, rebuildable
+└── .secondchair/      # derived state (index.sqlite, caches, the write lock); git-ignored, rebuildable
 ```
 
-Later contracts add facts, decisions, the speaker table and friction reports, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
+Later contracts add decisions, the speaker table and friction reports, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
 
 ## `workspace.yaml`
 
@@ -125,6 +127,60 @@ official_reference: null
 ---
 Un prêtre voûté.
 ```
+
+## `canon/facts/`
+
+A fact is one statement about one or more entities, in the campaign language (CAN-01): YAML front matter, then the statement.
+
+```markdown
+---
+id: f-5e6f7a8b
+entities: [e-1a2b3c4d, e-9c8d7e6f]
+relation: {type: member_of, subject: e-1a2b3c4d, object: e-9c8d7e6f}
+valid_from: "4725-03"
+valid_to: null
+rank: played
+origin: {kind: observation, quote: "Mira joined the Lock Council.", locator: "sessions/01.md:3"}
+---
+Mira Pell sits on the Lock Council.
+```
+
+| Key | Rule |
+|---|---|
+| `entities` | Entity ids the statement is about, each an existing entity; a relation's subject and object are always included. |
+| `relation` | Optional (CAN-03): `type`, `subject`, `object`. The type is one of the Core list `member_of`, `leads`, `lives_in`, `located_in`, `owns`, `knows`, `allied_with`, `opposes`, `serves`, `kin_of`, or one a System extension registers as an iterable of names under the `secondchair.relations` entry point group. Any other type is refused. |
+| `valid_from`, `valid_to` | Fictional validity (CAN-04), campaign dates, partial allowed; null when open. An event that opens or closes the fact sets its start or end instead. Validity is start-inclusive, end-exclusive. |
+| `rank` | `played`, `gm_decision`, `cited_source` or `agent_proposal`, highest first (CAN-06). Set by the Core from the origin, never by the caller. |
+| `origin` | Provenance (CAN-07), by `kind`: `observation` (`quote` verbatim, `locator`) ranks played; `source` (`source`, `page`) ranks cited_source; `gm` (`words`) ranks gm_decision only from an authenticated Surface (DEL-29, #38), else agent_proposal; `job` (`job`) ranks agent_proposal. Approving a proposal never raises its rank (CAN-08). |
+
+The record time is not in the file: the index takes it from the action log entry whose `after` is the file's current content (`admitted_by`), which carries the real time and the moment. A file no entry wrote, such as after a hand edit, has none (CAN-11, #37).
+
+## `canon/events/`
+
+An event, played at the table or offscreen, opens and closes facts on a date (CAN-05).
+
+```markdown
+---
+id: v-0a1b2c3d
+date: "4725-05-01"
+kind: played            # played or offscreen
+opens: [f-22222222]
+closes: [f-11111111]
+replaces: null          # a retcon: the id of the event it replaces
+rank: played
+origin: {kind: observation, quote: "We open the bypass.", locator: "sessions/02.md:1"}
+---
+The party opened the bypass.
+```
+
+- An **evolution** is one event that closes the old fact and opens the new one. Closing a fact that ranks above the event, has already ended, or starts after the event is refused as a contradiction.
+- A **correction** rewrites a fact file in place, with no event. It is refused when the fact is played or ranks above the correction; the previous version stays in the action log entry's `before`.
+- A **retcon** is an event whose `replaces` names an earlier event, with the GM's words as origin. The earlier event stays on record. The retcon takes effect only at the `gm_decision` rank; until then it is `pending_retcon` and the earlier event stays `canon`. Once in effect, the earlier event is `replaced` and the facts only it opened are `retconned`: kept, but left out of searches by default.
+- Nothing is deleted.
+
+## `.secondchair/index.sqlite`
+
+The derived index (CAN-10): entities, facts and events with their derived validity and status, and full-text tables over names, statements and descriptions (CAN-12). It records a fingerprint of `workspace.yaml`, `canon/` and `action-log/`, and any read rebuilds it when they changed. `secondchair check` (in the workspace, or with `-w <workspace>`) rebuilds it from the directory alone, names each invalid file and exits 1 if there is one. Deleting `.secondchair/` loses nothing.
 
 ## What is not in the workspace
 
