@@ -31,8 +31,12 @@ def tools(ws: Workspace) -> list[Tool]:
         ...
 
     return [
-        Tool(fn=roll_initiative, responsibility="rules_and_combat",
-             delegated_action=True, reversible=False),
+        Tool(
+            fn=roll_initiative,
+            responsibility="rules_and_combat",
+            delegated_action=True,
+            reversible=False,
+        ),
     ]
 ```
 
