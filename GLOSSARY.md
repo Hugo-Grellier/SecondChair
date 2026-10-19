@@ -116,6 +116,10 @@ _Avoid_: NPC card, prompt
 
 ## Inputs
 
+**Campaign language**:
+The one language, chosen per campaign, that everything SecondChair generates is written in. Sources may be in any language.
+_Avoid_: locale, GM language, UI language
+
 **Source**:
 A document the user supplies and the tool only reads, never ships: rulebooks, a previous campaign bible, session recordings, VTT exports.
 _Avoid_: corpus, import, data
@@ -153,6 +157,14 @@ _Avoid_: sheet, page, record
 **Fact**:
 One statement about one or more entities, true over a stretch of fictional time, with its provenance and authority rank. The unit of canon.
 _Avoid_: entry, note, lore
+
+**Official reference**:
+An entity's optional pointer to official game content (a creature, a spell, an item), by the stable English key the system extension provides. Its translated name is read from the GM's own install, never stored or shipped.
+_Avoid_: compendium link, official name
+
+**Campaign vocabulary**:
+Every name and alias of the campaign's entities, campaign-made or officially referenced. The only list of proper nouns; nothing else holds one.
+_Avoid_: glossary, lexicon, name list
 
 **Relation**:
 The optional typed link a fact can carry between two entities (member of, lives in, owns, knows), from a closed list the Core defines and a system extension can extend.
