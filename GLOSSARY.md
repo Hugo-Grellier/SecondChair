@@ -72,6 +72,18 @@ _Avoid_: audit trail, history
 A delegated action whose effect cannot be undone once it happens, such as a disclosure. Held at propose unless the GM lifts that limit for the responsibility.
 _Avoid_: destructive action
 
+**Deadline**:
+When a pending call on the GM (proposal, exception, ceiling refusal) must be answered: *now* if it blocks the current turn or scene, otherwise the next break. Set by the Core; the delegation table can force it to now or break per responsibility and moment.
+_Avoid_: priority, urgency
+
+**Break**:
+A point where held calls are shown to the GM: a pause the GM signals, or the end of the moment.
+_Avoid_: pause (as the term), checkpoint
+
+**Safe default**:
+What happens to a call left unanswered at its deadline: a proposal is rejected, an exception takes no action; it is logged and shown again at the break. An irreversible action never takes effect by default.
+_Avoid_: fallback, timeout behaviour
+
 ## Building blocks
 
 **Core**:
@@ -91,8 +103,16 @@ The part of a VTT connector that drives one game system inside that VTT (strikes
 _Avoid_: submodule, plugin, system module
 
 **Surface**:
-A way for the GM to interact with SecondChair: conversation, CLI, later a GUI or a VTT panel.
+A way for the GM to interact with SecondChair: conversation, CLI, the Director's Desk, later a GUI. A Surface only displays; what reaches the GM and when is decided by the Core.
 _Avoid_: UI, frontend, client
+
+**Director's Desk**:
+The minimal Surface inside the VTT, opened as the VTT's GM user: the calls due now, approve or reject with a rejection reason, the active NPC's acting cue, and the pile held for the break.
+_Avoid_: dashboard, GM screen, panel (as the name)
+
+**Acting cue**:
+What the GM needs to voice an NPC right now: goal, what it knows and does not know, a line in the GM's language.
+_Avoid_: NPC card, prompt
 
 ## Inputs
 
@@ -147,7 +167,7 @@ The GM's share of the work in a moment: every GM interaction (approval, rejectio
 _Avoid_: prep time, GM time (as wall-clock time)
 
 **Interruption**:
-Anything that calls for the GM's attention during a live session without the GM asking for it: a pending proposal, a surfaced exception, a ceiling refusal.
+Anything that calls for the GM's attention during a live session without the GM asking for it: a pending proposal, a surfaced exception, a ceiling refusal shown before the break. A call held until the break is not an interruption.
 _Avoid_: prompt, notification
 
 **Rejection reason**:
