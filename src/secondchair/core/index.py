@@ -320,7 +320,7 @@ def _knowledge(calendar: Calendar, front: dict) -> dict:
 # Deriving validity from events (CAN-04, CAN-05)
 
 
-def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events, knowledge):
+def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events, knowledge) -> None:
     # A retcon takes effect only at the GM-decision rank (CAN-05, CAN-09); below that it stays
     # on record, awaiting the GM's confirmation (#38).
     replaced_by = {
