@@ -134,6 +134,42 @@ _Avoid_: fact, event (when meaning canon), log
 What is true in the campaign's fiction, held by the Core. Ranked by authority: played, then GM decision, then cited official source, then agent proposal.
 _Avoid_: lore, truth (as the store's name)
 
+**Entity**:
+Something the fiction talks about (an NPC, a place, a faction, an item, a PC), with a stable identity, its names and a description. It holds no truth by itself: what is true about it is stated by facts.
+_Avoid_: sheet, page, record
+
+**Fact**:
+One statement about one or more entities, true over a stretch of fictional time, with its provenance and authority rank. The unit of canon.
+_Avoid_: entry, note, lore
+
+**Relation**:
+The optional typed link a fact can carry between two entities (member of, lives in, owns, knows), from a closed list the Core defines and a system extension can extend.
+_Avoid_: link, edge, tag
+
+**Event**:
+Something that happened in the fiction, played at the table or offscreen, which starts or ends facts.
+_Avoid_: log entry, occurrence
+
+**Retcon**:
+A GM decision that an event already established in play happened differently. It is recorded as a new event that replaces the earlier one, which stays on record.
+_Avoid_: rewrite, edit
+
+**Correction**:
+Fixing a fact that was recorded wrongly while nothing changed in the fiction and nothing played is contradicted. Unlike a retcon, no event is involved.
+_Avoid_: fix, retcon (when nothing played is changed)
+
+**Knower**:
+Anyone whose knowledge of facts is tracked: the party as a whole, an NPC, or a faction. A knower only knows what is recorded for it, plus what it inherits from its factions and the common knowledge of its places. Individual PCs are not knowers.
+_Avoid_: audience, viewer
+
+**Common knowledge**:
+The facts every inhabitant of a place knows, inherited by each knower who lives there.
+_Avoid_: public knowledge, rumour
+
+**Belief**:
+A knower holding a fact that is false: the fact is recorded as never true, and the knower believes it.
+_Avoid_: lie, misinformation
+
 **Decision**:
 A creative call by the GM, recorded with the GM's own words. Outranks everything except what was played.
 _Avoid_: ruling, choice
