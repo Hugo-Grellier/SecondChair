@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from secondchair.cli import main
-from secondchair.workspace import WorkspaceError, load
+from secondchair.core.workspace import WorkspaceError, load
 
 
 def test_init_creates_a_workspace_with_schema_version_and_language(tmp_path: Path) -> None:
