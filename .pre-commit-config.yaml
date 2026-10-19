@@ -24,6 +24,23 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      - id: biome
+        name: biome lint and format (Foundry modules)
+        entry: npx biome check --no-errors-on-unmatched --files-ignore-unknown=true
+        language: system
+        files: ^(foundry/|[^/]+\.json$)
+      - id: tsc
+        name: tsc --checkJs (Foundry modules)
+        entry: npx tsc --project tsconfig.json
+        language: system
+        files: ^(foundry/|tsconfig\.json$)
+        pass_filenames: false
+      - id: node-test
+        name: node --test (Foundry modules)
+        entry: node --test "foundry/**/*.test.js"
+        language: system
+        files: ^(foundry/|docs/contracts/)
+        pass_filenames: false
       - id: guard-no-workspace
         name: no campaign workspace or Source (LIC-10)
         entry: uv run python scripts/guard_no_workspace.py

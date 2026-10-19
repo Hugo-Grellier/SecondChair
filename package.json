@@ -1,0 +1,16 @@
+{
+  "name": "secondchair-foundry-dev",
+  "private": true,
+  "description": "QA tools for the Foundry modules: Biome, tsc --checkJs and node --test (PKG-22).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "check": "biome ci && tsc && node --test \"foundry/**/*.test.js\""
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "22.20.5",
+    "ajv": "8.20.0",
+    "typescript": "7.0.2"
+  }
+}

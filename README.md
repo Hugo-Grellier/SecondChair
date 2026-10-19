@@ -24,15 +24,18 @@ secondchair reject 3 --reason tone         # contradiction, rules, tone or other
 secondchair log undo 2 --reason rules      # undo an action of the current moment
 ```
 
+To connect Foundry VTT, run `secondchair token` and install the `secondchair-foundry` module as described in [`foundry/README.md`](foundry/README.md). Your browser may ask once whether the Foundry site may connect to services on your computer: allow it.
+
 ## Development
 
 ```sh
 uv sync
+npm ci                              # Biome, tsc and ajv for the Foundry modules
 uv run pre-commit install
-uv run pre-commit run --all-files   # ruff, ty, pytest, the LIC-10 guard, actionlint, zizmor
+uv run pre-commit run --all-files   # ruff, ty, pytest, Biome, tsc --checkJs, node --test, the LIC-10 guard, actionlint, zizmor
 ```
 
-CI runs the same checks on Python 3.14 and 3.15. The spec is in [`docs/spec/`](docs/spec/README.md).
+CI runs the same checks, the Python ones on 3.14 and 3.15. The spec is in [`docs/spec/`](docs/spec/README.md).
 
 The original [sample campaign](sample-campaign/README.md) supplies S0 material,
 synthetic session notes and a frozen reference set under CC BY 4.0.

@@ -1,0 +1,23 @@
+{
+  "id": "secondchair-foundry",
+  "title": "SecondChair",
+  "description": "Connects this world to SecondChair, a campaign director the GM runs on their own computer: the GM's browser opens a WebSocket to the local SecondChair Core. Requires SecondChair installed locally; sends nothing to any AI service by itself.",
+  "version": "0.1.0",
+  "compatibility": {
+    "minimum": "14",
+    "verified": "14"
+  },
+  "authors": [
+    {
+      "name": "Hugo Grellier",
+      "url": "https://github.com/Hugo-Grellier"
+    }
+  ],
+  "esmodules": ["scripts/main.js"],
+  "url": "https://github.com/Hugo-Grellier/SecondChair",
+  "manifest": "https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry/module.json",
+  "download": "https://github.com/Hugo-Grellier/SecondChair/releases/download/secondchair-foundry-v0.1.0/secondchair-foundry.zip",
+  "license": "LICENSE",
+  "readme": "https://github.com/Hugo-Grellier/SecondChair/blob/main/foundry/README.md",
+  "bugs": "https://github.com/Hugo-Grellier/SecondChair/issues"
+}

@@ -15,6 +15,7 @@ my-campaign/
 ├── canon/
 │   └── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
+├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
 └── .secondchair/      # derived state (SQLite index, caches, the write lock); git-ignored, rebuildable
 ```
 
@@ -132,6 +133,8 @@ Un prêtre voûté.
   ```yaml
   port: 7240   # default when the file or the key is absent
   ```
+
+  Next to it, `foundry-token` (mode 0600) holds the token the Foundry module connects with, created by `secondchair token` ([foundry-bridge.md](foundry-bridge.md)).
 
 - **Sources** (raw audio, full transcripts, Foundry worlds, rulebooks) stay outside both; the workspace only references them (PKG-12).
 

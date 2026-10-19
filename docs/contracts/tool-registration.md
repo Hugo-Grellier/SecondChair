@@ -104,4 +104,4 @@ The Core's own read, `campaign_info` (memory, read), returns the campaign langua
 
 ## Versioning
 
-The protocol version is semver and versions this contract and the wire contracts that follow (ARC-17a); before v4.0 a breaking change is free. The Foundry modules' range is checked at the bridge handshake (#47); how a Python block declares its supported range is still open (#77).
+The protocol version is semver and versions this contract and the wire contracts that follow (ARC-17a); before v4.0 a breaking change is free. The Foundry modules' version is checked at the bridge handshake ([foundry-bridge.md](foundry-bridge.md)); how a Python block declares its supported range is still open (#77).

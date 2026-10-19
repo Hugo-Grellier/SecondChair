@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Hugo-Grellier/SecondChair/blob/main/docs/contracts/foundry-bridge.schema.json",
+  "title": "Foundry bridge handshake message",
+  "description": "One message of the handshake on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md).",
+  "oneOf": [
+    {
+      "title": "hello",
+      "description": "Sent once by the module in the GM's browser, right after the socket opens.",
+      "type": "object",
+      "properties": {
+        "type": { "const": "hello" },
+        "protocol": {
+          "type": "string",
+          "description": "The protocol version the module implements (semver)."
+        },
+        "token": { "type": "string", "description": "The token printed by `secondchair token`." },
+        "world": { "type": "string", "minLength": 1, "description": "The Foundry world id." },
+        "campaign": {
+          "type": ["string", "null"],
+          "description": "The campaign id stored in the world, or null when the world is not bound."
+        }
+      },
+      "required": ["type", "protocol", "token", "world", "campaign"],
+      "additionalProperties": false
+    },
+    {
+      "title": "welcome",
+      "description": "The Core accepts the connection. The module stores `campaign` in the world.",
+      "type": "object",
+      "properties": {
+        "type": { "const": "welcome" },
+        "protocol": { "type": "string", "description": "The Core's protocol version." },
+        "campaign": { "type": "string", "minLength": 1 },
+        "campaign_language": { "type": "string" }
+      },
+      "required": ["type", "protocol", "campaign", "campaign_language"],
+      "additionalProperties": false
+    },
+    {
+      "title": "refused",
+      "description": "The Core refuses the connection, then closes the socket.",
+      "type": "object",
+      "properties": {
+        "type": { "const": "refused" },
+        "reason": { "enum": ["malformed", "no_token", "wrong_token", "protocol", "busy", "world"] },
+        "message": { "type": "string", "description": "A message for the GM, in English." }
+      },
+      "required": ["type", "reason", "message"],
+      "additionalProperties": false
+    }
+  ]
+}
