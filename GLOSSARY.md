@@ -118,6 +118,16 @@ _Avoid_: dashboard, GM screen, panel (as the name)
 What the GM needs to voice an NPC right now: goal, what it knows and does not know, a line in the GM's language.
 _Avoid_: NPC card, prompt
 
+## Rules
+
+**Rules check**:
+Checking one observed rules outcome (a roll, damage taken, a spent resource, a condition's progress, an activity's result) for consistency with its own trace. It never recomputes the inputs from a character or from the full rules.
+_Avoid_: validation, rules engine, audit
+
+**Discrepancy**:
+A rules check that fails: what the VTT did does not follow from its own trace. A call on the GM under rules and combat, held for the break by default. Fixing it is a proposal, never automatic.
+_Avoid_: error, bug, rules violation
+
 ## Inputs
 
 **Campaign language**:
