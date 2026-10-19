@@ -190,6 +190,28 @@ _Avoid_: ruling, choice
 What the Core asks the VTT to look like after prep (a scene, its tokens, lights, loot). Realised by reconciliation, which keeps what was played and what the GM retouched.
 _Avoid_: export, sync
 
+## Living world
+
+**Front**:
+A threat that advances on its own, carried by an entity such as a faction: a clock filled by ticks at an anchored rate, and agenda steps it reaches by date or clock threshold. Its state is held as facts.
+_Avoid_: threat, plot, faction AI
+
+**Situation**:
+Something the party can engage with (an opportunity, a quarrel, a project), with hooks, a stage relative to the party, and an optional deadline. Its state is held as facts.
+_Avoid_: quest, adventure, plot hook
+
+**World-turn**:
+The Core's deterministic advance of the world over a stretch of fictional time: due ticks, agenda steps and deadlines, each an occurrence recorded exactly once. Runs between sessions or in prep, never live.
+_Avoid_: simulation, tick (as the whole step)
+
+**Occurrence**:
+One dated effect a world-turn schedules (a tick, an agenda step, a deadline), identified by a key that is used only once, even if rejected.
+_Avoid_: trigger, scheduled event
+
+**Forecast**:
+A read-only look at what coming world-turns would do, used in prep. It writes nothing and moves no fictional time.
+_Avoid_: simulation, dry run, preview
+
 ## Agents
 
 **Agent host**:
