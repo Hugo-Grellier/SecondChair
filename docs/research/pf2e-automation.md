@@ -117,7 +117,7 @@ numbers are approximate anchors. Strikes and movement are out of scope (covered 
 
 ## Observing what humans did
 
-Cast cards carry `flags.pf2e.origin` with roll options; since 8.4/8.5 an actual cast (as opposed to "send to
+Cast cards carry `flags.pf2e.origin` with roll options; since 8.5.0 an actual cast (as opposed to "send to
 chat") is marked by the roll option `origin:action:slug:cast-a-spell`, and self-effect cards carry
 `flags.pf2e.context.type = "self-effect"`. A connector can watch `createChatMessage` and read these instead of
 scraping HTML. [src: commit `df5e905` "Add flag to differentiate actual casting from send-to-chat (#22892)",
@@ -127,7 +127,7 @@ scraping HTML. [src: commit `df5e905` "Add flag to differentiate actual casting 
 
 - **No published API contract.** The repo documents no public module API or deprecation policy; README only
   states the licence. `game.pf2e` is the de facto surface, and "Export module-subclassable classes (#20216,
-  2025-09)" renamed classes (dropped `PF2e` suffixes) without shims. [src: `README.md`, `CONTRIBUTING.md`,
+  2025-09)" also dropped `PF2e` suffixes from class names, i.e. internal names do move. [src: `README.md`, `CONTRIBUTING.md`,
   commit `c3cd3e2`]
 - **Major version = Foundry major.** 7.12.x requires Foundry 13 (`minimum 13.348, maximum 13`); 8.0.0
   (2026-04-10) moved to Foundry 14 only (`minimum 14.360`); 8.6.1 needs `14.361`. A module pins one system
