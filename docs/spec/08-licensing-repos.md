@@ -1,6 +1,6 @@
 # 08 — Licensing and repository split
 
-Decision: [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md); tickets [#4](https://github.com/Hugo-Grellier/SecondChair/issues/4), [#11](https://github.com/Hugo-Grellier/SecondChair/issues/11), [#16](https://github.com/Hugo-Grellier/SecondChair/issues/16), [#22](https://github.com/Hugo-Grellier/SecondChair/issues/22). Not legal advice; open legal uncertainties are listed in the [#4 findings](https://github.com/Hugo-Grellier/SecondChair/blob/research/legal-constraints/research/legal-constraints.md).
+Decision: [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md); tickets [#4](https://github.com/Hugo-Grellier/SecondChair/issues/4), [#11](https://github.com/Hugo-Grellier/SecondChair/issues/11), [#16](https://github.com/Hugo-Grellier/SecondChair/issues/16), [#22](https://github.com/Hugo-Grellier/SecondChair/issues/22). Not legal advice; open legal uncertainties are listed in the [#4 findings](../research/legal-constraints.md).
 
 ## Licences
 
