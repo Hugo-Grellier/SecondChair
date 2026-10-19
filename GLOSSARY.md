@@ -138,6 +138,10 @@ _Avoid_: locale, GM language, UI language
 A document the user supplies and the tool only reads, never ships: rulebooks, a previous campaign bible, session recordings, VTT exports.
 _Avoid_: corpus, import, data
 
+**Sample campaign**:
+Synthetic campaign material written for SecondChair and shipped with it (a campaign bible, session notes, its gold set), in an original setting free of official setting names. Agents read it exactly like a Source, but it is not one: it is shipped, not supplied by the user.
+_Avoid_: demo campaign, fixture, example Source
+
 **Campaign workspace**:
 The directory holding one campaign's canon, decisions and action log. It lives outside the tool and is named by the GM, who may keep it in a private repository of their own. The tool never ships one.
 _Avoid_: campaign repo, vault, bible
