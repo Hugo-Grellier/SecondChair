@@ -44,5 +44,5 @@ None of these contradicts a decision; each is a detail the map left unspecified.
 5. ~~**Event envelope and payload schemas, transcript format, job contract format, workspace layout.**~~ Settled 2026-10-19: written just in time, [02](02-architecture.md), ARC-17a.
 6. ~~**Floors and numeric targets.**~~ Process settled 2026-10-19: [10](10-success-bench.md), MET-05a; the numbers come from the "Set floors" ticket.
 7. ~~**Dogfooding as an acceptance gate.**~~ Settled 2026-10-19: yes, [10](10-success-bench.md), BEN-14.
-8. **Pre-publication pass** (LIC-17): its checklist and who runs it.
+8. ~~**Pre-publication pass.**~~ Settled 2026-10-19: [08](08-licensing-repos.md), LIC-17a.
 9. **Package index** for the Python distribution (PKG-17).

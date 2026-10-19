@@ -40,3 +40,13 @@ Decision: [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md); tickets [#4
 ## Going public
 
 - **LIC-17** The repository goes public at spec hand-off, after a pass checking that no ticket or commit quotes Paizo content or player data.
+- **LIC-17a** The pre-publication pass (settled in planning, 2026-10-19) is the first planning ticket, before any code. Its scope is every issue body and comment, every commit message and diff on every branch, and every file on every branch. Checklist:
+  1. Paizo content: quoted rule text, stat blocks, Beginner Box text, PathfinderWiki or GIS data (bare English keys are fine, LIC-13);
+  2. player data: real names, Discord handles, voice quotes, transcripts, speaker tables;
+  3. restricted third-party text: official translations (LIC-11);
+  4. personal or unrelated information: the owner's other work, notes, mail, personal absolute paths;
+  5. secrets, by a scan of the full history;
+  6. each non-main branch kept or deleted;
+  7. preconditions: the licence files of ADR 0006 are present and the CLA bot is installed (LIC-03), since a public repository accepts pull requests.
+
+  An agent runs the scan and writes a findings report. The GM rules on each finding. Fixes edit issue text, or rewrite history and force-push while the repository is still private. The GM makes the repository public personally.
