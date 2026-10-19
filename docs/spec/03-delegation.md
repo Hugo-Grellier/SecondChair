@@ -30,7 +30,13 @@ Decisions: [ADR 0003](../adr/0003-core-is-the-only-gateway.md), [ADR 0005](../ad
 
 ## Moments
 
-- **DEL-03** Three fixed moments: prep, live session, between sessions. Starting session capture opens *live session*; stopping it opens *between sessions*. The GM can force any moment.
+- **DEL-03** Three fixed moments: prep, live session, between sessions. A moment changes only by an explicit GM gesture, never inferred (no automatic start on VTT login, combat start or idle). Transitions settled in planning, 2026-10-19:
+  - **Start session** (Director's Desk, or `secondchair session start`) opens *live session*: the Core opens a session id, the connector starts durable observation capture tagged with it ("session capture"), the system adapter pushes the current date (CAL-11) and the rules context is recorded (RUL-22). Transcription is not part of it: it runs afterwards from the CLI against that session id.
+  - **End session** (Director's Desk, or `secondchair session end`) stops observation capture and opens *between sessions*.
+  - **Prep** opens only by GM gesture (`secondchair moment prep`), never automatically after the wrap, so the between-sessions log is not frozen while the GM may still undo wrap items.
+  - The GM can force any moment the same way.
+- **DEL-03a** Every moment change requires an authenticated Surface, since entering a moment can loosen effective levels (like DEL-14). An agent may prepare it; the GM confirms in one gesture.
+- **DEL-03b** A live session is never closed automatically in v4. While one is open, starting another session or opening prep is refused until it is ended.
 - **DEL-04** Ending the live session queues the "wrap a session" job ([04](04-canon-memory-capture.md)).
 
 ## Delegation table
