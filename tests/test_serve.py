@@ -54,7 +54,7 @@ def _serving(ws: Path, env: dict[str, str]) -> Generator[str]:
 @pytest.fixture
 def served(tmp_path: Path, machine_config: dict[str, str]) -> Iterator[int]:
     ws = tmp_path / "campaign"
-    main(["init", str(ws), "--language", "fr"])
+    main(["init", str(ws), "--language", "fr", "--calendar", "absalom"])
     with _serving(ws, machine_config) as line:
         assert line.startswith("Serving "), line
         yield int(line.rsplit(":", 1)[1])
@@ -82,7 +82,7 @@ def test_serve_uses_the_port_from_the_machine_configuration(
     config = Path(machine_config["XDG_CONFIG_HOME"]) / "secondchair" / "config.yaml"
     config.write_text(f"port: {port}\n")
     ws = tmp_path / "campaign"
-    main(["init", str(ws), "--language", "fr"])
+    main(["init", str(ws), "--language", "fr", "--calendar", "absalom"])
     with _serving(ws, machine_config) as line:
         assert line.endswith(f"http://127.0.0.1:{port}")
 
@@ -94,7 +94,7 @@ def test_serve_uses_the_port_from_the_machine_configuration(
 def test_serve_refuses_a_workspace_with_another_schema_version(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], version: int, message: str
 ) -> None:
-    main(["init", str(tmp_path), "--language", "fr"])
+    main(["init", str(tmp_path), "--language", "fr", "--calendar", "absalom"])
     config = tmp_path / "workspace.yaml"
     config.write_text(yaml.safe_dump({"schema_version": version, "campaign_language": "fr"}))
 
@@ -117,7 +117,7 @@ def test_serve_refuses_an_invalid_port_in_the_machine_configuration(
     (config_home / "secondchair" / "config.yaml").write_text("port: 70000\n")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
     ws = tmp_path / "campaign"
-    main(["init", str(ws), "--language", "fr"])
+    main(["init", str(ws), "--language", "fr", "--calendar", "absalom"])
 
     assert main(["serve", str(ws)]) == 1
     assert "port must be an integer" in capsys.readouterr().err

@@ -61,6 +61,17 @@ def serve(ws: Workspace, port: int) -> None:
             server.serve_forever()
 
 
+def _calendar_arg(value: str) -> str | dict:
+    """A calendar name, or the content of a `.yaml` / `.yml` file declaring one."""
+    if not value.endswith((".yaml", ".yml")):
+        return value
+    path = Path(value)
+    try:
+        return yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        raise WorkspaceError(f"{path} is not valid YAML: {e}") from e
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="secondchair")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -69,13 +80,20 @@ def main(argv: list[str] | None = None) -> int:
     init_cmd.add_argument(
         "--language", required=True, help="campaign language, a BCP 47 tag; fixed once set"
     )
+    init_cmd.add_argument(
+        "--calendar",
+        required=True,
+        help="campaign calendar, fixed once set: a System extension's calendar name (absalom) "
+        "or a YAML file declaring one",
+    )
     serve_cmd = commands.add_parser("serve", help="serve a campaign workspace on 127.0.0.1")
     serve_cmd.add_argument("workspace", type=Path)
     args = parser.parse_args(argv)
 
     try:
         if args.command == "init":
-            ws = workspace.init(args.workspace, args.language)
+            calendar = _calendar_arg(args.calendar)
+            ws = workspace.init(args.workspace, args.language, calendar)
             print(
                 f"Created campaign workspace {ws.root} (campaign language {ws.campaign_language})"
             )

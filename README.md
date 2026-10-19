@@ -7,7 +7,7 @@ Python 3.14 or later, with [uv](https://docs.astral.sh/uv/):
 
 ```sh
 uv tool install "secondchair @ git+https://github.com/Hugo-Grellier/SecondChair@<tag>"
-secondchair init ~/campaigns/my-campaign --language en
+secondchair init ~/campaigns/my-campaign --language en --calendar absalom
 secondchair serve ~/campaigns/my-campaign
 ```
 
