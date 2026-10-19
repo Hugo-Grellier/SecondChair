@@ -7,7 +7,8 @@ from pathlib import Path
 
 import yaml
 
-from secondchair.core import workspace
+from secondchair.core import delegation, workspace
+from secondchair.core.delegation import DelegationError
 from secondchair.core.server import LOOPBACK, MCP_PATH, serve
 from secondchair.core.tools import RegistrationError
 from secondchair.core.workspace import WorkspaceError
@@ -72,6 +73,31 @@ def _calendar_arg(value: str) -> str | dict:
         raise WorkspaceError(f"{path} is not valid YAML: {e}") from e
 
 
+def interactive() -> bool:
+    """Whether the GM is at an interactive terminal: the CLI's authenticated Surface (ARC-13)."""
+    return sys.stdin.isatty()
+
+
+def _gm_command(args: argparse.Namespace) -> str:
+    """Run a GM gesture on the workspace; the message to print."""
+    ws = workspace.load(args.workspace)
+    auth = interactive()
+    if args.command == "moment":
+        if not auth:  # DEL-03a
+            raise DelegationError("Changing the moment needs an interactive terminal.")
+        if not delegation.change_moment(ws, args.moment):
+            return f"Already in {args.moment}."
+        return f"Moment: {args.moment}. The previous moment's action log is frozen."
+    if args.command == "approve":
+        delegation.approve(ws, args.entry, "cli", auth)
+        return f"Approved and applied entry {args.entry}."
+    if args.command == "reject":
+        delegation.reject(ws, args.entry, args.reason, "cli", auth)
+        return f"Rejected entry {args.entry} ({args.reason})."
+    delegation.undo(ws, args.entry, args.reason, "cli", auth)
+    return f"Undid entry {args.entry} ({args.reason})."
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="secondchair")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -92,6 +118,27 @@ def main(argv: list[str] | None = None) -> int:
     host_sub = host_cmd.add_subparsers(dest="host_command", required=True)
     setup_cmd = host_sub.add_parser("setup", help="print the configuration for an agent host")
     setup_cmd.add_argument("host", choices=sorted(HOST_SETUP))
+    in_workspace = argparse.ArgumentParser(add_help=False)
+    in_workspace.add_argument(
+        "-w", "--workspace", type=Path, default=Path(), help="campaign workspace (default: .)"
+    )
+    reason = argparse.ArgumentParser(add_help=False)
+    reason.add_argument("--reason", required=True, choices=delegation.REASONS)
+    moment_cmd = commands.add_parser(
+        "moment", parents=[in_workspace], help="change the current moment (interactive only)"
+    )
+    moment_cmd.add_argument("moment", choices=delegation.MOMENTS)
+    for name, help_text, parents in (
+        ("approve", "approve a pending action", [in_workspace]),
+        ("reject", "reject a pending action", [in_workspace, reason]),
+    ):
+        commands.add_parser(name, parents=parents, help=help_text).add_argument("entry", type=int)
+    log_cmd = commands.add_parser("log", help="the action log")
+    log_sub = log_cmd.add_subparsers(dest="log_command", required=True)
+    undo_cmd = log_sub.add_parser(
+        "undo", parents=[in_workspace, reason], help="undo an action of the current moment"
+    )
+    undo_cmd.add_argument("entry", type=int)
     args = parser.parse_args(argv)
 
     try:
@@ -103,9 +150,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "host":
             print(host_setup(args.host), end="")
-        else:
+        elif args.command == "serve":
             serve(workspace.load(args.workspace), configured_port())
-    except (WorkspaceError, MachineConfigError, RegistrationError, OSError) as e:
+        else:
+            print(_gm_command(args))
+    except (
+        WorkspaceError,
+        MachineConfigError,
+        RegistrationError,
+        DelegationError,
+        OSError,
+    ) as e:
         print(f"secondchair: {e}", file=sys.stderr)
         return 1
     return 0

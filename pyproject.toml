@@ -25,6 +25,7 @@ core = "secondchair.core.campaign:tools"
 [dependency-groups]
 dev = [
     "actionlint-py",
+    "jsonschema>=4.26.0",
     "pre-commit",
     "pytest",
     "ruff",

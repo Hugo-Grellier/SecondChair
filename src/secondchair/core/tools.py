@@ -54,6 +54,17 @@ class Tool:
         return getattr(self.fn, "__name__", repr(self.fn))
 
 
+@dataclass(frozen=True)
+class Change:
+    """What a delegated action's `fn` returns: the workspace file it writes. The Core, not the
+    block, logs it and applies it at the effective level (ARC-04).
+    ponytail: one workspace file per action; VTT actions extend this with the connector (#47)."""
+
+    path: str  # relative to the workspace root
+    after: str | None  # the file's new content, None to delete it
+    source: str | None = None  # what the action draws on, recorded in the log (DEL-24)
+
+
 def load_tools(ws: Workspace) -> list[Tool]:
     """Every tool the installed blocks register, or `RegistrationError` naming the block."""
     tools: dict[str, Tool] = {}

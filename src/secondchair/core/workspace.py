@@ -50,6 +50,9 @@ def init(root: Path, language: str, calendar: str | dict) -> Workspace:
             sort_keys=False,
         )
     )
+    from secondchair.core import delegation  # it builds on this module
+
+    delegation.seed(root)
     gitignore = root / ".gitignore"
     lines = gitignore.read_text().splitlines() if gitignore.exists() else []
     if f"{STATE_DIR}/" not in lines:
