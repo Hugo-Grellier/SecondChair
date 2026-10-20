@@ -10,6 +10,9 @@
    `https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry/module.json`
 4. Enable the module in your world. As GM, open **Configure Settings → SecondChair**, paste the token into **Core token**, and set **Core port** if you changed it from 7240. Both settings stay in this browser only.
 5. Reload. A notification says "connected to the Core", or why the Core refused.
+6. For a Pathfinder Second Edition world, also install **SecondChair for Pathfinder Second Edition** from its manifest URL,
+   `https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry-pf2e/module.json`,
+   and enable it. It targets Foundry v14 with the pf2e system 8.x and stays off on any other pair. A French campaign also needs the official translation module **pf2-fr** enabled: without it SecondChair refuses to connect and says so.
 
 **Your browser may ask once before connecting.** Firefox, and recent Chrome versions, ask for each site whether it may connect to services on your own computer (the "local network" or "apps and services on this device" prompt). Allow it for your Foundry site. If you refused it, the module reports that it cannot reach the Core: allow the site in the browser's site permissions, then reload.
 

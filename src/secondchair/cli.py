@@ -191,13 +191,20 @@ def _gm_command(args: argparse.Namespace) -> str:
         if not auth:  # DEL-03a
             raise DelegationError("Starting or ending a session needs an interactive terminal.")
         if args.action == "start":
-            return f"Session {delegation.start_session(ws)} started: moment live-session."
+            started = f"Session {delegation.start_session(ws)} started: moment live-session."
+            return _session_started(ws, started)
         notes = str(Path(args.notes).expanduser().resolve()) if args.notes else None
         live = delegation.end_session(ws, notes)
         return (
             f"Session {live} ended: moment between-sessions. "
             'Job "wrap a session" queued (secondchair jobs).'
         )
+    if args.command == "date":
+        if args.date is None:
+            return capture.time(ws)["current_date"] or "The campaign has no current date yet."
+        if not auth:  # the current date moves only through the wrap or a GM gesture (CAL-14)
+            raise DelegationError("Setting the current date needs an interactive terminal.")
+        return f"Current date: {capture.set_current_date(ws, args.date)}."
     if args.command == "override":
         o = (args.entity, args.responsibility)
         if args.override_command == "add":
@@ -406,13 +413,29 @@ def _in_vtt(ws: workspace.Workspace, entry_id: int) -> bool:
     return path.is_file() and "op" in delegation.read_entry(ws, entry_id)
 
 
-def _relay(ws: workspace.Workspace, gesture: dict) -> None:
-    """Have the Core serving the campaign take a GM gesture on a VTT action: only that process
-    holds the GM client (PKG-10)."""
-    not_served = DelegationError(
+def _session_started(ws: workspace.Workspace, message: str) -> str:
+    """`message`, then what the VTT did for the new live session (the current date pushed into
+    its clock, CAL-11), when a Core serves the campaign: only that process holds the GM client."""
+    if not (ws.root / STATE_DIR / SERVE_FILE).is_file():
+        return message
+    try:
+        done = _relay(ws, {"gesture": "session_start"}, "No Core serves the campaign.")
+    except DelegationError as e:
+        return f"{message}\nThe VTT was not told the session started: {e}"
+    return f"{message}\n{done['message']}" if done.get("message") else message
+
+
+def _relay(
+    ws: workspace.Workspace,
+    gesture: dict,
+    not_served_message: str = (
         "This entry is a VTT action: `secondchair serve` the campaign, with its world open as GM, "
         "then try again."
-    )
+    ),
+) -> dict:
+    """Have the Core serving the campaign take a GM gesture on a VTT action: only that process
+    holds the GM client (PKG-10)."""
+    not_served = DelegationError(not_served_message)
     token = machine.foundry_token()
     try:
         port = json.loads((ws.root / STATE_DIR / SERVE_FILE).read_text())["port"]
@@ -424,7 +447,8 @@ def _relay(ws: workspace.Workspace, gesture: dict) -> None:
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
     )
     try:
-        urllib.request.urlopen(request, timeout=60).close()
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read())
     except urllib.error.HTTPError as e:
         try:
             message = json.loads(e.read())["error"]
@@ -483,6 +507,11 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "break", parents=[in_workspace], help="signal a break and show the calls held for it"
     )
+    commands.add_parser(
+        "date",
+        parents=[in_workspace],
+        help="show the campaign's current date, or set it (interactive only)",
+    ).add_argument("date", nargs="?", help="a full date of the campaign calendar, YYYY-MM-DD")
     override_cmd = commands.add_parser(
         "override", help="lower the delegation level for one acting entity"
     )

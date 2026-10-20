@@ -121,7 +121,7 @@
         "target": {
           "type": "string",
           "minLength": 1,
-          "description": "The Foundry UUID of the document acted on."
+          "description": "The Foundry UUID of the document acted on. `time` for the world clock (`set_date`)."
         },
         "params": {
           "type": "object",
@@ -157,8 +157,37 @@
       "additionalProperties": false
     },
     {
+      "title": "read",
+      "description": "The Core asks the GM client something only the VTT knows. Nothing changes in the VTT, so a read is neither queued nor recorded as handled.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "read"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What to read, answered by the system adapter: rules_context, official_name."
+        },
+        "params": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "op",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    {
       "title": "reply",
-      "description": "The GM client's answer to a request.",
+      "description": "The GM client's answer to a request or a read.",
       "type": "object",
       "oneOf": [
         {
@@ -187,6 +216,29 @@
             "ok",
             "before",
             "after"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "reply"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ok": {
+              "const": true
+            },
+            "result": {
+              "description": "What the read found."
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ok",
+            "result"
           ],
           "additionalProperties": false
         },
@@ -733,6 +785,10 @@
             "$ref": "#/$defs/desk_call"
           },
           "description": "break only: the break pile, open calls due at the break and calls defaulted since the last break (DEL-32)."
+        },
+        "message": {
+          "type": "string",
+          "description": "start_session only: what the VTT did for the new session, such as the current date pushed into its clock (CAL-11), for the GM."
         }
       },
       "required": [

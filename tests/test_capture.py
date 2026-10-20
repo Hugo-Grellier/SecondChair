@@ -3,6 +3,7 @@ quote the GM's notes verbatim, the wrap job routes them by class, and the GM's w
 session interval, advances the current date and queues the world-turn."""
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -330,6 +331,76 @@ def test_the_wrap_asks_for_the_interval_when_unknown_and_refuses_going_back(
     with pytest.raises(delegation.DelegationError, match="before 4726-01-05"):
         capture.wrap(ws, 2, authenticated=True, end="4726-01-04")
     assert capture.time(ws)["current_date"] == "4726-01-05"
+
+
+def clock(ws: Workspace, session: int, *dates: str) -> None:
+    """The VTT clock observed on `dates` during `session` (CAL-12), as the bridge records it."""
+    path = ws.root / "observations" / f"{session:06d}.jsonl"
+    path.parent.mkdir(exist_ok=True)
+    with path.open("a") as f:
+        for n, date in enumerate(dates):
+            envelope = {
+                "id": f"c{n}",
+                "session": session,
+                "at": f"2026-10-20T20:{n:02d}:00+00:00",
+                "scene": None,
+                "actor": None,
+                "kind": "clock",
+                "visibility": "gm",
+                "payload": {"date": date, "world_time": n},
+            }
+            f.write(json.dumps(envelope) + "\n")
+
+
+def test_with_no_notes_the_observed_clock_settles_the_interval(ws: Workspace) -> None:
+    clock(ws, 1, "4726-01-01", "4726-01-03", "4726-01-04")
+
+    summary = capture.wrap(ws, 1, authenticated=True)
+
+    assert summary["settled"] == {
+        "start": "4726-01-01",
+        "end": "4726-01-04",
+        "from": "clock",
+        "wrapped": True,
+    }
+    assert capture.time(ws)["current_date"] == "4726-01-04"
+
+
+def test_notes_agreeing_with_the_clock_settle_it_and_disagreeing_ask_the_gm(
+    ws: Workspace,
+) -> None:
+    job = wrap_job(ws)
+    capture.report_interval(
+        ws, job, "4726-01-01", "4726-01-02", "fictional interval 0302-04-25 to 0302-04-26"
+    )
+    jobs.end(ws, job)
+    clock(ws, 1, "4726-01-01", "4726-01-05")
+
+    with pytest.raises(
+        delegation.DelegationError, match=r"4726-01-05\. Give the interval \(--start, --end\)"
+    ):
+        capture.wrap(ws, 1, authenticated=True)
+    settled = capture.wrap(ws, 1, authenticated=True, end="4726-01-05")["settled"]
+
+    assert (settled["end"], settled["from"]) == ("4726-01-05", "gm")
+
+
+def test_notes_the_clock_confirms_settle_the_interval(ws: Workspace) -> None:
+    job = wrap_job(ws)
+    capture.report_interval(
+        ws, job, "4726-01-01", "4726-01-02", "fictional interval 0302-04-25 to 0302-04-26"
+    )
+    jobs.end(ws, job)
+    clock(ws, 1, "4726-01-01", "4726-01-02")
+
+    assert capture.wrap(ws, 1, authenticated=True)["settled"]["from"] == "notes"
+
+
+def test_the_gm_sets_the_current_date_from_an_interactive_terminal(ws: Workspace) -> None:
+    assert capture.set_current_date(ws, "4726-01-09") == "4726-01-09"
+    assert capture.time(ws)["current_date"] == "4726-01-09"
+    with pytest.raises(delegation.DelegationError, match="calendar"):
+        capture.set_current_date(ws, "4726-13-40")
 
 
 def test_the_wrap_job_captures_and_consolidates_over_mcp(ws: Workspace) -> None:

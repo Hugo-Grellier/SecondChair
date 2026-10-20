@@ -13,11 +13,30 @@ interface FoundrySettingConfig {
   onChange?: (value: unknown, options: object, userId?: string) => unknown;
 }
 
+interface FoundryModule {
+  id: string;
+  active: boolean;
+  version: string;
+}
+
+interface FoundryPack {
+  collection: string;
+  getIndex(options: { fields: string[] }): Promise<
+    Iterable<{
+      _id: string;
+      name: string;
+      system?: { slug?: string | null };
+      flags?: { babele?: { originalName?: string } };
+    }>
+  >;
+}
+
 declare const game: {
   settings: {
     register(module: string, key: string, config: FoundrySettingConfig): void;
     get(module: string, key: string): unknown;
     set(module: string, key: string, value: unknown): Promise<unknown>;
+    settings: Map<string, unknown>;
   };
   user: {
     id: string;
@@ -49,7 +68,20 @@ declare const game: {
       },
     ): void;
   };
-  modules: { get(id: string): object | undefined };
+  /** A Foundry Collection: iterating it yields the values. */
+  modules: Iterable<FoundryModule> & {
+    get(id: string): (FoundryModule & { api?: object }) | undefined;
+  };
+  packs: Iterable<FoundryPack>;
+  version: string;
+  release: { generation: number };
+  system: { id: string; version: string };
+  time: { worldTime: number; advance(seconds: number): Promise<unknown> };
+  /** The pf2e system: its world clock is Luxon's DateTime, Gregorian. */
+  pf2e: {
+    worldClock: { worldTime: { year: number; month: number; day: number } };
+    system: { sluggify(text: string): string };
+  };
   scenes: {
     get(id: string): { uuid: string } | undefined;
     active: { uuid: string } | null;
@@ -65,9 +97,11 @@ declare const game: {
 declare function fromUuid(uuid: string): Promise<object | null>;
 
 declare const Hooks: {
-  once(hook: string, fn: () => unknown): number;
+  // biome-ignore lint/suspicious/noExplicitAny: each hook passes its own arguments
+  once(hook: string, fn: (...args: any[]) => unknown): number;
   // biome-ignore lint/suspicious/noExplicitAny: each hook passes its own arguments
   on(hook: string, fn: (...args: any[]) => unknown): number;
+  callAll(hook: string, ...args: unknown[]): boolean;
 };
 
 interface ChatMessageLike {

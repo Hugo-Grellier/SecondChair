@@ -96,3 +96,18 @@ def find(ws: Workspace, locator: str) -> dict | None:
         if isinstance(observation, dict) and observation.get("id") == id_:
             return observation
     return None
+
+
+def of_session(ws: Workspace, session: int | None) -> list[dict]:
+    """Every observation recorded for a live session (None: outside sessions), in capture time
+    order: one delivered late after a reconnection takes its place."""
+    file = ws.root / path(session)
+    found = []
+    for line in file.read_text().splitlines() if file.is_file() else []:
+        try:
+            observation = json.loads(line)
+        except ValueError:
+            continue  # a line cut short by a crash
+        if isinstance(observation, dict) and problem(observation) is None:
+            found.append(observation)
+    return sorted(found, key=lambda o: datetime.fromisoformat(o["at"]))

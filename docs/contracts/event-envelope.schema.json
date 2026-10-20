@@ -32,7 +32,7 @@
     "kind": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$",
-      "description": "Generic kinds: chat, combat, scene. A System extension's kinds are prefixed by its system id (pf2e.strike) and their payload schemas ship with it."
+      "description": "Generic kinds: chat, combat, scene, ceiling; clock and rules_context, filled by a system adapter. A System extension's kinds are prefixed by its system id (pf2e.strike) and their payload schemas ship with it."
     },
     "visibility": {
       "enum": ["players", "gm", "blind"],
@@ -40,7 +40,7 @@
     },
     "payload": {
       "type": "object",
-      "description": "The kind's content. chat: {author, speaker, text, flavor, whisper, rolls}; combat: {action, combat, round, turn, combatant}; scene: {action, name}."
+      "description": "The kind's content. chat: {author, speaker, text, flavor, whisper, rolls}; combat: {action, combat, round, turn, combatant}; scene: {action, name}; clock: {date, world_time}; rules_context: {foundry, system, system_version, modules, settings}."
     }
   },
   "required": ["id", "session", "at", "scene", "actor", "kind", "visibility", "payload"],

@@ -1,5 +1,5 @@
 // secondchair-foundry: the active GM's browser dials the loopback Core (ADR 0010).
-import { CEILING, createActions } from "./actions.js";
+import { CEILING, createActions, missingTranslation } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
 import { createDesk, deskHtml } from "./desk.js";
@@ -141,6 +141,7 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
         try {
           const result = await desk?.gesture(String(gesture), fields);
           if (result && !result.ok) ui.notifications.error(`SecondChair: ${result.error}`);
+          else if (result?.message) ui.notifications.info(`SecondChair: ${result.message}`);
         } catch (error) {
           ui.notifications.error(`SecondChair: ${/** @type {Error} */ (error).message}`);
         }
@@ -177,7 +178,7 @@ function showDesk(force = false) {
 }
 
 Hooks.once("init", () => {
-  /** @type {{api?: object}} */ (game.modules.get(MODULE)).api = {
+  const api = {
     /** @param {Adapter} systemAdapter */
     registerAdapter: (systemAdapter) => {
       adapter = systemAdapter;
@@ -188,6 +189,9 @@ Hooks.once("init", () => {
      */
     trace: (event, data = {}) => recorder?.record("semantic", { ...data, event }),
   };
+  /** @type {{api?: object}} */ (game.modules.get(MODULE)).api = api;
+  // A system adapter registers through this hook (ARC-08, ADR 0004), whatever the load order.
+  Hooks.callAll("secondchairFoundryInit", api);
   // Client settings live in this browser only: the token never reaches the Foundry server.
   game.settings.register(MODULE, "token", {
     name: "Core token",
@@ -292,6 +296,7 @@ Hooks.once("ready", () => {
     return;
   }
   watch();
+  adapter?.observe?.((event) => capture.observe(event));
   const url = coreUrl(Number(game.settings.get(MODULE, "port")));
   const campaign = String(game.settings.get(MODULE, "campaign") ?? "");
   // ponytail: no reconnection yet; reload the world to dial again.
@@ -299,7 +304,16 @@ Hooks.once("ready", () => {
     url,
     hello: hello({ token, world: game.world.id, campaign }),
     onWelcome: async (welcome, socket) => {
+      const language = welcome.campaign_language;
+      const active = (/** @type {string} */ id) => game.modules.get(id)?.active === true;
+      const missing = missingTranslation(adapter, language, active);
+      if (missing) {
+        socket.close();
+        ui.notifications.error(`SecondChair: ${missing}`, { permanent: true });
+        return;
+      }
       const actions = createActions({
+        language: () => language,
         resolve: async (uuid) => /** @type {Doc | null} */ (await fromUuid(uuid)),
         // Handled requests live on the GM user, so a reload still knows them (BVE-02).
         store: {
@@ -329,6 +343,8 @@ Hooks.once("ready", () => {
           if (desk?.receive(message)) return;
           if (message.type === "request")
             socket.send(JSON.stringify(await actions.handle(message)));
+          else if (message.type === "read")
+            socket.send(JSON.stringify(await actions.read(message)));
           else if (message.type === "session") capture.setSession(message.session);
           else if (message.type === "ack") {
             if (!message.ok) console.error("SecondChair: observation refused:", message.error);

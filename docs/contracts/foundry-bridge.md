@@ -1,6 +1,6 @@
 # Contract: the Foundry bridge and its handshake
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Messages: [`foundry-bridge.schema.json`](foundry-bridge.schema.json), with observations in [`event-envelope.schema.json`](event-envelope.schema.json), validated by the Python tests and the module's `node --test`. Requirements: ARC-06, ARC-07, ARC-10, ARC-16, ARC-17, ARC-18, CAP-03, CAP-08, BVE-02, PKG-07, PKG-08, PKG-09, PKG-10, PKG-14, TRC-01, TRC-02, TRC-04, TRC-05.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Messages: [`foundry-bridge.schema.json`](foundry-bridge.schema.json), with observations in [`event-envelope.schema.json`](event-envelope.schema.json), validated by the Python tests and the module's `node --test`. Requirements: ARC-06, ARC-07, ARC-10, ARC-16, ARC-17, ARC-18, CAP-03, CAP-08, BVE-02, PKG-07, PKG-08, PKG-09, PKG-10, PKG-14, TRC-01, TRC-02, TRC-04, TRC-05, ARC-08, RUL-02, RUL-22, CAN-20, CAN-21, CAL-10..14.
 
 ## Who dials whom
 
@@ -63,7 +63,7 @@ A delegated action that acts in the VTT returns a `VttAction` ([tool-registratio
 - `target` is the Foundry UUID of the document acted on; `params` the fields to set; `before` and `after` the fields the module read before and after, which the Core logs.
 - `level` is the delegation level the Core takes the action at: the entry's effective level when it acts or the GM approves (an approved proposal is at `propose`), null for the GM's undo. The module checks it against the ceiling (below).
 - `expect`, when not null, holds the fields the document must still have: an **undo** sends the logged `before` as `params` and the logged `after` as `expect`, so a token the GM moved by hand since is not moved back.
-- **Generic operations**, taken by `secondchair-foundry` itself: `move_token` (a Token's `x`, `y`), `set_door` (a Wall's `ds`: 0 closed, 1 open, 2 locked), and the disclosures `reveal_token` (a Token's `hidden`) and `publish_journal` (a JournalEntry's `ownership.default`, set to 2, observer: a dotted field names a nested one, in `params`, `before` and `after`). Any other `op` is a **mechanical action**, handed to the system adapter that registered it through `game.modules.get("secondchair-foundry").api.registerAdapter({ops: {<op>: async (doc, params, expect) => ({before, after})}})`. With no adapter, the module refuses it (ARC-09).
+- **Generic operations**, taken by `secondchair-foundry` itself: `move_token` (a Token's `x`, `y`), `set_door` (a Wall's `ds`: 0 closed, 1 open, 2 locked), and the disclosures `reveal_token` (a Token's `hidden`) and `publish_journal` (a JournalEntry's `ownership.default`, set to 2, observer: a dotted field names a nested one, in `params`, `before` and `after`). Any other `op` is a **mechanical action**, handed to the system adapter ([below](#system-adapters-arc-08-adr-0004)) as `ops[op](target, params, expect)`, which resolves its own target. With no adapter, the module refuses it (ARC-09).
 - **Idempotent write queue** (transplanted from v3, BVE-02): the module records each request id on the GM user before and after taking it, so a replayed id gets its first reply back and is never applied twice, even after a reload; a request a reload interrupted is answered with an error asking the GM to check the VTT. Requests are taken one at a time.
 - A **failed action** is one the VTT did not take: no GM client connected, a refusal (`ok: false`), or no reply within 15 seconds. The Core logs it with status `failed` and the error, and the agent gets the error. Nothing is retried.
 
@@ -116,7 +116,7 @@ While a live session is open, the module captures what happens at the table as *
 ```
 
 - **Session**: the Core sends `session` right after `welcome` and whenever `secondchair session start|end` opens or ends one (it looks at `moment.yaml` every second): the live session id, or null. The module captures only while it is not null, and tags every envelope with it.
-- **Generic kinds**, captured by `secondchair-foundry`: `chat` (every chat message: author, speaker, text, flavor, whisper recipients' names, rolls' formula and total), `combat` (`start`, `round`, `turn`, `end`, with the combatant), `scene` (`activate`), and `ceiling` (above), the one kind also captured outside a live session. A system adapter's kinds are prefixed by its system id and their payload schemas ship with it.
+- **Generic kinds**, captured by `secondchair-foundry`: `chat` (every chat message: author, speaker, text, flavor, whisper recipients' names, rolls' formula and total), `combat` (`start`, `round`, `turn`, `end`, with the combatant), `scene` (`activate`), and `ceiling` (above); and `clock` and `rules_context`, which a system adapter fills ([below](#the-rules-context-and-the-world-clock-rul-22-cal-10cal-14)). These three are captured in every moment, with `session: null` outside a live session. A system adapter's own kinds are prefixed by its system id and their payload schemas ship with it.
 - **Visibility** (ARC-16): `players` when the whole table saw it; `gm` when it was not shown to the table (GM-only, a whisper even to a player, a hidden combatant's turn); `blind` for a blind roll. Only `players` attests what the party knows: the Core refuses a party knowledge record whose origin quotes a `gm` or `blind` observation (CAP-08: a whisper or a blind roll becomes a call held for the wrap).
 - **Durable capture** (transplanted from v3, BVE-02): the module keeps each envelope in the browser's local storage before sending it, and drops it only on its `ack`. Whatever is held (sent before a reload, or captured while the Core was unreachable) is resent on the next welcome. The Core appends each envelope to `observations/<session>.jsonl` in the workspace (`observations/outside-sessions.jsonl` for `session: null`), once per id, before acknowledging it, so a resent envelope is never recorded twice. An envelope the Core cannot take (malformed, or for a session not yet opened) is acknowledged with `ok: false` and an `error`, and the module drops it.
 
@@ -169,3 +169,39 @@ Behaviour traces record how each consenting user operates Foundry, in every mome
 
 - **Where they are kept** (TRC-04): the Core appends each record, tagged with the current `moment` and its `seq`, to `$XDG_DATA_HOME/secondchair/traces/<campaign id>/<user id>.jsonl` (default `~/.local/share/secondchair/`), a Source on the GM's machine, outside the workspace, never sent anywhere. Nothing expires them in v4: `erase_traces` deletes a user's file and rewrites the reports that listed their gaps, and the GM may delete any file. Traces are not acknowledged; a message the Core cannot read or keep is lost like one with no GM client.
 - **Report**: when a gap arrives, the Core rewrites that moment's friction report in the workspace ([workspace-layout.md](workspace-layout.md#frictions)).
+
+### System adapters (ARC-08, ADR 0004)
+
+A system adapter is its own Foundry module that requires `secondchair-foundry` and registers through a hook the library calls once, during Foundry's `init`, so a third party can ship one from its own repository (LIC-08):
+
+```js
+Hooks.once("secondchairFoundryInit", (api) => api.registerAdapter({
+  ops: {set_date: async (target, params, expect) => ({before, after})},  // mechanical actions
+  reads: {rules_context: async (params, {language}) => …, official_name: …},  // see Reads
+  translations: {fr: "pf2-fr"},                    // campaign language -> required module
+  observe: (emit) => { /* emit({kind, visibility, payload, anytime}) on Foundry hooks */ },
+}));
+```
+
+- **Translation module** (CAN-21, RUL-18): when the welcome's `campaign_language`, or its primary subtag, has an entry in `translations` and that module is not active in the world, the module closes the socket and tells the GM, in a permanent notification, which module to install and enable. It stays disconnected until the GM reloads with it enabled.
+- `observe` hands the adapter the library's durable capture: what it emits is an observation like the library's own.
+- `secondchair-foundry-pf2e` is the first adapter. It targets **Foundry v14 + pf2e 8.x** (RUL-02): its manifest declares that pair, so Foundry warns elsewhere, and on any other Foundry generation or pf2e major it does not register and tells the GM why; SecondChair then runs without an adapter (ARC-09). It requires `pf2-fr` for a `fr` campaign.
+
+### Reads (CAN-20, RUL-22)
+
+What only the VTT knows, asked by the Core: `{"type": "read", "id", "op", "params"}`, answered `{"type": "reply", "id", "ok": true, "result": …}`, or with `ok: false` and an `error`. A read changes nothing, so it is neither queued nor recorded with the handled requests. The library answers it with the adapter's `reads[op](params, {language})` and refuses it when there is none. With no GM client, or no reply within 15 seconds, the read fails with a message for the agent.
+
+| `op` | `params` | `result` (PF2e adapter) |
+|---|---|---|
+| `rules_context` | `{}` | `{foundry, system, system_version, modules: {<active module id>: <version>}, settings: {<pf2e rules setting>: <value>}}` |
+| `official_name` | `{key, pack}` | `{name, key, pack}`: the name in the GM's install, the stable English key (`system.slug`, else pf2e's slug of the English name), and the pack only when the key is in several packs |
+
+`official_name` matches `key` against each compendium index entry's slug or English name (`flags.babele.originalName`, else its name); several packs holding it with no `pack` given is an error naming them. The `name` is the translated name with pf2-fr's `vf-vo` suffix (` (<English name>)`) stripped. It is `null` when the entry has no translation in a non-English campaign: an official name is never machine-translated silently, so an agent proposes one or the GM chooses (CAN-21). `doc.name` is only ever a label. The Core's `official_name` tool returns `{name, official_reference: {key, pack}}`, ready for `create_entity`.
+
+### The rules context and the world clock (RUL-22, CAL-10..14)
+
+- **Rules context**: the Core reads `rules_context` when the GM client connects and at the start of each moment (it looks at `moment.yaml` every second), and records it as a `rules_context` observation (visibility `gm`) unless it is the one already recorded in that moment. Toggling a module in Foundry reloads the client, which connects again. The adapter also emits one when a rules setting changes.
+- **Clock advances** (CAL-12): the adapter emits a `clock` observation (`{date, world_time}`, visibility `gm`) at every advance of the world clock, its date read in the campaign calendar (PF2e: Absalom Reckoning, the world clock's Gregorian year plus 2700).
+- **Session start** (CAL-10, CAL-11): the Director's Desk's Start session, or `secondchair session start` while a Core serves the campaign (it relays `{"gesture": "session_start"}` to `POST /gm`), also pushes the current date. When the campaign calendar is a System extension's named calendar (`calendar: absalom`) and the campaign has a current date (`time.yaml`), that Core takes `set_date` with target `time`, `params` `{calendar, date}` and level null (a GM gesture, not bounded by the ceiling). The adapter moves the world clock by whole days, keeping its time of day, and the Core records the date it reports after as the session's first `clock` observation. A declared calendar is never synced. The CLI prints what was done; the Desk shows it from its `result`'s `message`.
+- The PF2e adapter refuses `set_date` for another calendar, a date after 28 Calistril 4800 AR, where the PF2e clock drifts from Absalom Reckoning (CAL-13), or a date the Gregorian clock lacks (29 Calistril of 4500, 4600, …). That failed action is reported to the GM (CLI or Desk) and is not an action log entry, since no delegated action took it; the session starts anyway. The push happens at that gesture only: the Core never writes the clock during play. Without a served Core or a GM client the session still starts and the clock is not pushed.
+- **Session interval** (CAL-14): the first and last `clock` dates observed in a live session propose its fictional interval at the wrap: `secondchair wrap` takes it when the GM's notes give none, and asks the GM when the two disagree ([workspace-layout.md](workspace-layout.md#timeyaml)).

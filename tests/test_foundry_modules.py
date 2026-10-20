@@ -14,6 +14,16 @@ def test_the_library_module_is_there() -> None:
     assert FOUNDRY / "secondchair-foundry" in MODULES
 
 
+def test_the_pf2e_adapter_requires_the_library_on_foundry_14_and_pf2e_8() -> None:
+    """ARC-08, RUL-01, RUL-02: Foundry refuses to enable it elsewhere, before its own check."""
+    manifest = json.loads((FOUNDRY / "secondchair-foundry-pf2e/module.json").read_text())
+    assert manifest["compatibility"]["maximum"] == "14"
+    [system] = manifest["relationships"]["systems"]
+    assert system["id"] == "pf2e"
+    assert (system["compatibility"]["minimum"], system["compatibility"]["maximum"]) == ("8", "8")
+    assert [r["id"] for r in manifest["relationships"]["requires"]] == ["secondchair-foundry"]
+
+
 @pytest.mark.parametrize("module", MODULES, ids=lambda p: p.name)
 def test_the_manifest_is_catalogue_compliant(module: Path) -> None:
     manifest = json.loads((module / "module.json").read_text())
