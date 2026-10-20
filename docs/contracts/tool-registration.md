@@ -98,7 +98,9 @@ The Core adds a required `agent` string argument to every delegated action's MCP
 | propose | logged as pending, a call on the GM ([calls](workspace-layout.md#calls)); nothing is written until the GM approves | `{"entry": 3, "status": "pending"}`, or `"rejected"` when a blocking call forced to break takes its safe default at once (DEL-31) |
 | act-then-review, autonomous | written at once and logged | `{"entry": 3, "status": "applied"}` |
 
-An irreversible action is held at propose (DEL-09) and only an authenticated Surface approves it (DEL-29).
+An irreversible action is held at propose (DEL-09) and only an authenticated Surface approves it (DEL-29). A narrative-direction action is held at propose whatever its cell (DEL-08).
+
+An action taken for a world-turn job, whose responsibility is `living_world` or `narrative_direction`, is also governed by the job's responsibility, since the class of the effect decides (ADR 0009). It takes the stricter of the two effective levels (DEL-23) and is logged under the job's responsibility. Under `living_world`, a `disclosure` tool, or an action that makes the party know a fact (a knowledge record whose knower is `party`), is refused: the living world never discloses (LW-08).
 
 The effective level is the table cell for the moment, lowered by every **entity override** of the action's acting entity for that responsibility and moment (DEL-12; [workspace layout](workspace-layout.md#entity-overrides)); the log entry records the `entity` and whether an override lowered the level (`override_lowered`). An override at manual refuses the action like a manual cell.
 

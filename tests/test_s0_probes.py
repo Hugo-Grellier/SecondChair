@@ -507,3 +507,88 @@ def test_chatter_and_wrong_knowers_lower_capture_coverage(tmp_path: Path) -> Non
     report = s0.capture_coverage(ws, GOLD)
     assert report["missed"] == ["capture-gauge"]
     assert (report["recall"], report["precision"]) == (7 / 8, 7 / 9)
+
+
+# The narrative-direction invariant and the drift ratio (10-success-bench.md, DEL-08, LW-08)
+
+CONFIG = {"host": "h", "model": "m", "effort": "e"}
+
+
+def narrative_job(ws: Workspace, ids: dict[str, str]) -> int:
+    """The started job for the engaged Inspect the Chain deadline, new narrative."""
+    world.world_turn(ws, "0302-05-01", since=START)
+    [r] = [r for r in world.occurrences(ws) if r["class"] == "narrative"]
+    jobs.start(ws, r["job"], CONFIG, manual=True)
+    return r["job"]
+
+
+def job_act(ws: Workspace, tool: str, job: int, **args: object) -> delegation.ActionResult:
+    [found] = [t for t in core_tools(ws) if t.name == tool]
+    return delegation.act(ws, found, "s0-agent", lambda: found.fn(**args), job=job)
+
+
+def test_a_narrative_direction_action_held_at_propose_keeps_s0_passing(tmp_path: Path) -> None:
+    ws, ids = rebuild_world(tmp_path)
+    job = narrative_job(ws, ids)
+    chain = ids["Inspect the Chain"]
+    origin = {"kind": "job", "job": str(job)}
+    held = job_act(
+        ws, "record_fact", job, statement="The chain snaps.", entities=[chain], origin=origin
+    )
+
+    delegation.approve(ws, held["entry"], "cli", authenticated=True)  # the GM decides
+
+    report = s0.score_probes(ws, GOLD, {})
+    assert report["narrative_direction"] == []
+    assert report["passed"]
+
+
+def test_a_narrative_direction_action_that_passes_fails_s0(tmp_path: Path) -> None:
+    ws, ids = rebuild_world(tmp_path)
+    table = yaml.safe_load((ws.root / "delegation.yaml").read_text())
+    table["prep"]["narrative_direction"]["level"] = "autonomous"
+    (ws.root / "delegation.yaml").write_text(yaml.safe_dump(table))
+    job = narrative_job(ws, ids)
+    origin = {"kind": "job", "job": str(job)}
+
+    with pytest.MonkeyPatch.context() as mp:  # a Core that lost its cap
+        mp.setattr(delegation, "CAPS", {})
+        passed = job_act(
+            ws,
+            "record_fact",
+            job,
+            statement="The chain snaps.",
+            entities=[ids["Inspect the Chain"]],
+            origin=origin,
+        )
+
+    report = s0.score_probes(ws, GOLD, {})
+    assert passed["status"] == "applied"
+    assert report["narrative_direction"] == [
+        f"entry {passed['entry']}: narrative direction at act-then-review, applied without the "
+        "GM's approval"
+    ]
+    assert not report["passed"]
+
+
+@pytest.mark.parametrize("living_world", ["act-then-review", "propose"])
+def test_s0_reports_the_drift_ratio_without_gating_it(tmp_path: Path, living_world: str) -> None:
+    ws, ids = rebuild_world(tmp_path)
+    table = yaml.safe_load((ws.root / "delegation.yaml").read_text())
+    table["prep"]["living_world"]["level"] = living_world
+    (ws.root / "delegation.yaml").write_text(yaml.safe_dump(table))
+    assert s0.score_probes(ws, GOLD, {})["drift_ratio"] == {"agent": 0, "gm": 0, "ratio": None}
+    world.world_turn(ws, "0302-05-01", since=START)
+    [silt] = [r for r in world.occurrences(ws) if r["class"] == "derived"]
+    jobs.start(ws, silt["job"], CONFIG, manual=True)
+    bypass = [f["id"] for f in index.search_facts(ws, text="bypass is closed")]
+    world.settle_unless(ws, silt["key"], False, bypass, silt["job"])  # an agent decision
+    if living_world == "propose":  # the GM accepting it does not make it the GM's
+        for r in world.occurrences(ws):
+            if r["status"] == "queued" and r["class"] != "narrative":
+                world.decide(ws, r["key"], "accept", authenticated=True)
+    world.set_active(ws, ids["Toll Squeeze"], False, "0302-05-01", authenticated=True)  # the GM's
+
+    report = s0.score_probes(ws, GOLD, {})
+    assert report["drift_ratio"] == {"agent": 1, "gm": 1, "ratio": 1.0}
+    assert report["passed"]

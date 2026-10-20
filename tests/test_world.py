@@ -13,11 +13,12 @@ import pytest
 import yaml
 from mcp import Client
 
-from secondchair import cli
+from secondchair import cli, runner
 from secondchair.cli import main
-from secondchair.core import calls, canon, delegation, index, jobs, workspace, world
+from secondchair.core import calls, canon, delegation, index, jobs, knowledge, workspace, world
 from secondchair.core.delegation import DelegationError
 from secondchair.core.server import build_server
+from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
 
 SCHEMA = json.loads(
@@ -561,3 +562,95 @@ def test_an_unless_is_not_settled_during_a_live_session(ws: Workspace) -> None:
     with pytest.raises(DelegationError, match="live session"):
         world.settle_unless(ws, key, False, [closed], job)
     assert queued(ws) == [key]
+
+
+# World-turn jobs (LW-06, LW-08, DEL-08, VIS-01)
+
+
+def set_level(ws: Workspace, moment: str, responsibility: str, level: str) -> None:
+    table = yaml.safe_load((ws.root / "delegation.yaml").read_text())
+    table[moment][responsibility]["level"] = level
+    (ws.root / "delegation.yaml").write_text(yaml.safe_dump(table))
+
+
+def job_act(ws: Workspace, tool: str, job: int, **args: Any) -> delegation.ActionResult:
+    [found] = [t for t in [*canon.tools(ws), *knowledge.tools(ws)] if t.name == tool]
+    return delegation.act(ws, found, "world-agent", lambda: found.fn(**args), job=job)
+
+
+def test_every_world_turn_job_has_a_playbook_matching_its_contract(ws: Workspace) -> None:
+    front(ws, "Toll Squeeze")
+    front(ws, "Silt Choke", unless="the bypass is open")
+    situation(ws, "Inspect the Chain", stage="active", deadline="4725-01-08")
+    turn(ws, "4725-01-08")
+
+    queued_jobs = jobs.pending(ws)
+    assert sorted(j["playbook"] for j in queued_jobs) == [
+        "propose-consequences",
+        "propose-narrative-direction",
+        "settle-an-unless",
+    ]
+    for job in queued_jobs:  # the Core cannot read playbooks (ARC-01): they must agree
+        meta = runner.playbook(job["playbook"])
+        assert meta["responsibility"] == job["responsibility"]
+        assert meta["tier"] == job["tier"]
+        assert meta["expected-output"] == job["expected_output"]
+        assert meta["inputs"] == ",".join(sorted(job["inputs"]))
+
+
+def test_new_narrative_is_held_at_propose_whatever_its_cell(ws: Workspace) -> None:
+    set_level(ws, "prep", "narrative_direction", "autonomous")
+    chain = situation(ws, "Inspect the Chain", stage="active", deadline="4725-01-10")
+    turn(ws, "4725-01-10")
+    job = occ(ws, f"{chain}/deadline@4725-01-10")["job"]
+    jobs.start(ws, job, CONFIG, manual=True)
+
+    assert delegation.effective_level(ws, "narrative_direction", "prep", True) == "propose"
+    # Whatever tool it uses, the job's new narrative is a narrative-direction action (ADR 0009).
+    result = job_act(
+        ws,
+        "record_fact",
+        job,
+        statement="The chain snaps.",
+        entities=[chain],
+        origin={"kind": "job", "job": str(job)},
+    )
+    entry = delegation.read_entry(ws, result["entry"])
+    assert result["status"] == "pending"
+    assert (entry["responsibility"], entry["effective_level"]) == ("narrative_direction", "propose")
+
+
+def test_a_derived_consequence_is_an_agent_proposal_at_the_living_world_level(
+    ws: Workspace,
+) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    mira = entity(ws, "Mira Pell")
+    turn(ws, "4725-01-08")
+    [job] = [j["id"] for j in jobs.pending(ws) if j["playbook"] == "propose-consequences"]
+    jobs.start(ws, job, CONFIG, manual=True)
+    [tick] = [f for f in index.search_facts(ws, entity=tolls) if f["origin"]["kind"] == "rule"]
+    origin = {"kind": "job", "job": str(job)}
+    learn = {"fact": tick["id"], "origin": origin, "date": "4725-01-09"}
+
+    # LW-08: the living world never discloses; reaching the party goes through disclosure.
+    with pytest.raises(DelegationError, match="never discloses"):
+        job_act(ws, "record_knowledge", job, knower=index.PARTY, **learn)
+    result = job_act(ws, "record_knowledge", job, knower=mira, **learn)
+
+    assert result["status"] == "applied"  # living_world is at act-then-review in prep
+    assert delegation.read_entry(ws, result["entry"])["responsibility"] == "living_world"
+    learnt = {k["knower"]: k["rank"] for k in index.search_knowledge(ws, [mira, index.PARTY])}
+    assert learnt == {mira: "agent_proposal"}
+
+    # Nor through a disclosure tool; and the tool's own cell still binds the job (DEL-23).
+    tell = Tool(
+        fn=lambda: Change("canon/x.md", "x"),
+        responsibility="disclosure",
+        delegated_action=True,
+        reversible=False,
+    )
+    with pytest.raises(DelegationError, match="never discloses"):
+        delegation.act(ws, tell, "world-agent", tell.fn, job=job)
+    set_level(ws, "prep", "memory", "manual")
+    with pytest.raises(DelegationError, match="memory is at manual"):
+        job_act(ws, "record_fact", job, statement="Tolls rise.", entities=[tolls], origin=origin)

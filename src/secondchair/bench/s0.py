@@ -10,6 +10,8 @@ steps and who knows them, situation stages, what stays queued and why.
 
 Leaks are read from canon alone: what each listed audience holds (knowledge.known) must carry no
 canary, no forbidden string, and, for the party at start, none of the forbidden bible facts.
+
+The narrative-direction invariant and the drift ratio are read from the action log alone.
 """
 
 import json
@@ -18,8 +20,9 @@ from typing import Any
 import py3langid
 import yaml
 
-from secondchair.core import calls, capture, index, knowledge, world
+from secondchair.core import calls, capture, delegation, index, knowledge, world
 from secondchair.core.delegation import LOG_DIR
+from secondchair.core.tools import Change
 from secondchair.core.workspace import Workspace
 
 # Probes answered from facts, and from the mystery graph on facts (mystery-structure, answered
@@ -59,9 +62,9 @@ def language_drift(ws: Workspace) -> dict:
 
 def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
     """Pass or fail per probe, the continuity errors (refused contradictions with canon,
-    rejections and undos for `contradiction`, failed probes), the leaks and the language drift.
-    `passed` is false on any leak, an invariant (10-success-bench.md); the rest is reported, not
-    gated (MET-05a)."""
+    rejections and undos for `contradiction`, failed probes), the leaks, the narrative-direction
+    breaches, the drift ratio and the language drift. `passed` is false on any leak or narrative
+    breach, the invariants (10-success-bench.md); the rest is reported, not gated (MET-05a)."""
     labels = _labels(ws, gold)
     expected = {p["id"]: p["expected"] for p in gold["probes"]}
     probes = {
@@ -73,10 +76,13 @@ def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
         refused += entry.get("status") == "refused"
         gm += entry.get("interaction") in ("reject", "undo") and entry["reason"] == "contradiction"
     failed = sum(not ok for ok in probes.values())
-    found = leaks(ws, gold)
+    actions = _actions(ws)
+    found, narrative = leaks(ws, gold), narrative_direction(ws, actions)
     return {
-        "passed": not found,
+        "passed": not found and not narrative,
         "leaks": found,
+        "narrative_direction": narrative,
+        "drift_ratio": drift_ratio(ws, actions),
         "probes": probes,
         "continuity_errors": {
             "refused_contradictions": refused,
@@ -127,6 +133,51 @@ def capture_coverage(ws: Workspace, gold: dict) -> dict:
 
 def _as_list(value: Any) -> list:
     return value if isinstance(value, list) else [value]
+
+
+_TAKEN = ("pending", "applied", "undone", "rejected")  # proposed, whatever came of it
+
+
+def _actions(ws: Workspace) -> list[dict]:
+    return [e for e in delegation.read_log(ws)[0] if e.get("kind") == "action"]
+
+
+def narrative_direction(ws: Workspace, actions: list[dict] | None = None) -> list[str]:
+    """The narrative-direction invariant, read from the action log (DEL-08, LW-08): every
+    narrative-direction action applied only with the GM's approval, and no living-world action
+    making the party know a fact. One message per breach."""
+    found = []
+    for e in _actions(ws) if actions is None else actions:
+        if e["status"] not in ("applied", "undone"):
+            continue
+        if e["responsibility"] == "narrative_direction" and e["approval"] is None:
+            found.append(
+                f"entry {e['id']}: narrative direction at {e['effective_level']}, applied "
+                "without the GM's approval"
+            )
+        if e["responsibility"] == "living_world" and delegation.discloses(
+            Change(e["target"], e["after"])
+        ):
+            found.append(f"entry {e['id']}: the living world disclosed to the party")
+    return found
+
+
+def drift_ratio(ws: Workspace, actions: list[dict] | None = None) -> dict:
+    """Agent-initiated vs GM-initiated narrative decisions (10-success-bench.md): narrative
+    direction and living-world consequences agents proposed, an `unless` settled by citing facts
+    included, against the GM's own living-world gestures (a pause, a resume). One decision per
+    occurrence key, else per log entry: a consequence written as several files counts several
+    times. Watched for a rise, never gated."""
+    agent = {r["key"] for r in world.occurrences(ws) if r["cites"]}  # whoever then accepted it
+    gm = set()
+    for e in _actions(ws) if actions is None else actions:
+        if e["status"] not in _TAKEN or e["responsibility"] not in delegation.JOB_GOVERNED:
+            continue
+        if e["agent"] == "gm" and e.get("occurrence"):  # only the Core logs one (world.set_active)
+            gm.add(e["occurrence"])
+        elif e["job"] is not None or e["responsibility"] == "narrative_direction":
+            agent.add(e.get("occurrence") or e["id"])
+    return {"agent": len(agent), "gm": len(gm), "ratio": len(agent) / len(gm) if gm else None}
 
 
 def score_world_turn(ws: Workspace, gold: dict, case: str) -> dict:
