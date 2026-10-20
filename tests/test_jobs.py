@@ -40,7 +40,8 @@ def finishing(ws: Workspace) -> list[str]:
 BROKEN = [sys.executable, "-c", "raise SystemExit('host unavailable')"]
 
 # The agent a fake host runs: it creates one entity for the job named in its prompt, over the
-# Core's MCP endpoint, finishes the job, and writes what the Core answered to the file given as its argument.
+# Core's MCP endpoint, finishes the job, and writes what the Core answered to the file given as
+# its argument.
 FAKE_AGENT = """
 import asyncio, json, os, re, sys
 from mcp import Client

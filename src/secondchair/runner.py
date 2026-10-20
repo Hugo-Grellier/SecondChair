@@ -119,8 +119,7 @@ def prompt(ws: Workspace, job: dict) -> str:
         text += (
             "\nEarlier attempts failed or stopped before `finish_job`, after taking these actions "
             "(action log id: tool on target, status). Continue from there: do not take them "
-            "again.\n"
-            + "\n".join(taken)
+            "again.\n" + "\n".join(taken)
         )
     return text
 
