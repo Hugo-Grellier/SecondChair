@@ -1,6 +1,14 @@
 # A campaign snapshot is the workspace plus a paired Foundry world; restore is into a fresh directory; a destructive migration needs consent
 
-**Status: proposed — awaiting the GM's decision.** Issue [#197](https://github.com/Hugo-Grellier/SecondChair/issues/197). Not binding until the GM accepts it; the spec index lists it as proposed.
+Status: proposed — awaiting the GM ([#197](https://github.com/Hugo-Grellier/SecondChair/issues/197))
+
+Not binding until the GM accepts it. Until then ADR 0010 and PKG-16 hold as written.
+
+**Amends [ADR 0010](0010-local-core-reached-by-the-gm-browser.md) (its upgrade consequence) and PKG-16 ([09](../spec/09-packaging.md#export-and-schema-evolution)).** ADR 0010 says an older schema blocks `serve` "until `secondchair upgrade` migrates it in place as a reviewable diff". PKG-16 says the same. On acceptance, PKG-16 becomes:
+
+> **PKG-16** `workspace.yaml` carries the schema version. A newer schema is refused. An older one blocks `serve` until `secondchair upgrade` migrates it: after a pre-upgrade snapshot, on a sibling copy swapped in by rename once `check` passes, with `--preview` showing the diff first. A destructive migration step runs only from an authenticated Surface with typed confirmation (ADR 0018).
+
+The reviewable diff survives, as `--preview` and as the git diff after the swap. "In place" no longer holds: the workspace directory is replaced, not edited.
 
 A multi-year campaign must survive a dead disk, a moved workspace and a SecondChair or Foundry upgrade. ADR 0010 already makes the campaign workspace the full export: `workspace.yaml` carries the schema version, the derived index lives in a git-ignored `.secondchair/`, and `secondchair check` rebuilds everything from the directory alone. This ADR states what a backup holds, how a restore proves itself, and when an upgrade may change authoritative data.
 
@@ -20,7 +28,7 @@ Excluded, and why:
 
 **Restore.** `secondchair restore <archive> <new-dir>` only writes into an empty or new directory, never over a live workspace. It verifies every hash against the manifest, then runs `check`. It reports, without fixing: a Foundry world id or versions that differ from the manifest, machine permissions to grant again, and Source references whose paths are missing on this host. Foundry state then converges by the ordinary reconciliation of desired scenes and documents, which keeps played state.
 
-**Upgrade and migration consent.** `secondchair upgrade` (`workspace.upgrade`) migrates in place one schema version at a time. It rewrites `schema_version` after each step and keeps no copy. This ADR amends it:
+**Upgrade and migration consent.** `secondchair upgrade` (`workspace.upgrade`) migrates in place one schema version at a time. It rewrites `schema_version` after each step and keeps no copy. This ADR amends that, together with ADR 0010 and PKG-16 (see above):
 
 - Before the first step, upgrade takes a snapshot of the workspace archive. Without one it refuses unless the GM passes `--no-snapshot`.
 - Each migration declares itself **additive** (new files or fields; nothing removed or rewritten) or **destructive** (it removes, rewrites or merges authoritative content).

@@ -16,7 +16,7 @@ One deterministic generator, `secondchair.bench.synth`, seeded and fictional, in
 
 - **Parameters**: `sessions` (10 → 500), `npcs_per_session`, `plots_active`, `retcon_rate`, `contradiction_rate`, `calendar_jumps`, `seed`.
 - **Per session**: a moment cycle (prep → live → between), captured candidates quoting synthetic notes, consolidation, a wrap and a world-turn over fronts and clocks. NPC relationship changes, secrets disclosed late, a few retcons and GM corrections, and occasional hand edits (path 6 in [write-paths.md](write-paths.md)).
-- **Its gold set is generated with it**: for chosen `(session, question)` pairs, the true answer as of that session. Who knew X then; the current versus historical relationship of A and B; when promise P was made, broken or kept; which claim holds after the retcon of session k; book claim versus played claim (with a synthetic "book" Source).
+- **It generates its own synthetic gold set**. This conflicts with MET-02 (gold sets are written by hand, once), so the recall bench is a **tracked, non-reference track**. Its scores are reported and compared over time, never gated as v4 metrics or reference floors, unless the GM amends MET-02 or writes a hand gold set for a fixed seed. The generated answers cover: for chosen `(session, question)` pairs, the true answer as of that session. Who knew X then; the current versus historical relationship of A and B; when promise P was made, broken or kept; which claim holds after the retcon of session k; book claim versus played claim (with a synthetic "book" Source).
 - **Sizes**: S (10 sessions; CI), M (100), L (400; local only). One #204 size equals one S/M/L workspace, so the index benchmark and the recall bench share fixtures.
 - **Determinism check**: two runs with the same seed on fresh `XDG_*` dirs produce byte-identical workspaces (timestamps from a fixed clock).
 
@@ -37,7 +37,7 @@ Two harness entries, sharing the generator and `bench/report.py`:
 | Context-pack tokens per job | reported; must not grow linearly with sessions |
 | Unchanged-read bytes read | must not grow with total bytes once #172 lands |
 
-Invariants hold on every run (BEN-04). Floors are reported first and gated once the GM accepts them.
+Invariants hold on every run (BEN-04); they are checked by the Core's own rules, not by the gold set. The floors are tracking targets on this non-reference track. They gate nothing until the GM accepts a hand-written gold set or a MET-02 amendment.
 
 ## Tiered memory views (design direction, not built)
 

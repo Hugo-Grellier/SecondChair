@@ -17,7 +17,7 @@ Design note for [#179](https://github.com/Hugo-Grellier/SecondChair/issues/179) 
 
 | Gap | Proposal | Risk |
 |---|---|---|
-| No production brief or asset manifest | `production/<scene>.yaml`: a desired asset list (map spec: scale, grid, levels; portraits; tokens; music; ambience; handouts). Each entry is `{need, source: install|user-file|provider, path?, licence, consent, status: wanted|found|approved}`. It is prep, not canon (ADR 0007), written by a delegated tool | R1 |
+| No production brief or asset manifest | `prep/production/<scene>.yaml` (under `prep/`, so it stays inside the delegated-write allow-list proposed in [write-paths.md](write-paths.md)): a desired asset list (map spec: scale, grid, levels; portraits; tokens; music; ambience; handouts). Each entry is `{need, source: install|user-file|provider, path?, licence, consent, status: wanted|found|approved}`. It is prep, not canon (ADR 0007), written by a delegated tool | R1 |
 | Missing assets are silent until realisation | A pre-realisation `asset_check`: every `src`/`path`/`texture` in `scenes/` and `documents/` resolves through `browse_files`; images have `image_size`; `grid.size` divides the map; every Token `actor` resolves; every `@prepared` reference exists. The report separates `missing`, `mismatched` and `ok` | R1 |
 | Walls, lights and regions are hand-authored by the agent | Keep it so. Add derivation helpers only for objective geometry (a grid-aligned wall from a room polygon). No vision-to-walls in v4: unreliable, and the agent cannot see the map without a multimodal host | R1 |
 | GM/player preview | A smoke test in the isolated bench Foundry (BEN-05, world restored from a snapshot). Realise the scene, then query visibility as a player user: tokens with `hidden: false` the party should not see, Notes linking journals the player owns at less than OBSERVER, lights revealing a hidden token's square. Output a report, never a fix | R1 |
@@ -46,7 +46,7 @@ Design note for [#179](https://github.com/Hugo-Grellier/SecondChair/issues/179) 
 | Title | Scope | Risk | Deps |
 |---|---|---|---|
 | Decide the scene-origin ceiling default | Settle #163 | R2 | — |
-| Production brief and asset manifest | `production/` schema, a delegated write tool, licence/consent fields | R1 | licence questions 1–4 |
+| Production brief and asset manifest | `prep/production/` schema, a delegated write tool, licence/consent fields | R1 | licence questions 1–4 |
 | Pre-realisation asset check | File, size, grid, actor and `@prepared` resolution report | R1 | — |
 | Three-state production report | `structurally_valid / realised / smoke_tested` on scene_report | R0 | asset check |
 | Player-view smoke test in the bench Foundry | Hidden-token, lit-square and journal-ownership checks under a player user | R1 | BEN-05 bench world |
