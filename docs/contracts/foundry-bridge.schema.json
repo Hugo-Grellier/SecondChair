@@ -133,6 +133,16 @@
             "null"
           ],
           "description": "The fields the document must still have, or the action is refused (an undo after a hand edit); null to skip the check."
+        },
+        "level": {
+          "enum": [
+            "manual",
+            "propose",
+            "act-then-review",
+            "autonomous",
+            null
+          ],
+          "description": "The delegation level the Core takes the action at, which the module checks against the world's ceiling (DEL-19); null for the GM's own undo, which the ceiling does not bound."
         }
       },
       "required": [
@@ -141,7 +151,8 @@
         "op",
         "target",
         "params",
-        "expect"
+        "expect",
+        "level"
       ],
       "additionalProperties": false
     },
@@ -193,6 +204,10 @@
             "error": {
               "type": "string",
               "description": "Why the action failed, for the GM, in English."
+            },
+            "reason": {
+              "const": "ceiling",
+              "description": "Present when the world's ceiling refused the action (DEL-20)."
             }
           },
           "required": [

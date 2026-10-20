@@ -6,8 +6,8 @@
 
 /**
  * @typedef {"players" | "gm" | "blind"} Visibility
- * @typedef {{id: string, session: number, at: string, scene: string | null, actor: string | null, kind: string, visibility: Visibility, payload: Record<string, unknown>}} Envelope
- * @typedef {{scene?: string | null, actor?: string | null, kind: string, visibility: Visibility, payload: Record<string, unknown>}} Event
+ * @typedef {{id: string, session: number | null, at: string, scene: string | null, actor: string | null, kind: string, visibility: Visibility, payload: Record<string, unknown>}} Envelope
+ * @typedef {{scene?: string | null, actor?: string | null, kind: string, visibility: Visibility, payload: Record<string, unknown>, anytime?: boolean}} Event
  */
 
 /**
@@ -41,9 +41,13 @@ export function createCapture({
     disconnect() {
       send = null;
     },
-    /** Capture one event; null outside a live session. @param {Event} event @returns {Envelope | null} */
-    observe({ scene = null, actor = null, kind, visibility, payload }) {
-      if (session === null) return null;
+    /**
+     * Capture one event; null outside a live session, unless `anytime` (a kind recorded in every
+     * moment, such as a ceiling change), which is then tagged with session null.
+     * @param {Event} event @returns {Envelope | null}
+     */
+    observe({ scene = null, actor = null, kind, visibility, payload, anytime = false }) {
+      if (session === null && !anytime) return null;
       /** @type {Envelope} */
       const envelope = {
         id: newId(),

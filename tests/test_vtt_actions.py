@@ -5,9 +5,11 @@ from collections.abc import Iterator
 
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
+from test_calls import CALL_SCHEMA, records
 from test_delegation import call, log, set_level, ws  # noqa: F401  (ws is a fixture)
 
 from secondchair.core import delegation, vtt
+from secondchair.core.delegation import LEVELS
 from secondchair.core.tools import Tool, VttAction
 from secondchair.core.workspace import Workspace
 
@@ -15,12 +17,20 @@ TOKEN = "Scene.s1.Token.t1"
 
 
 class FakeVtt:
-    """The GM client: documents by UUID, mechanical actions refused (no system adapter)."""
+    """The GM client: documents by UUID, the world's ceiling, mechanical actions refused (no
+    system adapter)."""
 
     def __init__(self) -> None:
         self.docs: dict[str, dict] = {TOKEN: {"x": 100, "y": 200}}
+        self.ceiling = "act-then-review"
+        self.levels: list[str | None] = []
 
-    def perform(self, op: str, target: str, params: dict, expect: dict | None) -> tuple[dict, dict]:
+    def perform(
+        self, op: str, target: str, params: dict, expect: dict | None, level: str | None
+    ) -> tuple[dict, dict]:
+        self.levels.append(level)
+        if level is not None and LEVELS.index(level) > LEVELS.index(self.ceiling):
+            raise vtt.CeilingRefusal(f"Refused by this world's delegation ceiling ({self.ceiling})")
         if op != "move_token":
             raise vtt.VttError(f'No system adapter is installed: "{op}" is a mechanical action.')
         doc = self.docs[target]
@@ -134,3 +144,61 @@ def test_an_approved_action_the_vtt_does_not_take_is_a_failed_action(
     [entry] = log(ws)
     assert entry["status"] == "failed"
     assert "No GM client" in entry["error"]
+
+
+def calls(ws: Workspace) -> list[dict]:  # noqa: F811
+    return records(ws, "calls", CALL_SCHEMA)
+
+
+def test_above_the_ceiling_an_allowed_action_is_a_failed_action_and_a_call(
+    ws: Workspace,  # noqa: F811
+    foundry: FakeVtt,
+) -> None:
+    foundry.ceiling = "propose"
+
+    result = move(ws, 300, 200)
+
+    assert result.is_error
+    assert "ceiling" in result.content[0].text
+    assert foundry.docs[TOKEN] == {"x": 100, "y": 200}
+    [entry] = log(ws)
+    assert (entry["effective_level"], entry["status"]) == ("act-then-review", "failed")
+    [called] = calls(ws)
+    assert called["kind"] == "ceiling_refusal"
+    assert (called["entry"], called["responsibility"]) == (entry["id"], "vtt_operations")
+    assert called["status"] == "open"
+
+
+def test_under_the_ceiling_the_gm_approves_and_undoes(
+    ws: Workspace,  # noqa: F811
+    foundry: FakeVtt,
+) -> None:
+    foundry.ceiling = "propose"
+    set_level(ws, "prep", "vtt_operations", "propose")
+    move(ws, 300, 200)
+
+    delegation.approve(ws, 1, "cli", True)
+    foundry.ceiling = "manual"
+    delegation.undo(ws, 1, "tone", "cli", True)
+
+    assert foundry.levels == ["propose", None]  # the GM's undo is not bounded by the ceiling
+    assert foundry.docs[TOKEN] == {"x": 100, "y": 200}
+    assert [(c["kind"], c["status"]) for c in calls(ws)] == [("proposal", "answered")]
+
+
+def test_an_approval_refused_by_the_ceiling_is_a_call(
+    ws: Workspace,  # noqa: F811
+    foundry: FakeVtt,
+) -> None:
+    set_level(ws, "prep", "vtt_operations", "propose")
+    move(ws, 300, 200)
+    foundry.ceiling = "manual"
+
+    with pytest.raises(delegation.DelegationError, match="ceiling"):
+        delegation.approve(ws, 1, "cli", True)
+
+    assert log(ws)[0]["status"] == "failed"
+    assert [(c["kind"], c["entry"], c["status"]) for c in calls(ws)] == [
+        ("proposal", 1, "answered"),
+        ("ceiling_refusal", 1, "open"),
+    ]

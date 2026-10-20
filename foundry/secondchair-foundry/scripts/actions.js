@@ -5,8 +5,8 @@
 
 /**
  * @typedef {Record<string, unknown>} Fields
- * @typedef {{type: "request", id: string, op: string, target: string, params: Fields, expect: Fields | null}} Request
- * @typedef {{type: "reply", id: string, ok: true, before: Fields, after: Fields} | {type: "reply", id: string, ok: false, error: string}} Reply
+ * @typedef {{type: "request", id: string, op: string, target: string, params: Fields, expect: Fields | null, level: string | null}} Request
+ * @typedef {{type: "reply", id: string, ok: true, before: Fields, after: Fields} | {type: "reply", id: string, ok: false, error: string, reason?: "ceiling"}} Reply
  * @typedef {{documentName: string, update(changes: Fields): Promise<unknown>} & Record<string, unknown>} Doc
  * @typedef {{id: string, status: "running" | "done", reply?: Reply}} Handled
  * @typedef {{ops: Record<string, (doc: Doc, params: Fields, expect: Fields | null) => Promise<{before: Fields, after: Fields}>>}} Adapter
@@ -18,6 +18,28 @@ const GENERIC = {
   set_door: { documentName: "Wall", fields: ["ds"] },
 };
 
+/** Delegation levels, loosest last (DEL-02). */
+export const LEVELS = ["manual", "propose", "act-then-review", "autonomous"];
+
+/** The ceiling (DEL-19, DEL-19a): a world setting only a GM changes, act-then-review on a fresh world. */
+export const CEILING = {
+  name: "Delegation ceiling",
+  hint: "The most any SecondChair agent may do in this world, whatever the campaign's delegation table says. Actions above it are refused and become a call on the GM.",
+  scope: /** @type {const} */ ("world"),
+  config: true,
+  type: String,
+  choices: {
+    manual: "Manual: agents take no action in the VTT",
+    propose: "Propose: only actions the GM approved",
+    "act-then-review": "Act then review",
+    autonomous: "Autonomous",
+  },
+  default: "act-then-review",
+};
+
+/** Refused by the ceiling: a failed action and a call on the GM (DEL-20). */
+class CeilingRefusal extends Error {}
+
 /** Handled request ids kept (v3 kept 60). */
 const KEPT = 200;
 
@@ -26,8 +48,9 @@ const KEPT = 200;
  * @param {(uuid: string) => Promise<Doc | null>} args.resolve  the document a UUID names
  * @param {{load(): unknown[], save(list: Handled[]): Promise<unknown>}} args.store  handled requests, kept across reloads
  * @param {() => Adapter | null} args.adapter  the system adapter, if one registered
+ * @param {() => unknown} args.ceiling  the world's ceiling setting
  */
-export function createActions({ resolve, store, adapter }) {
+export function createActions({ resolve, store, adapter, ceiling }) {
   /** @type {Map<string, Promise<Reply>>} */
   const inflight = new Map();
   /** @type {Promise<unknown>} */
@@ -44,7 +67,15 @@ export function createActions({ resolve, store, adapter }) {
     );
 
   /** @param {Request} request @returns {Promise<{before: Fields, after: Fields}>} */
-  async function act({ op, target, params, expect }) {
+  async function act({ op, target, params, expect, level }) {
+    // level null: the GM's own undo, which the ceiling does not bound. Anything unknown is refused.
+    const max = LEVELS.indexOf(String(ceiling()));
+    const rank = level === null ? -1 : LEVELS.indexOf(level);
+    if (level !== null && (max < 0 || rank < 0 || rank > max)) {
+      throw new CeilingRefusal(
+        `Refused by this world's delegation ceiling (${ceiling()}): the action was asked at ${level}.`,
+      );
+    }
     const doc = await resolve(target);
     if (!doc) throw new Error(`No document ${target} in this world.`);
     if (!Object.hasOwn(GENERIC, op)) {
@@ -103,6 +134,7 @@ export function createActions({ resolve, store, adapter }) {
             id,
             ok: false,
             error: String(/** @type {Error} */ (err)?.message ?? err),
+            ...(err instanceof CeilingRefusal && { reason: /** @type {const} */ ("ceiling") }),
           };
         }
         await record({ id, status: "done", reply });

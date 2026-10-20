@@ -13,6 +13,8 @@
 
 **Your browser may ask once before connecting.** Firefox, and recent Chrome versions, ask for each site whether it may connect to services on your own computer (the "local network" or "apps and services on this device" prompt). Allow it for your Foundry site. If you refused it, the module reports that it cannot reach the Core: allow the site in the browser's site permissions, then reload.
 
+**Delegation ceiling.** In the same settings, the GM sets the most any SecondChair agent may do in this world, whatever the campaign's delegation table says. It starts at *act then review*; an action above it is refused and becomes a call for you. Only a GM can change it, and each change is recorded.
+
 Only the active GM connects, and only one GM client at a time. The first connection binds the world to the campaign; another campaign's world is refused ([contract](../docs/contracts/foundry-bridge.md)).
 
 ## Licence and Foundry package policy

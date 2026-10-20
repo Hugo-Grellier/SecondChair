@@ -1,5 +1,5 @@
 // secondchair-foundry: the active GM's browser dials the loopback Core (ADR 0010).
-import { createActions } from "./actions.js";
+import { CEILING, createActions } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
 
@@ -98,6 +98,12 @@ function watch() {
   );
 }
 
+/** Whether this client is the one GM client that talks to the Core (PKG-08). */
+const isActiveGM = () => game.user.isGM && game.users.activeGM?.id === game.user.id;
+
+/** The ceiling as this client last saw it, to record each change's before. */
+let ceiling = CEILING.default;
+
 Hooks.once("init", () => {
   /** @type {{api?: object}} */ (game.modules.get(MODULE)).api = {
     /** @param {Adapter} systemAdapter */
@@ -131,11 +137,46 @@ Hooks.once("init", () => {
     type: String,
     default: "",
   });
+  // The ceiling (DEL-19a): each change is recorded as an observation by the active GM client,
+  // which also puts back a change made by a user who is not a GM.
+  game.settings.register(MODULE, "ceiling", {
+    ...CEILING,
+    onChange: (value, _options, userId) => {
+      const before = ceiling;
+      ceiling = String(value);
+      if (!isActiveGM()) return;
+      // Recorded in every moment, tagged with the live session when one is open.
+      capture.observe({
+        kind: "ceiling",
+        visibility: "gm",
+        payload: { user: userId ?? null, before, after: ceiling },
+        anytime: true,
+      });
+      if (userId && !game.users.get(userId)?.isGM) {
+        ui.notifications.warn("SecondChair: only a GM may change the delegation ceiling.");
+        // The revert is itself a change, recorded as one.
+        game.settings
+          .set(MODULE, "ceiling", before)
+          .catch((/** @type {unknown} */ error) => console.error("SecondChair:", error));
+      }
+    },
+  });
+  // Only a GM changes the ceiling (DEL-19a), even where players were granted world settings.
+  // ponytail: refused in the changing client; a tampered client is put back by the active GM.
+  /** @param {{key: string}} setting */
+  const guard = (setting) => {
+    if (setting.key !== `${MODULE}.ceiling` || game.user.isGM) return true;
+    ui.notifications.error("SecondChair: only a GM may change the delegation ceiling.");
+    return false;
+  };
+  Hooks.on("preCreateSetting", guard);
+  Hooks.on("preUpdateSetting", guard);
 });
 
 Hooks.once("ready", () => {
+  ceiling = String(game.settings.get(MODULE, "ceiling"));
   // One GM connection at a time (PKG-08): only the active GM dials the Core.
-  if (!game.user.isGM || game.users.activeGM?.id !== game.user.id) return;
+  if (!isActiveGM()) return;
   const token = String(game.settings.get(MODULE, "token") ?? "");
   if (!token) {
     ui.notifications.warn(
@@ -159,6 +200,8 @@ Hooks.once("ready", () => {
           save: (list) => game.user.setFlag(MODULE, "requests", list),
         },
         adapter: () => adapter,
+        // Read at each request, so a change applies at once (DEL-19).
+        ceiling: () => game.settings.get(MODULE, "ceiling"),
       });
       socket.addEventListener("message", async (event) => {
         try {

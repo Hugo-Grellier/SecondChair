@@ -14,7 +14,7 @@ my-campaign/
 ├── action-log/        # one YAML file per action log entry: 000001.yaml, 000002.yaml, …
 ├── jobs/              # one YAML file per job: 000001.yaml, …
 ├── calls/             # one YAML file per call on the GM: 000001.yaml, …
-├── observations/      # one JSON Lines file per live session: 000001.jsonl, …
+├── observations/      # one JSON Lines file per live session: 000001.jsonl, …, and outside-sessions.jsonl
 ├── canon/
 │   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 │   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
@@ -145,7 +145,7 @@ One YAML file per job, named by its id on six digits, following [`job.schema.jso
 
 ## `calls/`
 
-One YAML file per call on the GM, following [`call.schema.json`](call.schema.json): a pending proposal (one per action held at propose) or a surfaced exception, such as the one raised when every runner configuration for a job's tier failed (the job stays queued). Ceiling refusals join with #49.
+One YAML file per call on the GM, following [`call.schema.json`](call.schema.json): a pending proposal (one per action held at propose), a surfaced exception, such as the one raised when every runner configuration for a job's tier failed (the job stays queued), or a ceiling refusal (DEL-20), written when the VTT's ceiling refused a delegated action: it names the failed action log `entry`.
 
 ```yaml
 id: 1
@@ -171,10 +171,11 @@ shown: false            # a defaulted call shown again at a break
 - **Break pile**: the calls due at the break still open (shown at every break until answered or the moment ends) and every call defaulted since the last break (shown once, then `shown: true`).
 - **Interruptions** (DEL-33, MET-06): calls with `interruption: true`, counted by the Core per live session and per responsibility (`calls.interruptions`), whatever Surface shows them.
 - Approving or rejecting a proposal answers its call.
+- A ceiling refusal takes no action by default: the action already failed.
 
 ## `observations/`
 
-One JSON Lines file per live session, named by the session id on six digits: each line is one observation the VTT connector captured during that session, in the event envelope ([`event-envelope.schema.json`](event-envelope.schema.json); how it arrives: [foundry-bridge.md](foundry-bridge.md), "Observations"). The Core only appends, once per envelope id. Observations are never canon by themselves (CAP-03); capture quotes them at the wrap with the locator `observations/<session>.jsonl#<id>`.
+One JSON Lines file per live session, named by the session id on six digits: each line is one observation the VTT connector captured during that session, in the event envelope ([`event-envelope.schema.json`](event-envelope.schema.json); how it arrives: [foundry-bridge.md](foundry-bridge.md), "Observations"). The Core only appends, once per envelope id. Observations are never canon by themselves (CAP-03); capture quotes them at the wrap with the locator `observations/<session>.jsonl#<id>`. A kind recorded in every moment, so far only `ceiling` (a change of the VTT's ceiling, DEL-19a), goes to `observations/outside-sessions.jsonl` with `session: null` when no live session is open.
 
 ```json
 {"id": "4b1e…", "session": 1, "at": "2026-10-19T20:15:00.000Z", "scene": "Scene.s1", "actor": "Actor.a1", "kind": "chat", "visibility": "players", "payload": {"author": "Gamemaster", "speaker": "Sella", "text": "The bell rings.", "flavor": "", "whisper": [], "rolls": []}}

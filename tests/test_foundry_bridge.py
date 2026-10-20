@@ -155,20 +155,23 @@ def test_a_bound_world_that_lost_its_mark_reconnects(bridge: str, token: str) ->
 
 
 @contextmanager
-def gm_client(url: str, token: str) -> Generator[dict[str, dict]]:
-    """A connected GM client answering requests in its own little world, as the module's
-    generic actions do; yields that world."""
+def gm_client(url: str, token: str, ceiling: str = "act-then-review") -> Generator[dict[str, dict]]:
+    """A connected GM client answering requests in its own little world under `ceiling`, as the
+    module's generic actions do; yields that world."""
     docs = {TOKEN: {"x": 100, "y": 200}}
     with connect(url, origin=Origin("https://foundry.example")) as socket:
         socket.send(json.dumps(hello(token)))
         assert json.loads(socket.recv(timeout=5))["type"] == "welcome"
-        thread = threading.Thread(target=answer, args=(socket, docs), daemon=True)
+        thread = threading.Thread(target=answer, args=(socket, docs, ceiling), daemon=True)
         thread.start()
         yield docs
     thread.join(timeout=5)
 
 
-def answer(socket: ClientConnection, docs: dict[str, dict]) -> None:
+LEVELS = ["manual", "propose", "act-then-review", "autonomous"]
+
+
+def answer(socket: ClientConnection, docs: dict[str, dict], ceiling: str) -> None:
     """Answer the Core's requests until the socket closes."""
     for raw in socket:
         request = json.loads(raw)
@@ -177,7 +180,14 @@ def answer(socket: ClientConnection, docs: dict[str, dict]) -> None:
             continue  # the live session
         doc = docs[request["target"]]
         before = dict(doc)
-        if request["expect"] and request["expect"] != before:
+        level = request["level"]
+        if level is not None and LEVELS.index(level) > LEVELS.index(ceiling):
+            reply = {
+                "ok": False,
+                "error": f"Refused by the ceiling ({ceiling})",
+                "reason": "ceiling",
+            }
+        elif request["expect"] and request["expect"] != before:
             reply = {"ok": False, "error": f"{request['target']} changed since"}
         else:
             doc.update(request["params"])
@@ -267,3 +277,20 @@ def test_a_malformed_hello_is_refused(bridge: str, token: str) -> None:
         reply = json.loads(socket.recv(timeout=5))
     jsonschema.validate(reply, SCHEMA)
     assert reply["type"] == "refused"
+
+
+def test_above_the_ceiling_the_connector_refuses_and_the_gm_gets_a_call(
+    bridge: str, token: str, workspace: Path
+) -> None:
+    with gm_client(bridge, token, ceiling="propose") as docs:
+        result = move(bridge)
+        assert docs[TOKEN] == {"x": 100, "y": 200}
+
+    assert result.is_error
+    assert "ceiling" in result.content[0].text
+    assert (action(workspace)["effective_level"], action(workspace)["status"]) == (
+        "act-then-review",
+        "failed",
+    )
+    called = yaml.safe_load((workspace / "calls/000001.yaml").read_text())
+    assert (called["kind"], called["entry"]) == ("ceiling_refusal", 1)

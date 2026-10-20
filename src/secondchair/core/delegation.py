@@ -315,6 +315,7 @@ def act(
                     raise
                 # A failed action (ARC-09): logged, counted, and reported to the agent.
                 failed = _append(ws, {**entry, "status": "failed", "error": str(e)})
+                _call_if_ceiling(ws, failed, e, table_moment, blocking)
                 raise DelegationError(f"Failed action, logged as entry {failed['id']}: {e}") from e
         logged = _append(ws, entry)
         if entry["status"] == "pending":
@@ -355,6 +356,9 @@ def approve(
                 raise
             entry.update(status="failed", error=str(e))  # a failed action, as in `act`
             _save(ws, entry)
+            _answered(ws, entry_id)  # the GM answered; the action failed
+            # The GM is answering now: the refusal is held for the break.
+            _call_if_ceiling(ws, entry, e, entry["moment"], False)
             raise DelegationError(f"Failed action, entry {entry_id}: {e}") from e
         interaction = _interaction(ws, "approve", entry_id, channel, authenticated, quote, None)
         _answered(ws, entry_id)
@@ -614,6 +618,25 @@ def _withdraw(ws: Workspace, override: dict, interaction: int) -> None:
             calls._default(ws, call, interaction)
 
 
+def _call_if_ceiling(
+    ws: Workspace, entry: dict, error: DelegationError, table_moment: str, blocking: bool
+) -> None:
+    """A ceiling refusal is a failed action and a call on the GM (DEL-20). Callers hold the lock."""
+    from secondchair.core import calls
+
+    if isinstance(error.__cause__, vtt.CeilingRefusal):
+        calls.open_call(
+            ws,
+            kind="ceiling_refusal",
+            responsibility=entry["responsibility"],
+            table_moment=table_moment,
+            blocking=blocking,
+            entry=entry["id"],
+            job=entry.get("job"),
+            message=str(error),
+        )
+
+
 # Hand edits (CAN-11): a canon file changed outside the Core.
 
 CANON_DIR = "canon"
@@ -825,7 +848,11 @@ def _apply(ws: Workspace, entry: dict, state: str) -> None:
     if "op" in entry:  # a VTT action: the connector checks and takes it
         other = "after" if state == "before" else "before"
         try:
-            before, after = vtt.perform(entry["op"], entry["target"], entry[state], entry[other])
+            # The undo is the GM's own gesture, which the VTT's ceiling does not bound (DEL-19).
+            level = entry["effective_level"] if state == "after" else None
+            before, after = vtt.perform(
+                entry["op"], entry["target"], entry[state], entry[other], level
+            )
         except vtt.VttError as e:
             raise DelegationError(str(e)) from e
         if state == "after":  # the state the VTT reports, not the one asked for
