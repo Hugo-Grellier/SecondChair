@@ -1298,6 +1298,14 @@ def _target(ws: Workspace, relative: str) -> Path:
         WORLD_FILE,
         FRICTIONS_DIR,
         STATE_DIR,
+        # Written by other Core modules, which this one cannot import: the wrap's candidates and
+        # dates, the house rules, the reference library, the Foundry binding, Source references.
+        "capture",
+        "time.yaml",
+        "house-rules.yaml",
+        "library.yaml",
+        "foundry.yaml",
+        "sources",
     ):
         raise DelegationError(f"{relative!r} belongs to the Core; no delegated action writes it.")
     return path

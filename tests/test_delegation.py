@@ -259,7 +259,18 @@ def test_create_entity_asks_the_agent_for_its_name(ws: Workspace) -> None:
 
 @pytest.mark.parametrize(
     "target",
-    ["delegation.yaml", "moment.yaml", "action-log/000009.yaml", "observations/000001.jsonl"],
+    [
+        "delegation.yaml",
+        "moment.yaml",
+        "action-log/000009.yaml",
+        "observations/000001.jsonl",
+        "capture/k1.yaml",
+        "time.yaml",
+        "house-rules.yaml",
+        "library.yaml",
+        "foundry.yaml",
+        "sources/s-1a2b3c4d.yaml",
+    ],
 )
 def test_a_delegated_action_cannot_write_the_core_files(ws: Workspace, target: str) -> None:
     with pytest.raises(delegation.DelegationError, match="belongs to the Core"):
