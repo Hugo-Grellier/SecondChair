@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from mcp.server.mcpserver import Context
 
 from secondchair.core import canon, machine
 from secondchair.core.delegation import (
@@ -24,6 +25,8 @@ from secondchair.core.delegation import (
     _for_agent,
     _read_yaml,
     _save,
+    bind,
+    bound_job,
     current_moment,
     locked,
 )
@@ -194,13 +197,18 @@ def raise_exception(ws: Workspace, job_id: int, message: str) -> dict:
 def agent_tools(ws: Workspace) -> list[Callable[..., Any]]:
     """What an agent's session calls to take a job and close it, served by the Core."""
 
-    def start_job(job: int, host: str, model: str, effort: str) -> dict[str, Any]:
+    def start_job(job: int, host: str, model: str, effort: str, ctx: Context) -> dict[str, Any]:
         """Start a queued SecondChair job from this session, when the GM asks you to. Report the
         agent host, model and effort you run with: they are logged as the job's effective
         configuration. Returns the job contract; its tier is only a hint. Then follow its
-        playbook and pass `job` to every delegated action."""
+        playbook and pass `job` to every delegated action. Until the job ends, every delegated
+        action of this session is for it."""
         with _for_agent():
-            return start(ws, job, {"host": host, "model": model, "effort": effort}, manual=True)
+            if (running := bound_job(ws, ctx)) is not None:
+                raise DelegationError(f"This session runs job {running}: finish it first.")
+            record = start(ws, job, {"host": host, "model": model, "effort": effort}, manual=True)
+            bind(ctx, job)
+            return record
 
     def finish_job(job: int) -> dict[str, Any]:
         """Mark a started SecondChair job done once its playbook is complete."""

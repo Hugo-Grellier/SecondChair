@@ -92,13 +92,20 @@ def _transcribe_command(args: argparse.Namespace) -> None:
             raise transcribe.TranscriptionError("Give either speaker tracks or --from, not both.")
         source_id = transcribe.register(ws, args.session, args.source)
         print(f"Referenced transcript {source_id} for session {args.session}.")
-        return
-    tracks = dict(args.tracks)
-    if len(tracks) != len(args.tracks):
-        raise transcribe.TranscriptionError("Give one track per speaker.")
-    template = configured_transcription()
-    out = transcribe.transcribe(ws, args.session, tracks, args.out, args.language, template)
-    print(f"Transcript of session {args.session}: {out}")
+        out = args.source.expanduser().resolve()
+    else:
+        tracks = dict(args.tracks)
+        if len(tracks) != len(args.tracks):
+            raise transcribe.TranscriptionError("Give one track per speaker.")
+        template = configured_transcription()
+        out = transcribe.transcribe(ws, args.session, tracks, args.out, args.language, template)
+        print(f"Transcript of session {args.session}: {out}")
+    job, new = capture.attach_transcript(ws, args.session, out)
+    n, done = job["id"], "queued on it" if new else "given it"
+    print(
+        f'Job {n} "wrap a session" {done}: run it (secondchair jobs run, or ask your agent '
+        f"to start job {n}), then secondchair wrap {args.session}."
+    )
 
 
 HOST_SETUP = {

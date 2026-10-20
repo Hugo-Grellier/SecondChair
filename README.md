@@ -22,6 +22,8 @@ secondchair moment between-sessions        # interactive terminal only
 secondchair session start                  # open the live session (interactive terminal only)
 secondchair break                          # signal a break: show the calls held for it
 secondchair session end --notes notes.md   # end it and queue "wrap a session" on your notes
+secondchair transcribe --session 1 gm=gm.flac al=al.flac   # transcribe the tracks for the wrap job
+secondchair jobs run                       # run the wrap job (or ask your agent to start it)
 secondchair wrap 1                         # the wrap's round, then advance the date (interactive only)
 secondchair approve 3                      # apply a pending proposal
 secondchair reject 3 --reason tone         # contradiction, rules, tone or other

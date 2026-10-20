@@ -300,6 +300,78 @@ def test_a_job_s_actions_follow_the_table_of_the_job_s_moment(ws: Workspace) -> 
     assert result.structured_content == {"entry": 1, "status": "pending"}
 
 
+def world_turn(ws: Workspace) -> int:
+    return jobs.queue(
+        ws,
+        playbook="world-turn",
+        inputs={"until": "4720-01-02"},
+        expected_output="occurrences",
+        responsibility="living_world",
+        tier="fast",
+    )["id"]
+
+
+# A legacy client keeps an MCP session; a 2026-07-28 one (auto) has none to bind (ARC-23a).
+SESSIONS = pytest.mark.parametrize("mode", ["legacy", "auto"])
+
+
+@SESSIONS
+def test_a_session_that_started_a_job_acts_for_it_whether_or_not_it_passes_job(
+    ws: Workspace, mode: Any
+) -> None:
+    world_turn(ws)
+    queue(ws)
+    started = {"job": 1, "host": "h", "model": "m", "effort": "e"}
+
+    async def run() -> list[Any]:
+        async with Client(build_server(ws), mode=mode) as client:
+            return [
+                await client.call_tool("start_job", started),
+                await client.call_tool("start_job", {**started, "job": 2}),
+                await client.call_tool("create_entity", {"names": ["Ada Fen"], "agent": "a"}),
+                await client.call_tool("create_entity", {"names": ["X"], "agent": "a", "job": 2}),
+                await client.call_tool("finish_job", {"job": 1}),
+                await client.call_tool("create_entity", {"names": ["Bo Lin"], "agent": "a"}),
+            ]
+
+    _, second, bound, other, _, after = asyncio.run(run())
+    if mode == "legacy":
+        assert second.is_error and "runs job 1" in second.content[0].text
+        assert other.is_error and "runs job 1" in other.content[0].text
+        assert not bound.is_error
+    else:
+        assert not second.is_error and not other.is_error
+        assert bound.is_error and "pass `job`" in bound.content[0].text
+    assert not after.is_error
+    first, last = log(ws)
+    assert first["job"] == (1 if mode == "legacy" else 2)
+    assert first["runner_configuration"]["host"] == "h"
+    assert last["job"] is None
+
+
+@SESSIONS
+def test_a_session_acting_for_a_started_job_stays_bound_to_it(ws: Workspace, mode: Any) -> None:
+    """A runner starts the job, not the agent's session: its first action for it binds it."""
+    world_turn(ws)
+    jobs.start(ws, 1, {"host": "h", "model": "m", "effort": "e"}, manual=False)
+
+    async def run() -> list[Any]:
+        async with Client(build_server(ws), mode=mode) as client:
+            return [
+                await client.call_tool("create_entity", {"names": ["Ada"], "agent": "a", "job": 1}),
+                await client.call_tool("create_entity", {"names": ["Bo Lin"], "agent": "a"}),
+            ]
+
+    with_job, without = asyncio.run(run())
+    assert not with_job.is_error
+    if mode == "legacy":
+        assert not without.is_error
+        assert [e["job"] for e in log(ws)] == [1, 1]
+    else:
+        assert without.is_error and "pass `job`" in without.content[0].text
+        assert [e["job"] for e in log(ws)] == [1]
+
+
 def test_the_runner_prompt_names_the_job_and_its_contract(ws: Workspace) -> None:
     queue(ws)
     text = runner.prompt(job(ws))
