@@ -22,6 +22,7 @@ METRICS = (
     "leaks",
     "narrative_direction",
     "fact_probes",
+    "knowledge_probes",
     "continuity_errors",
 )
 
@@ -61,18 +62,25 @@ def test_report_compares_the_delegated_table_with_the_baseline(scripted: Path) -
     assert (scripted / "report.md").read_text().startswith("# S0 bench report")
 
 
-def test_the_fact_probes_are_asked_and_scored_but_not_gated(scripted: Path) -> None:
+def test_the_probes_are_asked_and_scored_but_not_gated(scripted: Path) -> None:
     found = report(scripted)
     asked = yaml.safe_load((scripted / "delegated/1/probes.yaml").read_text())
-    assert list(asked) == list(s0.FACT_PROBES)
+    assert sorted(asked) == sorted(s0.PROBES)
     assert "expected" not in str(asked) and "npc-mira" not in str(asked)  # never the gold
-    # The fake records the factions and situations, and answers those two probes from canon.
+    # Canon has no ids for the common knowledge: the shape gives the terms, never their split.
+    terms = ("bell-ringing", "council-controls-gate", "bell-cause")
+    assert all(t in asked["common-knowledge"]["answer"] for t in terms)
+    # The fake records the factions, situations, mystery graph and who knows what at start, and
+    # answers those probes from canon.
+    answered = {"factions", "situations", "mystery-structure", *s0.KNOWLEDGE_PROBES}
     for run in found["tables"]["delegated"]["runs"]:
-        assert [p for p, ok in run["probes"].items() if ok] == ["factions", "situations"]
-        assert run["continuity_errors"] == len(s0.FACT_PROBES) - 2
-    assert found["tables"]["delegated"]["fact_probes"]["median"] == 2
+        assert {p for p, ok in run["probes"].items() if ok} == answered
+        assert run["continuity_errors"] == len(s0.PROBES) - len(answered)
+    assert found["tables"]["delegated"]["fact_probes"]["median"] == 3
+    assert found["tables"]["delegated"]["knowledge_probes"]["median"] == 4
     # The baseline's hand-made canon holds no fact: every probe fails, and the run still passes.
-    assert found["tables"]["baseline"]["fact_probes"]["max"] == 0
+    for metric in ("fact_probes", "knowledge_probes"):
+        assert found["tables"]["baseline"][metric]["max"] == 0
     assert found["passed"] is True
 
 
