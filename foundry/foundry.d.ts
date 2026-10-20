@@ -37,6 +37,18 @@ declare const game: {
     // Foundry passes the id of the user whose client emitted the message.
     on(event: string, fn: (data: unknown, senderId: string) => unknown): void;
   };
+  keybindings: {
+    register(
+      module: string,
+      key: string,
+      config: {
+        name: string;
+        editable: { key: string; modifiers?: string[] }[];
+        restricted?: boolean;
+        onDown: () => boolean;
+      },
+    ): void;
+  };
   modules: { get(id: string): object | undefined };
   scenes: {
     get(id: string): { uuid: string } | undefined;
@@ -85,16 +97,6 @@ interface CombatantLike {
 
 declare const canvas: { ready: boolean; mousePosition: { x: number; y: number } } | undefined;
 
-declare const foundry: {
-  applications: {
-    api: {
-      DialogV2: {
-        confirm(options: { window: { title: string }; content: string }): Promise<boolean>;
-      };
-    };
-  };
-};
-
 declare const ui: {
   players?: { render(): unknown };
   notifications: Record<
@@ -108,3 +110,14 @@ declare const ui: {
 type FoundryDoc = any;
 declare const Scene: { create(data: object): Promise<FoundryDoc> };
 declare const Actor: { create(data: object): Promise<FoundryDoc> };
+
+declare namespace foundry.applications.api {
+  class ApplicationV2 {
+    constructor(options?: object);
+    rendered: boolean;
+    render(options?: { force?: boolean }): Promise<this>;
+  }
+  const DialogV2: {
+    confirm(options: { window: { title: string }; content: string }): Promise<boolean>;
+  };
+}

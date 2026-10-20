@@ -500,6 +500,163 @@
         "user"
       ],
       "additionalProperties": false
+    },
+    {
+      "title": "desk",
+      "description": "Core to module: what the Director's Desk shows (ARC-14), sent after welcome, whenever it changes and after each gesture.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "desk"
+        },
+        "moment": {
+          "enum": [
+            "prep",
+            "live-session",
+            "between-sessions"
+          ]
+        },
+        "session": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/desk_call"
+          },
+          "description": "The calls due now, still open."
+        },
+        "decisions": {
+          "type": "array",
+          "description": "Facts and events recorded from the GM's words, awaiting confirmation at the GM-decision rank (DEL-29).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "words": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "text",
+              "words"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "type",
+        "moment",
+        "session",
+        "calls",
+        "decisions"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "gesture",
+      "description": "Module to Core: a GM gesture on the Director's Desk, an authenticated Surface (ARC-13).",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "gesture"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Echoed by the result."
+        },
+        "gesture": {
+          "enum": [
+            "approve",
+            "reject",
+            "confirm",
+            "break",
+            "start_session",
+            "end_session"
+          ]
+        },
+        "entry": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "approve and reject: the pending action log entry."
+        },
+        "reason": {
+          "enum": [
+            "contradiction",
+            "rules",
+            "tone",
+            "other"
+          ],
+          "description": "reject: the rejection reason (DEL-26)."
+        },
+        "doc": {
+          "type": "string",
+          "minLength": 1,
+          "description": "confirm: the fact or event id."
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "gesture"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "result",
+      "description": "Core to module: the gesture `id` was taken (ok), or refused with an error for the GM.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "result"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "pile": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/desk_call"
+          },
+          "description": "break only: the break pile, open calls due at the break and calls defaulted since the last break (DEL-32)."
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "ok"
+      ],
+      "if": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "error"
+        ]
+      },
+      "additionalProperties": false
     }
   ],
   "$defs": {
@@ -704,6 +861,79 @@
           "additionalProperties": false
         }
       ]
+    },
+    "desk_call": {
+      "type": "object",
+      "description": "A call on the GM as the Desk shows it (call.schema.json), with what its action entry would do.",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "enum": [
+            "proposal",
+            "exception",
+            "ceiling_refusal"
+          ]
+        },
+        "responsibility": {
+          "type": "string"
+        },
+        "deadline": {
+          "enum": [
+            "now",
+            "break"
+          ]
+        },
+        "status": {
+          "enum": [
+            "open",
+            "answered",
+            "defaulted",
+            "withdrawn"
+          ]
+        },
+        "entry": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The action log entry a proposal approves or rejects."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The entry's tool, agent, target and content, cut to 400 characters; null without an entry."
+        },
+        "reversible": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the entry's action can be undone; null without an entry."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "responsibility",
+        "deadline",
+        "status",
+        "entry",
+        "message",
+        "detail",
+        "reversible"
+      ],
+      "additionalProperties": false
     }
   }
 }

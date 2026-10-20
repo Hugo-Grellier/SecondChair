@@ -15,6 +15,8 @@
 
 **Delegation ceiling.** In the same settings, the GM sets the most any SecondChair agent may do in this world, whatever the campaign's delegation table says. It starts at *act then review*; an action above it is refused and becomes a call for you. Only a GM can change it, and each change is recorded.
 
+**Director's Desk.** Once connected, the GM gets a small window: the calls due now, to approve or reject with a reason; **Break**, which shows what was held for the break; **Start session** and **End session**; the decisions taken from your words that await your confirmation; and the ceiling, shown read-only. It opens on connection and whenever a call is due now; **Shift+D** opens it again. Players never see it.
+
 Only the active GM connects, and only one GM client at a time. The first connection binds the world to the campaign; another campaign's world is refused ([contract](../docs/contracts/foundry-bridge.md)).
 
 ## Licence and Foundry package policy

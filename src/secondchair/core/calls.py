@@ -107,7 +107,7 @@ def raise_exception(
 
 def answered(ws: Workspace, entry_id: int) -> None:
     """Close the open call on a proposal the GM approved or rejected. Callers hold the lock."""
-    for call in _calls(ws):
+    for call in read_calls(ws):
         if call["entry"] == entry_id and call["status"] == "open":
             call["status"] = "answered"
             _save(ws, call, CALLS_DIR)
@@ -137,7 +137,7 @@ def take_break(ws: Workspace) -> list[dict]:
         pass_deadline(ws, "break")
         pile = [
             c
-            for c in _calls(ws)
+            for c in read_calls(ws)
             if (c["status"] == "open" and c["deadline"] == "break")
             or (c["status"] == "defaulted" and not c.get("shown"))
         ]
@@ -157,7 +157,7 @@ def pass_deadline(ws: Workspace, gesture: str) -> None:
     for job in _jobs(ws):
         if job.get("deadline") in late_jobs and job["status"] in ("queued", "started"):
             _miss(ws, job)
-    for call in _calls(ws):
+    for call in read_calls(ws):
         if call["status"] == "open" and call["deadline"] in late_calls:
             _default(ws, call)
 
@@ -166,7 +166,7 @@ def interruptions(ws: Workspace, session: int | None = None) -> dict:
     """Interruptions counted at the Core, the same whatever the Surface (MET-06): in total and
     per responsibility, for one live session or all of them."""
     by: dict[str, int] = {}
-    for call in _calls(ws):
+    for call in read_calls(ws):
         if call.get("interruption") and session in (None, call.get("session")):
             by[call["responsibility"]] = by.get(call["responsibility"], 0) + 1
     return {"total": sum(by.values()), "by_responsibility": by}
@@ -214,7 +214,7 @@ def _log_default(
     )
 
 
-def _calls(ws: Workspace) -> list[dict]:
+def read_calls(ws: Workspace) -> list[dict]:
     return [_read_yaml(p) for p in sorted((ws.root / CALLS_DIR).glob("*.yaml"))]
 
 

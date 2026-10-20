@@ -190,16 +190,10 @@ def _gm_command(args: argparse.Namespace) -> str:
     if args.command == "session":
         if not auth:  # DEL-03a
             raise DelegationError("Starting or ending a session needs an interactive terminal.")
-        live = delegation.current_session(ws)
         if args.action == "start":
-            if live is not None:  # DEL-03b
-                raise DelegationError(f"Session {live} is already open; end it first.")
-            delegation.change_moment(ws, "live-session")
-            return f"Session {delegation.current_session(ws)} started: moment live-session."
-        if live is None:
-            raise DelegationError("No live session is open.")
+            return f"Session {delegation.start_session(ws)} started: moment live-session."
         notes = str(Path(args.notes).expanduser().resolve()) if args.notes else None
-        delegation.change_moment(ws, "between-sessions", notes)
+        live = delegation.end_session(ws, notes)
         return (
             f"Session {live} ended: moment between-sessions. "
             'Job "wrap a session" queued (secondchair jobs).'

@@ -4,6 +4,7 @@ PKG-07, PKG-08, PKG-09, ARC-18."""
 
 import asyncio
 import json
+import queue
 import stat
 import subprocess
 import sys
@@ -155,15 +156,24 @@ def test_a_bound_world_that_lost_its_mark_reconnects(bridge: str, token: str) ->
 
 
 @contextmanager
-def gm_client(url: str, token: str, ceiling: str = "act-then-review") -> Generator[dict[str, dict]]:
+def gm_client(
+    url: str,
+    token: str,
+    ceiling: str = "act-then-review",
+    inbox: queue.Queue | None = None,
+    sent: list[ClientConnection] | None = None,
+) -> Generator[dict[str, dict]]:
     """A connected GM client answering requests in its own little world under `ceiling`, as the
-    module's generic actions do; yields that world."""
+    module's generic actions do; yields that world. Other messages go to `inbox`; the socket
+    to `sent`, to say more."""
     docs = {TOKEN: {"x": 100, "y": 200}}
     with connect(url, origin=Origin("https://foundry.example")) as socket:
         socket.send(json.dumps(hello(token)))
         assert json.loads(socket.recv(timeout=5))["type"] == "welcome"
-        thread = threading.Thread(target=answer, args=(socket, docs, ceiling), daemon=True)
+        thread = threading.Thread(target=answer, args=(socket, docs, ceiling, inbox), daemon=True)
         thread.start()
+        if sent is not None:
+            sent.append(socket)
         yield docs
     thread.join(timeout=5)
 
@@ -171,13 +181,17 @@ def gm_client(url: str, token: str, ceiling: str = "act-then-review") -> Generat
 LEVELS = ["manual", "propose", "act-then-review", "autonomous"]
 
 
-def answer(socket: ClientConnection, docs: dict[str, dict], ceiling: str) -> None:
+def answer(
+    socket: ClientConnection, docs: dict[str, dict], ceiling: str, inbox: queue.Queue | None
+) -> None:
     """Answer the Core's requests until the socket closes."""
     for raw in socket:
         request = json.loads(raw)
         jsonschema.validate(request, SCHEMA)
         if request["type"] != "request":
-            continue  # the live session
+            if inbox is not None:
+                inbox.put(request)
+            continue  # the live session, the Desk
         doc = docs[request["target"]]
         before = dict(doc)
         level = request["level"]
@@ -294,3 +308,52 @@ def test_above_the_ceiling_the_connector_refuses_and_the_gm_gets_a_call(
     )
     called = yaml.safe_load((workspace / "calls/000001.yaml").read_text())
     assert (called["kind"], called["entry"]) == ("ceiling_refusal", 1)
+
+
+# The Director's Desk (ARC-12, ARC-14, DEL-03)
+
+
+def next_of(inbox: queue.Queue, kind: str, test: Any = lambda _: True) -> dict:
+    """The next message of `kind` from the Core passing `test`, skipping the others."""
+    while True:
+        message = inbox.get(timeout=10)
+        if message["type"] == kind and test(message):
+            return message
+
+
+def say(socket: ClientConnection, message: dict) -> None:
+    jsonschema.validate(message, SCHEMA)
+    socket.send(json.dumps(message))
+
+
+def test_the_desk_starts_a_session_and_approves_a_vtt_proposal_due_now(
+    bridge: str, token: str, workspace: Path
+) -> None:
+    table = yaml.safe_load((workspace / "delegation.yaml").read_text())
+    table["live-session"]["vtt_operations"]["level"] = "propose"
+    (workspace / "delegation.yaml").write_text(yaml.safe_dump(table))
+    inbox: queue.Queue = queue.Queue()
+    sockets: list[ClientConnection] = []
+    with gm_client(bridge, token, inbox=inbox, sent=sockets) as docs:
+        assert next_of(inbox, "desk")["moment"] == "prep"
+        say(sockets[0], {"type": "gesture", "id": "g1", "gesture": "start_session"})
+        assert next_of(inbox, "result")["ok"] is True
+        live = next_of(inbox, "desk", lambda m: m["moment"] == "live-session")
+        assert live["session"] == 1
+
+        async def propose() -> Any:
+            async with Client(bridge.replace("ws://", "http://").replace("/foundry", "/mcp")) as c:
+                arguments = {"token": TOKEN, "x": 300, "y": 200, "agent": "a", "blocking": True}
+                return await c.call_tool("move_token", arguments)
+
+        assert asyncio.run(propose()).structured_content == {"entry": 1, "status": "pending"}
+        [due] = next_of(inbox, "desk", lambda m: m["calls"])["calls"]
+        assert (due["kind"], due["entry"]) == ("proposal", 1)
+
+        say(sockets[0], {"type": "gesture", "id": "g2", "gesture": "approve", "entry": 1})
+        assert next_of(inbox, "result") == {"type": "result", "id": "g2", "ok": True}
+        assert docs[TOKEN] == {"x": 300, "y": 200}
+    assert (action(workspace)["status"], action(workspace)["approval"]["channel"]) == (
+        "applied",
+        "desk",
+    )

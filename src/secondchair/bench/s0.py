@@ -167,7 +167,7 @@ def world_observations(ws: Workspace, labels: dict[str, str]) -> dict[str, Any]:
         if state.get("key") == "agenda" and state["value"]["status"] == "done":
             done[state["value"]["id"]] = f["id"]
     queued = [r for r in records if r["status"] == "queued"]
-    open_calls = {c["id"]: c for c in calls._calls(ws) if c["status"] == "open"}
+    open_calls = {c["id"]: c for c in calls.read_calls(ws) if c["status"] == "open"}
     deadlines = {
         open_calls[r["call"]]["deadline"]
         for r in queued

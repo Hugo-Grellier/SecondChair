@@ -76,6 +76,31 @@ The module enforces its own **ceiling**, whatever the Core asks: one maximum del
 - Only a GM user changes it: Foundry keeps world settings to users with the *Modify configuration settings* permission, and the module refuses the change in the client of a user who is not a GM, even when that permission was granted to players. A change by a non-GM user that still lands is put back by the active GM client.
 - Each change is an **observation** (below) of kind `ceiling`, visibility `gm`, payload `{"user": <Foundry user id>, "before": …, "after": …}`, captured by the active GM client in every moment: tagged with the live session when one is open, else with `session: null`.
 
+### The Director's Desk (ARC-12, ARC-13, ARC-14)
+
+The **Director's Desk** is a minimal window of `secondchair-foundry`, with no tabs, shown only in the GM client connected to the Core (players' clients never open the bridge, and the module renders nothing and sends no gesture for a user who is not a GM). It opens when the module connects and whenever a call is due now; **Shift+D** (a GM-only keybinding) opens it again. It shows the current moment, the world's ceiling (read-only: it is changed only in the module settings), the calls due now, the break pile once the GM signals a break, and the facts and events recorded from the GM's words that await confirmation at the GM-decision rank.
+
+It holds no state (ARC-11): the Core sends the module a **desk** message after `welcome`, whenever the moment, the calls due now or the action log change (it looks every second), and after each gesture. Each button sends a **gesture**, which the Core takes and answers with a **result**:
+
+```json
+{"type": "desk", "moment": "live-session", "session": 3, "calls": [{"id": 4, "kind": "proposal", "responsibility": "disclosure", "deadline": "now", "status": "open", "entry": 12, "message": null, "detail": "speak by claude-live on lines/1.md: The bell rings.", "reversible": false}], "decisions": [{"id": "f-1a2b3c4d", "text": "The bell tower fell.", "words": "The bell tower fell in 4710."}]}
+{"type": "gesture", "id": "g1", "gesture": "reject", "entry": 12, "reason": "tone"}
+{"type": "result", "id": "g1", "ok": true}
+{"type": "result", "id": "g2", "ok": true, "pile": […]}
+{"type": "result", "id": "g3", "ok": false, "error": "Session 3 is already open; end it first."}
+```
+
+| Gesture | Fields | Does |
+|---|---|---|
+| `approve` | `entry` | approves a pending proposal (DEL-28), irreversible ones included (DEL-29) |
+| `reject` | `entry`, `reason` | rejects it, the reason one of contradiction, rules, tone, other (DEL-26) |
+| `confirm` | `doc` | confirms a fact or event from the GM's words as a GM decision (CAN-09, DEL-29) |
+| `break` | | signals a break; the result carries the break pile (DEL-30, DEL-32) |
+| `start_session` | | opens live-session with the next session id, refused while one is open (DEL-03, DEL-03b) |
+| `end_session` | | ends it: between-sessions, and "wrap a session" is queued (DEL-03, DEL-04) |
+
+The Desk is an **authenticated Surface** (ARC-13): its gestures reach the Core only over the bridge the token authenticated, from the GM client. The Core logs them as GM interactions with channel `desk` and `authenticated: true` (DEL-27). A gesture on a VTT action is taken in a worker thread, so the Core can send the GM client its request while the gesture waits.
+
 The GM's approval or undo of a VTT action from the CLI needs the GM client, which only the `serve` process holds: the CLI relays it to `POST /gm` on the served Core ([tool-registration.md](tool-registration.md)).
 
 ### Observations (ARC-16, CAP-03, CAP-08)
