@@ -128,9 +128,8 @@ def run(
         job = jobs.read(ws, job_id)
         if job["status"] in ("done", "missed"):  # finish_job, or a live deadline passed (ARC-28)
             return job
-        if error is None:
-            return jobs.end(ws, job_id)
-        jobs.end(ws, job_id, error)
+        # A clean exit is no proof the playbook is complete: only finish_job is (#171).
+        jobs.end(ws, job_id, error or f"{config['host']} exited without calling finish_job")
     call = jobs.raise_exception(
         ws,
         job_id,

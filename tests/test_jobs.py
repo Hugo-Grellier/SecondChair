@@ -27,11 +27,20 @@ JOB_SCHEMA = json.loads((CONTRACTS / "job.schema.json").read_text())
 LOG_SCHEMA = json.loads((CONTRACTS / "action-log-entry.schema.json").read_text())
 BIBLE = ROOT / "sample-campaign/bible.md"
 PLAYBOOK = "rebuild-entities-from-a-bible"
-OK = [sys.executable, "-c", "pass"]
+OK = [sys.executable, "-c", "pass"]  # exits cleanly without finish_job: a failed attempt (#171)
+
+
+def finishing(ws: Workspace) -> list[str]:
+    """A host that calls finish_job for its job, then exits cleanly."""
+    end = "import sys, pathlib; from secondchair.core import jobs, workspace as w; "
+    end += "jobs.end(w.load(pathlib.Path(sys.argv[1])), int(sys.argv[2]))"
+    return [sys.executable, "-c", end, str(ws.root), "{job}"]
+
+
 BROKEN = [sys.executable, "-c", "raise SystemExit('host unavailable')"]
 
 # The agent a fake host runs: it creates one entity for the job named in its prompt, over the
-# Core's MCP endpoint, and writes what the Core answered to the file given as its argument.
+# Core's MCP endpoint, finishes the job, and writes what the Core answered to the file given as its argument.
 FAKE_AGENT = """
 import asyncio, json, os, re, sys
 from mcp import Client
@@ -44,6 +53,8 @@ async def main():
         result = await client.call_tool(
             "create_entity", {"names": ["Ada Fen"], "agent": "fake-runner", "job": job}
         )
+        if not result.is_error:
+            await client.call_tool("finish_job", {"job": job})
     with open(out, "w") as f:
         json.dump({"error": result.is_error, "text": result.content[0].text}, f)
 
@@ -199,7 +210,7 @@ def test_every_block_s_playbooks_reach_the_agent_host(
     )
     queue(ws)
 
-    assert main(["jobs", "-w", str(ws.root), "run"]) == 0
+    main(["jobs", "-w", str(ws.root), "run"])  # it never calls finish_job: only argv matters
 
     dirs = [f"--plugin-dir={d}" for d in runner.playbook_dirs()]
     assert json.loads(out.read_text())[1:] == dirs
@@ -209,7 +220,9 @@ def test_every_block_s_playbooks_reach_the_agent_host(
 def test_with_the_first_entry_broken_the_second_is_used_and_both_are_logged(
     ws: Workspace, config: Path
 ) -> None:
-    configure(config, {"broken": BROKEN, "ok": OK}, ("broken", "model-a"), ("ok", "model-b"))
+    configure(
+        config, {"broken": BROKEN, "ok": finishing(ws)}, ("broken", "model-a"), ("ok", "model-b")
+    )
     queue(ws)
 
     assert main(["jobs", "-w", str(ws.root), "run"]) == 0
@@ -241,8 +254,30 @@ def test_with_every_entry_broken_the_job_stays_queued_and_calls_on_the_gm(
     assert "stays queued" in capsys.readouterr().err
 
 
+def test_a_host_exiting_cleanly_without_finish_job_is_a_failed_attempt(
+    ws: Workspace, config: Path
+) -> None:
+    configure(config, {"ok": OK}, ("ok", "model-a"))
+    queue(ws)
+
+    assert main(["jobs", "-w", str(ws.root), "run"]) == 1
+
+    record = job(ws)
+    assert record["status"] == "queued"
+    [attempt] = record["attempts"]
+    assert attempt["outcome"] == "failed" and "finish_job" in attempt["error"]
+    assert [yaml.safe_load(p.read_text())["kind"] for p in (ws.root / "calls").glob("*.yaml")] == [
+        "exception"
+    ]
+
+
 def test_a_missing_host_binary_is_a_broken_entry(ws: Workspace, config: Path) -> None:
-    configure(config, {"gone": ["/nonexistent/agent-host"], "ok": OK}, ("gone", "m"), ("ok", "m"))
+    configure(
+        config,
+        {"gone": ["/nonexistent/agent-host"], "ok": finishing(ws)},
+        ("gone", "m"),
+        ("ok", "m"),
+    )
     queue(ws)
 
     assert main(["jobs", "-w", str(ws.root), "run"]) == 0
