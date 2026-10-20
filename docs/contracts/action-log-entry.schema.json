@@ -43,6 +43,7 @@
             }
           ]
         },
+        "occurrence": {"type": "string", "description": "Present for an effect of the world-turn or a GM gesture on the living world: the occurrence key it applies (05-living-world-calendar.md, LW-04). Undoing an occurrence undoes every entry carrying its key and its cascade (LW-12)."},
         "op": {"type": "string", "description": "Present for an action taken in the VTT: the VTT connector's operation (docs/contracts/foundry-bridge.md). Absent for a workspace file."},
         "target": {"type": "string", "description": "The workspace file the action writes, relative to the workspace root; for a VTT action, the document acted on, as the connector names it (a Foundry UUID)."},
         "before": {"type": ["string", "object", "null"], "description": "The target's content before the action; null when absent. For a VTT action, the fields the VTT reported before it; null until it is taken."},

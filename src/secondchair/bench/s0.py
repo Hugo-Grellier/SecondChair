@@ -5,6 +5,9 @@ entity ids; this module scores the answers against the frozen gold set with no L
 ids resolve to the gold labels through exact names (sample-campaign/README.md, step 2), and
 bible facts through their cited paragraph (a `source` origin whose page is the gold label).
 
+Living-world probes (BEN-07) are read from the workspace after a world-turn case: clocks, agenda
+steps and who knows them, situation stages, what stays queued and why.
+
 Leaks are read from canon alone: what each listed audience holds (knowledge.known) must carry no
 canary, no forbidden string, and, for the party at start, none of the forbidden bible facts.
 """
@@ -15,7 +18,7 @@ from typing import Any
 import py3langid
 import yaml
 
-from secondchair.core import index, knowledge
+from secondchair.core import calls, index, knowledge, world
 from secondchair.core.delegation import LOG_DIR
 from secondchair.core.workspace import Workspace
 
@@ -83,6 +86,76 @@ def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
         },
         "language_drift": language_drift(ws),
     }
+
+
+def score_world_turn(ws: Workspace, gold: dict, case: str) -> dict:
+    """Pass or fail per expected field of one `world_turn_probes` case, read from the workspace
+    after its world-turn; `unscored` lists the expected fields this harness cannot read yet."""
+    [expected] = [c["expected"] for c in gold["world_turn_probes"] if c["id"] == case]
+    labels = _labels(ws, gold) | {
+        f["id"]: f["origin"]["page"]
+        for f in index.search_facts(ws, include_retconned=True)
+        if f["origin"].get("kind") == "source"
+    }
+    seen = world_observations(ws, labels)
+    return {
+        "probes": {
+            k: _norm(seen[k], labels) == _norm(v, {}) for k, v in expected.items() if k in seen
+        },
+        "unscored": sorted(set(expected) - set(seen)),
+    }
+
+
+def world_observations(ws: Workspace, labels: dict[str, str]) -> dict[str, Any]:
+    """What the living world shows now, in the vocabulary of the gold world-turn cases."""
+    now, records = world.state(ws), world.occurrences(ws)
+    label = {v: k for k, v in labels.items()}
+    holders = index.search_knowledge(ws, [*labels, index.PARTY])
+
+    def knowers(fact: str) -> list[str]:
+        return [k["knower"] for k in holders if k["fact"] == fact]
+
+    def learns(knower: str | None) -> list[str]:  # from a world-turn effect, never disclosed
+        return [
+            k["fact"] for k in holders if k["knower"] == knower and k["origin"]["kind"] == "rule"
+        ]
+
+    done: dict[str, str] = {}  # agenda step id -> the fact recording it done
+    for f in index.search_facts(ws):
+        state = f.get("state") or {}
+        if state.get("key") == "agenda" and state["value"]["status"] == "done":
+            done[state["value"]["id"]] = f["id"]
+    queued = [r for r in records if r["status"] == "queued"]
+    open_calls = {c["id"]: c for c in calls._calls(ws) if c["status"] == "open"}
+    deadlines = {
+        open_calls[r["call"]]["deadline"]
+        for r in queued
+        if r["call"] in open_calls and open_calls[r["call"]]["kind"] == "exception"
+    }
+    seen: dict[str, Any] = {
+        "clocks": {e: f["clock"] for e, f in now["fronts"].items()},
+        "agenda_steps": list(done),
+        "agenda_knowers": {step: knowers(f) for step, f in done.items()},
+        "queued_ticks": sorted({r["entity"] for r in queued if r["kind"] == "tick"}),
+        "narrative_pending": [r["entity"] for r in queued if r["class"] == "narrative"],
+        "suppressed_tick_dates": [r["date"] for r in records if r["status"] == "suppressed"],
+        "unless_evidence": sorted({c for r in records for c in r["cites"]}),
+        "party_learns": learns(index.PARTY),
+        "edda_learns": learns(label.get("npc-edda")),
+    }
+    if len(deadlines) == 1:
+        [seen["exception_deadline"]] = deadlines
+    if ferry := label.get("situation-ferry"):
+        situation = now["situations"].get(ferry, {})
+        seen["situation_ferry_stage"] = situation.get("stage")
+        expiry = [r for r in records if r["key"] == f"{ferry}/deadline@{situation.get('deadline')}"]
+        expired = [f["id"] for f in index.search_facts(ws, entity=ferry) if f["valid_to"] is None]
+        seen["ferry_expiry_knowers"] = (
+            [k for f in expired for k in knowers(f)]
+            if expiry and expiry[0]["status"] == "applied"
+            else []
+        )
+    return seen
 
 
 def leaks(ws: Workspace, gold: dict) -> list[str]:

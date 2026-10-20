@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, ARC-10, CAP-01, CAP-02, CAP-03, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, ARC-10, CAP-01, CAP-02, CAP-03, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-13.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -15,6 +15,8 @@ my-campaign/
 ├── jobs/              # one YAML file per job: 000001.yaml, …
 ├── calls/             # one YAML file per call on the GM: 000001.yaml, …
 ├── observations/      # one JSON Lines file per live session: 000001.jsonl, …, and outside-sessions.jsonl
+├── living-world.yaml  # the world-turn cursor; written by the first world-turn
+├── occurrences/       # one YAML file per world-turn occurrence: 000001.yaml, …
 ├── canon/
 │   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 │   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
@@ -184,6 +186,33 @@ One JSON Lines file per live session, named by the session id on six digits: eac
 
 A knowledge record whose origin is an observation with such a locator is refused when the observation does not exist, and, for the party, when its visibility is not `players` (ARC-16, CAP-08).
 
+## `living-world.yaml` and `occurrences/`
+
+The world-turn (05-living-world-calendar.md) advances fronts and situations over `]cursor, now]`. `living-world.yaml` holds its cursor, `cursor: '4725-01-15'`, the date up to which every occurrence is recorded (applied or queued); it never moves back. `occurrences/` holds one YAML file per occurrence, named by its id on six digits:
+
+```yaml
+id: 3
+at: '2026-10-20T09:00:00+00:00'
+key: e-1a2b3c4d/tick@4725-01-08   # used once, whatever happens to it (LW-13)
+kind: tick                        # tick, step, deadline, pause or resume
+class: rule                       # rule, derived (an unless tick) or narrative (ADR 0009)
+entity: e-1a2b3c4d
+date: '4725-01-08'                # its fictional date; a late accept keeps it (LW-17)
+rule: f-5e6f7a8b                  # the state fact it applies
+ticks: 1                          # a tick's clock segments
+status: applied                   # queued, applied, rejected, rescheduled or suppressed
+entries: [12, 13, 14]             # the action log entries that applied it
+call: null                        # the call on the GM it waits on
+job: null                         # the settle-an-unless or narrative-direction job
+cites: []                         # the fact ids an unless was settled with
+cause: null                       # a threshold step: the tick that crossed it
+rescheduled_from: null
+rescheduled_to: null              # <key>~<date>, a new key linked to it (LW-16)
+rescheduled_date: null
+```
+
+Keys: `<front>/tick@<date>`, `<front>/<step id>`, `<situation>/deadline@<date>`, `<front>/pause@<date>`, `<front>/resume@<date>`, and `<key>~<date>` for a rescheduled one. A rule effect is applied through the action log under living world, every entry carrying the key (`occurrence`); an `unless` tick queues a `settle-an-unless` job (input `occurrence`) and an engaged situation's deadline a `propose-narrative-direction` job; a world-turn that applied anything queues one `propose-consequences` job (input `occurrences`, the keys). On the CLI, in the workspace: `secondchair world turn <date> [--since <date>]` (refused in a live session; `--since` on the first one), `secondchair world forecast <date>` (writes nothing), `secondchair world decide <key> accept|reject|reschedule [--date <date>]`, `secondchair world undo <key> --reason <reason>` (with its cascade; the keys return to the queue) and `secondchair world pause|resume <front> <date>`.
+
 ## `canon/entities/`
 
 An entity carries identity only (CAN-02): YAML front matter, then its player-facing description in the campaign language.
@@ -225,7 +254,8 @@ Mira Pell sits on the Lock Council.
 | `relation` | Optional (CAN-03): `type`, `subject`, `object`. The type is one of the Core list `member_of`, `leads`, `lives_in`, `located_in`, `owns`, `knows`, `allied_with`, `opposes`, `serves`, `kin_of`, or one a System extension registers as an iterable of names under the `secondchair.relations` entry point group. Any other type is refused. |
 | `valid_from`, `valid_to` | Fictional validity (CAN-04), campaign dates, partial allowed; null when open. An event that opens or closes the fact sets its start or end instead. Validity is start-inclusive, end-exclusive. |
 | `rank` | `played`, `gm_decision`, `cited_source` or `agent_proposal`, highest first (CAN-06). Set by the Core from the origin, never by the caller. |
-| `origin` | Provenance (CAN-07), by `kind`: `observation` (`quote` verbatim, `locator`) ranks played; `source` (`source`, `page`) ranks cited_source; `gm` (`words`) ranks agent_proposal when an agent records it, and gm_decision once the GM confirms it with `secondchair confirm <id>` in an interactive terminal (CAN-09, DEL-29), which rewrites the rank and logs a `confirm` GM interaction; `job` (`job`) ranks agent_proposal and cannot be confirmed. Approving a proposal never raises its rank (CAN-08). |
+| `origin` | Provenance (CAN-07), by `kind`: `observation` (`quote` verbatim, `locator`) ranks played; `source` (`source`, `page`) ranks cited_source; `gm` (`words`) ranks agent_proposal when an agent records it, and gm_decision once the GM confirms it with `secondchair confirm <id>` in an interactive terminal (CAN-09, DEL-29), which rewrites the rank and logs a `confirm` GM interaction; `job` (`job`) ranks agent_proposal and cannot be confirmed; `rule` (`fact`, `key`) is written by the world-turn only, for a rule effect: it takes the rank of the rule fact it applies (ADR 0009). Approving a proposal never raises its rank (CAN-08). |
+| `state` | Optional (LW-03): makes it a **state fact** of a front or a situation, `{of, key, value}`, `of` one of its `entities`. `key` and `value`: `front` `{carrier, participants: [], capacity, every (a duration ≥ 1d), ticks: 1, anchor (a date), unless: null (a condition in words), active: true}`; `clock` (an integer ≥ 0); `agenda` `{id, when: {date} or {clock_gte}, status: pending, done or averted}`, one fact per step; `situation` `{stage: available, active (the party engaged it), resolved or expired, deadline: null, participants: []}`. An entity holds at most one current fact per key (one per agenda step). Every change is an offscreen event closing the old state fact and opening the new one. |
 | `never_true` | Optional, `true` for a **belief** (CAN-15): a statement that is never true, which knowers can only believe or suspect. It has no validity, no event opens or closes it, and searches at a date leave it out. Absent means false. |
 
 The record time is not in the file: the index takes it from the action log entry whose `after` is the file's current content (`admitted_by`), which carries the real time and the moment. A file changed by hand is admitted by its `hand_edit` entry (below).
@@ -353,7 +383,7 @@ A hand edit of `canon/` bypasses the Core (CAN-11). When it rebuilds the index, 
 
 ## `.secondchair/index.sqlite`
 
-The derived index (CAN-10): entities, facts, events and knowledge with their derived validity and status, and full-text tables over names, statements and descriptions (CAN-12). It records a fingerprint of `workspace.yaml`, `canon/` and `action-log/`, and any read rebuilds it when they changed. `secondchair check` (in the workspace, or with `-w <workspace>`) rebuilds it from the directory alone, with no Foundry and no Source (PKG-15), logs any hand edit, also validates `moment.yaml`, `delegation.yaml`, the action log, job and call files, names each invalid file and exits 1 if there is one. It lists the hand edits awaiting promotion. Deleting `.secondchair/` loses nothing.
+The derived index (CAN-10): entities, facts, events and knowledge with their derived validity and status, and full-text tables over names, statements and descriptions (CAN-12). It records a fingerprint of `workspace.yaml`, `canon/` and `action-log/`, and any read rebuilds it when they changed. `secondchair check` (in the workspace, or with `-w <workspace>`) rebuilds it from the directory alone, with no Foundry and no Source (PKG-15), logs any hand edit, also validates `moment.yaml`, `delegation.yaml`, the action log, job, call and occurrence files, names each invalid file and exits 1 if there is one. It lists the hand edits awaiting promotion. Deleting `.secondchair/` loses nothing.
 
 ## What is not in the workspace
 

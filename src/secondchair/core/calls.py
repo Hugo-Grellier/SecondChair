@@ -113,6 +113,15 @@ def answered(ws: Workspace, entry_id: int) -> None:
             _save(ws, call, CALLS_DIR)
 
 
+def close(ws: Workspace, call_id: int) -> None:
+    """Close an open call the GM answered by another gesture (a world-turn occurrence decided).
+    Callers hold the lock."""
+    call = _read_yaml(ws.root / CALLS_DIR / f"{call_id:06d}.yaml")
+    if call["status"] == "open":
+        call["status"] = "answered"
+        _save(ws, call, CALLS_DIR)
+
+
 def move_on(ws: Workspace) -> None:
     """The blocking turn or scene moved on: calls and live jobs due now take their safe default.
     ponytail: a Core gesture only; the VTT connector calls it on turn and scene changes."""

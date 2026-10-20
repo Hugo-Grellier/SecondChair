@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from secondchair import runner, transcribe
-from secondchair.core import calls, canon, delegation, index, jobs, machine, workspace
+from secondchair.core import calls, canon, delegation, index, jobs, machine, workspace, world
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.server import GM_PATH, LOOPBACK, MCP_PATH, SERVE_FILE, serve
@@ -317,6 +317,36 @@ def _jobs_command(args: argparse.Namespace) -> int:
     return status
 
 
+def _describe_occurrence(o: dict) -> str:
+    if o["kind"] == "ticks":  # LW-15: one line, one key per tick
+        return f"{len(o['keys'])} ticks of {o['entity']} ({', '.join(o['dates'])})"
+    status = f"  {o['status']}" if "status" in o else ""
+    return f"{o['date']}  {o['key']}  {o['class']}{status}"
+
+
+def _world_command(args: argparse.Namespace) -> str:
+    """The living world's GM gestures (LW-04, LW-05, LW-09, LW-12, LW-14, LW-16, LW-18)."""
+    ws = workspace.load(args.workspace)
+    auth = interactive()
+    what = args.world_command
+    if what in ("turn", "forecast"):
+        shown = (
+            world.present(world.world_turn(ws, args.date, args.since))
+            if what == "turn"
+            else world.forecast(ws, args.date, args.since)
+        )
+        lines = [_describe_occurrence(o) for o in shown]
+        return "\n".join(lines) or "Nothing due."
+    if what == "decide":
+        record = world.decide(ws, args.key, args.answer, auth, args.date)
+        return f"{args.key}: {record['status']}."
+    if what == "undo":
+        keys = world.undo(ws, args.key, args.reason, "cli", auth)
+        return f"Undone and queued again: {', '.join(keys)}."
+    record = world.set_active(ws, args.front, what == "resume", args.date, auth)
+    return f"{record['key']}: applied."
+
+
 def _in_vtt(ws: workspace.Workspace, entry_id: int) -> bool:
     path = ws.root / delegation.LOG_DIR / f"{entry_id:06d}.yaml"
     return path.is_file() and "op" in delegation.read_entry(ws, entry_id)
@@ -481,6 +511,31 @@ def main(argv: list[str] | None = None) -> int:
     transcribe_cmd.add_argument(
         "--language", help="the language spoken (default: the campaign language)"
     )
+    world_cmd = commands.add_parser("world", help="advance, forecast and steer the living world")
+    world_sub = world_cmd.add_subparsers(dest="world_command", required=True)
+    for name, help_text in (
+        ("turn", "run the world-turn up to a campaign date (never in a live session)"),
+        ("forecast", "show what world-turns would do up to a campaign date; writes nothing"),
+    ):
+        cmd = world_sub.add_parser(name, parents=[in_workspace], help=help_text)
+        cmd.add_argument("date")
+        cmd.add_argument("--since", help="the date the world starts from, on the first turn")
+    decide_cmd = world_sub.add_parser(
+        "decide", parents=[in_workspace], help="answer a queued occurrence"
+    )
+    decide_cmd.add_argument("key")
+    decide_cmd.add_argument("answer", choices=("accept", "reject", "reschedule"))
+    decide_cmd.add_argument("--date", help="the new date, to reschedule")
+    world_undo = world_sub.add_parser(
+        "undo",
+        parents=[in_workspace, reason],
+        help="undo an applied occurrence and its cascade; their keys return to the queue",
+    )
+    world_undo.add_argument("key")
+    for name in ("pause", "resume"):
+        cmd = world_sub.add_parser(name, parents=[in_workspace], help=f"{name} a front")
+        cmd.add_argument("front")
+        cmd.add_argument("date")
     args = parser.parse_args(argv)
 
     try:
@@ -512,6 +567,8 @@ def main(argv: list[str] | None = None) -> int:
             return _jobs_command(args)
         elif args.command == "transcribe":
             _transcribe_command(args)
+        elif args.command == "world":
+            print(_world_command(args))
         else:
             print(_gm_command(args))
     except (

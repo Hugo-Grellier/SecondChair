@@ -119,12 +119,13 @@ Approving or undoing a VTT action needs the GM client, which only the `serve` pr
 
 ## Jobs
 
-An agent running a job ([`job.schema.json`](job.schema.json)) passes `job` to every delegated action. The job must be started; the action is then bound by the delegation table of the job's moment (a manual cell refuses it), and its log entry records the job and the runner configuration it was started with. Two tools, served by the Core outside block registration with `_meta: {"secondchair/job": true}`, let a session take and close a job:
+An agent running a job ([`job.schema.json`](job.schema.json)) passes `job` to every delegated action. The job must be started; the action is then bound by the delegation table of the job's moment (a manual cell refuses it), and its log entry records the job and the runner configuration it was started with. Three tools, served by the Core outside block registration with `_meta: {"secondchair/job": true}`, let a session take, answer and close a job:
 
 | Tool | Does |
 |---|---|
 | `start_job(job, host, model, effort)` | Starts a queued job from the GM's own session (ARC-29): the host, model and effort the session reports are logged as the effective configuration. Returns the job record; its tier is only a hint. |
 | `finish_job(job)` | Marks a started job done. |
+| `settle_unless(occurrence, unless_holds, cites, job)` | The answer of a started `settle-an-unless` job (LW-10): whether a front's `unless` held on the tick's date, citing the ids of canon facts valid then. Held: the tick is suppressed. Not held: the tick applies at the agent-proposal rank. `null` or no citation: a call on the GM at the next break, and the tick stays queued. |
 
 A runner started by `secondchair jobs run` logs its attempt itself and gives the agent the contract in its prompt; the job is done when the agent calls `finish_job` or exits cleanly.
 
@@ -158,7 +159,7 @@ Each tool in `tools/list` carries its declarations in `_meta`, and the matching 
 }
 ```
 
-The Core's own reads, all under memory: `campaign_info` returns the campaign language, the workspace schema version and the protocol version; `search_entities(text)`, `search_facts(text, entity, relation, at, include_retconned)` and `search_events(text, fact)` search the derived index, structured and full text (every word of `text` must match); `what_knows(knower, at)` returns what a knower holds, inheritance included, and `check_audience_content(audience, text, cites, at)` checks content for an audience ([workspace layout](workspace-layout.md#canonknowledge)). A read's refusal reaches the agent as an MCP error with its message. The mystery graph adds `check_mystery(mystery, lose)`, under prep: the graph with each element's state, its problems and warnings, `lose` simulating the loss of clues without writing.
+The Core's own reads, all under memory: `campaign_info` returns the campaign language, the workspace schema version and the protocol version; `search_entities(text)`, `search_facts(text, entity, relation, at, include_retconned)` and `search_events(text, fact)` search the derived index, structured and full text (every word of `text` must match); `what_knows(knower, at)` returns what a knower holds, inheritance included, and `check_audience_content(audience, text, cites, at)` checks content for an audience ([workspace layout](workspace-layout.md#canonknowledge)). A read's refusal reaches the agent as an MCP error with its message. The mystery graph adds `check_mystery(mystery, lose)`, under prep: the graph with each element's state, its problems and warnings, `lose` simulating the loss of clues without writing. The living world adds, under living world: `living_world()`, each front's clock, capacity, activity and agenda steps, each situation's stage and deadline, the world-turn cursor and the occurrences still queued; `forecast_world(until)`, what coming world-turns would record up to a campaign date, writing nothing (LW-18).
 
 ## Versioning
 
