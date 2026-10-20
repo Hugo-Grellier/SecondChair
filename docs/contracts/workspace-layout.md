@@ -592,3 +592,106 @@ The derived index (CAN-10): entities, facts, events and knowledge with their der
 ## In the tool repository
 
 The tool never ships a workspace (LIC-09). The CI guard `scripts/guard_no_workspace.py` (LIC-10) fails on any tracked `workspace.yaml`, any file under a `.secondchair/` directory, and files that look like Sources (audio, PDF, a Foundry `world.json`), except inside the sample campaign's folder, `sample-campaign/`.
+
+## Campaign workshop and reference library (spec 12, first delivery)
+
+`init` installs the versioned campaign workshop skill into
+`.agents/skills/campaign-workshop/SKILL.md` (Codex) and
+`.claude/skills/campaign-workshop/SKILL.md` (Claude Code). The tracked
+`.secondchair-skills.json` records the managed version and file hashes.
+`secondchair campaign-skill [-w <workspace>]` installs it in an existing workspace
+or updates unchanged managed copies. It preflights both hosts and refuses local
+edits or symlink destinations before changing either copy. Move custom guidance
+to a separately named skill or campaign instructions, then retry. No force
+replacement is provided. Custom skills and existing agent instructions are kept.
+
+The skill supports an open conversation directed by the human GM, including
+maintenance and play support. With the GM's permission, working ideas, questions
+and rejected directions are saved in `notes/workshop/<theme>.md`. They remain
+outside `canon/`; no importer promotes them. A positive reaction is provisional.
+The skill requires explicit confirmation before proposing a canon write through
+the existing delegated tools. The GM's words retain the existing separate
+`secondchair confirm <id>` truth-confirmation step. Notes are ordinary editable
+Markdown; the agent reports actual writes and pending actions.
+
+`library.yaml` maps registered reference ids (`r-<24 hex digits>`, derived from the
+resolved file path) to filenames. Raw references stay outside the workspace.
+Registration of a directory snapshots its PDF, Markdown and UTF-8 text files
+recursively; repeat registration to discover newly added files. It is idempotent
+and grants neither permission. Directory entries have individual permissions.
+
+```sh
+secondchair sources add ~/references/setting.pdf
+secondchair sources add ~/references/books
+secondchair sources list
+# Use the returned r-… id; permissions are GM gestures in an interactive terminal:
+secondchair sources permit r-<id> --index allow
+secondchair sources index r-<id>
+secondchair sources search 'ancient harbor' --local  # GM terminal only
+secondchair sources permit r-<id> --model allow
+secondchair sources search 'ancient harbor'         # safe for model context
+# After a file changes, inspect the change and explicitly confirm replacement:
+secondchair sources index r-<id> --replace-changed
+secondchair sources permit r-<id> --model deny
+```
+
+The per-workspace local paths and permissions are stored in machine configuration,
+`$XDG_CONFIG_HOME/secondchair/library/<workspace-path-hash>.json`. Extracted text,
+embeddings and the version each workspace indexed live in one machine-wide SQLite
+index, `$XDG_DATA_HOME/secondchair/library/index.sqlite3`, keyed by content SHA-256
+and embedding model: a rulebook registered in several campaigns is extracted and
+embedded once. Neither travels in campaign Git history. On another machine or after
+moving a workspace, re-register sources and grant permissions again. Revocation stops
+retrieval immediately but retains the index. Superseded content versions stay in the
+index until it is deleted.
+Deleting `.secondchair/` does not discard the reference registry or cache.
+
+PDF indexing uses Poppler's `pdftotext` on PATH in reading-order mode (not
+`-layout`, which interleaves the columns of a multi-column page). Pages without selectable text
+are rasterized with `pdftoppm` and read by Tesseract; configure optional
+`ocr_languages` in machine `config.yaml` (default `eng+fra`). Scanned PDFs need
+Tesseract with those language packs installed. OCR runs locally in a temporary
+directory; the indexed result retains the original PDF page number. Extracted text is packed
+into passages of about 1,500 characters within a page. Markdown and text use line
+locations.
+
+Search is hybrid. A SQLite FTS5 index (BM25, accent-insensitive) requires every query
+term, for exact names of spells, gods and places; normalized passage embeddings from
+the multilingual Ollama model `qwen3-embedding:0.6b` find paraphrases (cosine ≥ 0.2).
+The top 30 of each are fused by reciprocal rank, and `score` is that fused rank
+score. Install Ollama, pull the model with `ollama pull qwen3-embedding:0.6b`, and
+keep the service available while indexing and searching. Machine `config.yaml` can
+set `semantic_model` (another installed Ollama embedding model) and `ollama_url`
+(default `http://127.0.0.1:11434`; point it at another machine the GM operates to
+index on its GPU). Source text used for embeddings is sent only to that server
+(ADR 0001 amendment). The result includes its method and filename with physical
+page or line citations. Model changes are detected separately from source changes;
+indexing with the selected model rebuilds those vectors. Each source excerpt is
+bounded to 1,800 characters, with 10 matches by default (50 maximum). Freshness
+trusts an unchanged file size and modification time and hashes only otherwise.
+Vectors are truncated to 256 dimensions (Qwen3-Embedding is trained for it).
+Every authorized vector is compared linearly per query: about 1 s at 300,000
+passages, so ~2–3 s for a whole PF2e library (~800,000 passages). Indexing is
+the slow part: about 11 minutes for a 138-page Lost Omens book on a laptop CPU;
+point `ollama_url` at a GPU machine for a whole library.
+
+The MCP reads `list_campaign_sources` and `search_campaign_library` expose only
+metadata and authorized excerpts. Source matches require both indexing and model
+permissions; local terminal search requires indexing alone. A purchased-content
+path with `opt_in: false` additionally blocks model excerpts, even when the
+reference's model permission is allowed. Granting one permission never implies
+the other. Permission changes and changed-index replacement have no MCP tool.
+Search reports unindexed, changed and unavailable sources, omits their excerpts,
+and never replaces an index automatically. A failed extraction or concurrent
+file change preserves the old index. Changed-index replacement requires both
+`--replace-changed` and an interactive GM terminal.
+
+The same search also reads campaign Markdown under `canon/`, `notes/` and
+`sessions/`, with filenames and line citations. These are file search results,
+including provisional or historical records; use `search_facts` for canon rank
+and validity. Search writes no campaign content and never resolves source/canon
+conflicts. Raw registered files (or enclosing directories) cannot be passed as
+job inputs, even with model permission: use authorized excerpt retrieval. This
+check runs at queue and start time. SecondChair does not sandbox a separately
+operated agent host's filesystem; its skill tells agents to use the authorized
+retrieval tools rather than read raw references or local caches themselves.

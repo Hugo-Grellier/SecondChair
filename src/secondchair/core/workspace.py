@@ -46,6 +46,9 @@ def init(root: Path, language: str, calendar: str | dict) -> Workspace:
         raise WorkspaceError(f"{language!r} is not a BCP 47 language tag (for example: en, fr).")
     _calendar(calendar, "--calendar")
 
+    from secondchair.core import campaign_skill
+
+    campaign_skill.plan(root)
     (root / STATE_DIR).mkdir(parents=True, exist_ok=True)
     config.write_text(
         yaml.safe_dump(
@@ -56,6 +59,7 @@ def init(root: Path, language: str, calendar: str | dict) -> Workspace:
     from secondchair.core import delegation  # it builds on this module
 
     delegation.seed(root)
+    campaign_skill.install(root)
     gitignore = root / ".gitignore"
     lines = gitignore.read_text().splitlines() if gitignore.exists() else []
     if f"{STATE_DIR}/" not in lines:

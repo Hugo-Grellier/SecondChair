@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 from mcp.server.mcpserver import Context
 
-from secondchair.core import canon, machine
+from secondchair.core import canon, library, machine
 from secondchair.core.delegation import (
     JOBS_DIR,
     DelegationError,
@@ -61,6 +61,7 @@ def queue(
         raise DelegationError(f"Tier {tier!r}: expected one of {', '.join(TIERS)}.")
     if responsibility not in RESPONSIBILITIES:
         raise DelegationError(f"Unknown responsibility {responsibility!r}.")
+    library.guard_job_inputs(ws, inputs)
     inputs = _licensed(ws, inputs)
     with locked(ws):
         moment, _ = current_moment(ws)
@@ -161,6 +162,7 @@ def start(ws: Workspace, job_id: int, config: dict[str, str], manual: bool) -> d
         job = read(ws, job_id)
         if job["status"] != "queued":
             raise DelegationError(f"Job {job_id} is {job['status']}, not queued.")
+        library.guard_job_inputs(ws, job["inputs"])
         job["status"] = "started"
         job["attempts"].append(
             {

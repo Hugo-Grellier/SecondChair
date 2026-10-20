@@ -12,11 +12,13 @@ import yaml
 from secondchair import review, runner, transcribe
 from secondchair.core import (
     calls,
+    campaign_skill,
     canon,
     capture,
     delegation,
     index,
     jobs,
+    library,
     machine,
     rules,
     workspace,
@@ -568,6 +570,39 @@ def _relay(
         raise not_served from e
 
 
+def _sources_command(args: argparse.Namespace) -> None:
+    ws = workspace.load(args.workspace)
+    action = args.source_command
+    if action == "add":
+        print("Registered: " + ", ".join(library.register(ws, args.path)))
+    elif action == "permit":
+        if args.index is None and args.model is None:
+            raise WorkspaceError("Give --index allow|deny or --model allow|deny.")
+        library.permit(
+            ws,
+            args.id,
+            None if args.index is None else args.index == "allow",
+            None if args.model is None else args.model == "allow",
+            interactive(),
+        )
+        print(f"Permissions updated for {args.id}.")
+    elif action == "index":
+        library.build_index(ws, args.id, args.replace_changed, interactive())
+        print(f"Index ready for {args.id}.")
+    elif action == "list":
+        print(json.dumps(library.listing(ws), ensure_ascii=False, indent=2))
+    else:
+        if args.local and not interactive():
+            raise WorkspaceError("Local-only excerpts need an interactive GM terminal.")
+        print(
+            json.dumps(
+                library.search(ws, args.query, local=args.local, limit=args.limit),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="secondchair")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -595,6 +630,26 @@ def main(argv: list[str] | None = None) -> int:
     in_workspace.add_argument(
         "-w", "--workspace", type=Path, default=Path(), help="campaign workspace (default: .)"
     )
+    commands.add_parser(
+        "campaign-skill",
+        parents=[in_workspace],
+        help="install or update the managed campaign skill; refuse local conflicts",
+    )
+    source_cmd = commands.add_parser("sources", help="registered campaign reference library")
+    source_sub = source_cmd.add_subparsers(dest="source_command", required=True)
+    source_sub.add_parser("add", parents=[in_workspace]).add_argument("path", type=Path)
+    source_sub.add_parser("list", parents=[in_workspace])
+    permit_cmd = source_sub.add_parser("permit", parents=[in_workspace])
+    permit_cmd.add_argument("id")
+    permit_cmd.add_argument("--index", choices=("allow", "deny"))
+    permit_cmd.add_argument("--model", choices=("allow", "deny"))
+    index_cmd = source_sub.add_parser("index", parents=[in_workspace])
+    index_cmd.add_argument("id")
+    index_cmd.add_argument("--replace-changed", action="store_true")
+    search_cmd = source_sub.add_parser("search", parents=[in_workspace])
+    search_cmd.add_argument("query")
+    search_cmd.add_argument("--limit", type=int, default=10)
+    search_cmd.add_argument("--local", action="store_true", help="GM terminal only; local excerpts")
     reason = argparse.ArgumentParser(add_help=False)
     reason.add_argument("--reason", required=True, choices=delegation.REASONS)
     moment_cmd = commands.add_parser(
@@ -817,6 +872,14 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"Created campaign workspace {ws.root} (campaign language {ws.campaign_language})"
             )
+        elif args.command == "campaign-skill":
+            ws = workspace.load(args.workspace)
+            changed = campaign_skill.install(ws.root)
+            print(
+                "Updated: " + ", ".join(changed) if changed else "Campaign skill already current."
+            )
+        elif args.command == "sources":
+            _sources_command(args)
         elif args.command == "token":
             print("Foundry token (keep it secret; paste it into the SecondChair module settings):")
             print(machine.ensure_foundry_token())
