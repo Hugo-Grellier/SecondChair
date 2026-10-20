@@ -76,3 +76,13 @@ uv run secondchair bench s0 ~/bench/s0-run --runner claude/<model>/high   # serv
 uv run secondchair bench s0 /tmp/s0 --runner fake/scripted/none          # what CI runs
 uv run secondchair bench report ~/bench/s0-run                           # recompute from the stored logs
 ```
+
+S2, Beginner Box prep, is private: its scenario directory (`scenario.yaml` with the command that
+restores the bench world from its snapshot and the `calibrate-encounters` job inputs, and
+`gold.yaml` with what the scripted GM keeps) lives outside the repository. Each run restores the
+bench world first, so a run never touches the players' world; the report gives prep GM effort,
+failed actions and acceptance rate:
+
+```sh
+uv run secondchair bench s2 ~/bench/s2-run --scenario ~/bench-private/s2 --runner claude/<model>/high
+```

@@ -4,7 +4,13 @@ import os
 import secrets
 from pathlib import Path
 
+import yaml
+
 TOKEN_FILE = "foundry-token"
+
+
+class MachineConfigError(Exception):
+    """A machine configuration SecondChair cannot use."""
 
 
 def _xdg(variable: str, default: str) -> Path:
@@ -15,6 +21,38 @@ def _xdg(variable: str, default: str) -> Path:
 
 def config_dir() -> Path:
     return _xdg("XDG_CONFIG_HOME", ".config")
+
+
+def config() -> tuple[Path, dict]:
+    """`config.yaml` of the machine configuration and its content, empty when absent."""
+    path = config_dir() / "config.yaml"
+    if not path.is_file():
+        return path, {}
+    try:
+        found = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise MachineConfigError(f"{path} is not valid YAML: {e}") from e
+    if not isinstance(found, dict):
+        raise MachineConfigError(f"{path} must be a YAML mapping.")
+    return path, found
+
+
+def purchased_content() -> list[tuple[Path, bool]]:
+    """The GM's purchased content (LIC-12): each directory or file, and whether the GM opted in
+    to sending its content to a model."""
+    path, found = config()
+    entries = found.get("purchased_content", [])
+    if not isinstance(entries, list) or not all(
+        isinstance(e, dict)
+        and isinstance(e.get("path"), str)
+        and isinstance(e.get("opt_in", False), bool)
+        and set(e) <= {"path", "opt_in"}
+        for e in entries
+    ):
+        raise MachineConfigError(
+            f"{path}: purchased_content must be a list of {{path, opt_in}} entries."
+        )
+    return [(Path(e["path"]).expanduser().resolve(), e.get("opt_in", False)) for e in entries]
 
 
 def data_dir() -> Path:

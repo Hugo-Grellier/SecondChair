@@ -8,11 +8,15 @@ Workspace files (docs/contracts/workspace-layout.md): one YAML file per job in `
 (docs/contracts/job.schema.json), one per call on the GM in `calls/`.
 """
 
+import hashlib
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-from secondchair.core import canon
+import yaml
+
+from secondchair.core import canon, machine
 from secondchair.core.delegation import (
     JOBS_DIR,
     DelegationError,
@@ -24,9 +28,10 @@ from secondchair.core.delegation import (
     locked,
 )
 from secondchair.core.tools import RESPONSIBILITIES
-from secondchair.core.workspace import Workspace
+from secondchair.core.workspace import STATE_DIR, Workspace
 
 TIERS = ("fast", "standard", "deep")  # ARC-25
+PURCHASED_DIR = f"{STATE_DIR}/purchased"  # metadata indexes of purchased content (LIC-12)
 CONFIG_KEYS = ("host", "model", "effort")  # a runner configuration (ARC-26)
 
 
@@ -53,6 +58,7 @@ def queue(
         raise DelegationError(f"Tier {tier!r}: expected one of {', '.join(TIERS)}.")
     if responsibility not in RESPONSIBILITIES:
         raise DelegationError(f"Unknown responsibility {responsibility!r}.")
+    inputs = _licensed(ws, inputs)
     with locked(ws):
         moment, _ = current_moment(ws)
         due, at_once = (
@@ -82,6 +88,47 @@ def queue(
         if at_once:
             calls._miss(ws, job)
         return job
+
+
+def _licensed(ws: Workspace, inputs: dict[str, str]) -> dict[str, str]:
+    """Purchased content is indexed by metadata by default (LIC-12): an input naming a path
+    that is, or holds, purchased content the GM has not opted in to send to a model becomes the
+    path of that path's metadata index, so none of its text reaches the job."""
+    purchased = machine.purchased_content()
+    found = {}
+    for name, value in inputs.items():
+        path = Path(value).expanduser()
+        if path.is_absolute() and path.exists():
+            path = path.resolve()
+            if any(
+                not opt_in and (path.is_relative_to(root) or root.is_relative_to(path))
+                for root, opt_in in purchased
+            ):
+                value = str(_metadata_index(ws, path))
+        found[name] = value
+    return found
+
+
+def _metadata_index(ws: Workspace, path: Path) -> Path:
+    """A path's metadata index: its name and each file's relative path and size, no content."""
+    files = sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
+    index = {
+        "purchased_content": path.name,
+        "opt_in": False,
+        "note": "Metadata only: the GM has not opted in to sending this purchased content to a "
+        "model (LIC-12). Ask the GM for anything it does not list.",
+        "files": [
+            {
+                "path": str(p.relative_to(path) if path.is_dir() else p.name),
+                "bytes": p.stat().st_size,
+            }
+            for p in files
+        ],
+    }
+    target = ws.root / PURCHASED_DIR / f"{hashlib.sha256(str(path).encode()).hexdigest()[:16]}.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(index, sort_keys=False, allow_unicode=True))
+    return target
 
 
 def read(ws: Workspace, job_id: int) -> dict:

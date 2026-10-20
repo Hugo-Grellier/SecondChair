@@ -25,6 +25,7 @@ from secondchair.core import (
 from secondchair.core.calendar import CalendarError
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
+from secondchair.core.machine import MachineConfigError
 from secondchair.core.server import GM_PATH, LOOPBACK, MCP_PATH, SERVE_FILE, serve
 from secondchair.core.tools import RESPONSIBILITIES, RegistrationError
 from secondchair.core.workspace import STATE_DIR, WorkspaceError
@@ -32,25 +33,8 @@ from secondchair.core.workspace import STATE_DIR, WorkspaceError
 DEFAULT_PORT = 7240
 
 
-class MachineConfigError(Exception):
-    """A machine configuration `serve` cannot use."""
-
-
-def _machine_config() -> tuple[Path, dict]:
-    path = machine.config_dir() / "config.yaml"
-    if not path.is_file():
-        return path, {}
-    try:
-        config = yaml.safe_load(path.read_text()) or {}
-    except yaml.YAMLError as e:
-        raise MachineConfigError(f"{path} is not valid YAML: {e}") from e
-    if not isinstance(config, dict):
-        raise MachineConfigError(f"{path} must be a YAML mapping.")
-    return path, config
-
-
 def configured_port() -> int:
-    path, config = _machine_config()
+    path, config = machine.config()
     port = config.get("port", DEFAULT_PORT)
     if type(port) is not int or not 0 <= port <= 65535:
         raise MachineConfigError(f"{path}: port must be an integer between 0 and 65535.")
@@ -60,7 +44,7 @@ def configured_port() -> int:
 def configured_runners() -> tuple[dict[str, list[dict[str, str]]], dict[str, list]]:
     """The runner configuration, keyed by tier only (ARC-26), and the agent hosts' command
     templates: the built-in ones, overridden or extended by the machine configuration's."""
-    path, config = _machine_config()
+    path, config = machine.config()
     runners = config.get("runners") or {}
     hosts = config.get("hosts") or {}
     if not isinstance(runners, dict) or not set(runners) <= set(jobs.TIERS):
@@ -84,7 +68,7 @@ def configured_runners() -> tuple[dict[str, list[dict[str, str]]], dict[str, lis
 
 def configured_transcription() -> list[str] | None:
     """The transcription engine's command template, or None for WhisperX's."""
-    path, config = _machine_config()
+    path, config = machine.config()
     template = config.get("transcription")
     if template is not None and not (
         isinstance(template, list) and template and all(isinstance(a, str) for a in template)
@@ -345,14 +329,24 @@ def _runner_config(value: str) -> dict[str, str]:
 
 
 def _bench_command(args: argparse.Namespace) -> int:
-    from secondchair.bench import harness, report  # the bench is not the Core's
+    from secondchair.bench import harness, report, s2  # the bench is not the Core's
 
-    if args.bench_command == "s0":
-        hosts = configured_runners()[1]
-        found = harness.run_s0(args.sample, args.out, args.runner, hosts, args.runs)
-    else:
-        found = report.recompute(args.out)
-    print(f"S0 {'passed' if found['passed'] else 'FAILED'}; report: {args.out / 'report.md'}")
+    try:
+        if args.bench_command == "s0":
+            hosts = configured_runners()[1]
+            found = harness.run_s0(args.sample, args.out, args.runner, hosts, args.runs)
+        elif args.bench_command == "s2":
+            hosts = configured_runners()[1]
+            found = s2.run_s2(args.scenario, args.out, args.runner, hosts, args.runs)
+        else:
+            found = report.recompute(args.out)
+    except s2.BenchError as e:
+        print(f"secondchair: {e}", file=sys.stderr)
+        return 1
+    print(
+        f"{found['scenario']} {'passed' if found['passed'] else 'FAILED'}; "
+        f"report: {args.out / 'report.md'}"
+    )
     return 0 if found["passed"] else 1
 
 
@@ -714,6 +708,26 @@ def main(argv: list[str] | None = None) -> int:
         "scripted fake runner (model scripted, leaky or idle)",
     )
     s0_cmd.add_argument("-n", "--runs", type=int, default=3, help="runs per table (default 3)")
+    s2_cmd = bench_sub.add_parser(
+        "s2",
+        help="run scenario S2, Beginner Box prep, restoring its bench world before each run, "
+        "then report; exits 1 when an invariant fails",
+    )
+    s2_cmd.add_argument("out", type=Path, help="a new directory for the runs and the report")
+    s2_cmd.add_argument(
+        "--scenario",
+        type=Path,
+        required=True,
+        help="the private S2 scenario directory (scenario.yaml, gold.yaml)",
+    )
+    s2_cmd.add_argument(
+        "--runner",
+        type=_runner_config,
+        required=True,
+        help="the reference runner configuration, host/model/effort; `fake/prep/none` is the "
+        "scripted fake runner",
+    )
+    s2_cmd.add_argument("-n", "--runs", type=int, default=3, help="runs (default 3)")
     bench_report = bench_sub.add_parser(
         "report", help="recompute a bench report from its stored action logs"
     )

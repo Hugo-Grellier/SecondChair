@@ -63,6 +63,7 @@ def test_host_setup_prints_how_to_install_the_playbooks(
     assert f"claude plugin marketplace add {runner.PLAYBOOKS}" in out
     assert "claude plugin install secondchair@secondchair\n" in out
     assert "claude plugin install secondchair-foundry@secondchair-foundry\n" in out  # ARC-10
+    assert "claude plugin install secondchair-pf2e@secondchair-pf2e\n" in out
     main(["host", "setup", "codex"])
     out = capsys.readouterr().out
     for skill in runner.skills():
