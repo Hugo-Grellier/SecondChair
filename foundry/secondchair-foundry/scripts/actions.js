@@ -99,6 +99,8 @@ const KEPT = 200;
  * @param {(uuid: string) => Promise<Doc | null>} args.resolve  the document a UUID names
  * @param {{load(): unknown[], save(list: Handled[]): Promise<unknown>}} args.store  handled requests, kept across reloads
  * @param {() => Adapter | null} args.adapter  the system adapter, if one registered
+ * @param {Record<string, (params: Fields) => Promise<unknown>>} [args.reads]  the library's own
+ *   generic reads, answered before the adapter's
  * @param {() => unknown} args.ceiling  the world's ceiling setting
  * @param {() => string} args.language  the campaign language
  * @param {(token: Doc, line: string) => Promise<string>} args.say  have a token say a line aloud
@@ -106,7 +108,16 @@ const KEPT = 200;
  * @param {(user: Doc, line: string) => Promise<string>} args.tell  whisper a line to one user:
  *   a chat message only that user (and the GM) sees, whose id it returns
  */
-export function createActions({ resolve, store, adapter, ceiling, language, say, tell }) {
+export function createActions({
+  resolve,
+  store,
+  adapter,
+  ceiling,
+  language,
+  say,
+  tell,
+  reads: generic = {},
+}) {
   /** @type {Map<string, Promise<Reply>>} */
   const inflight = new Map();
   /** @type {Promise<unknown>} */
@@ -174,6 +185,9 @@ export function createActions({ resolve, store, adapter, ceiling, language, say,
    */
   async function read({ id, op, params }) {
     try {
+      if (Object.hasOwn(generic, op)) {
+        return { type: "reply", id, ok: true, result: await generic[op](params) };
+      }
       const reads = adapter()?.reads;
       if (!reads) throw new Error(`No system adapter is installed to read "${op}".`);
       if (!Object.hasOwn(reads, op)) throw new Error(`Unknown read "${op}".`);

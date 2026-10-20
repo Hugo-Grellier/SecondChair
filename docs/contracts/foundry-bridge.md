@@ -72,7 +72,7 @@ A delegated action that acts in the VTT returns a `VttAction` ([tool-registratio
 
 The module enforces its own **ceiling**, whatever the Core asks: one maximum delegation level for every action reaching this world. It is the world setting **Delegation ceiling** of `secondchair-foundry` (`manual`, `propose`, `act-then-review`, `autonomous`), `act-then-review` on a fresh world, so no base profile exceeds it and *autonomous* takes raising it in Foundry on purpose.
 
-- It also bounds the realisation of a [prepared scene](#prepared-scenes-arc-10-bve-02), at the `level` the `realise` message carries.
+- It also bounds the realisation of a [prepared scene](#prepared-scenes-arc-10-bve-02) or [world document](#prepared-world-documents-arc-07-arc-10), at the `level` the `realise` or `realise_document` message carries.
 - A request whose `level` is above the ceiling, or not a level, is refused before anything is read: `{"type": "reply", "id": …, "ok": false, "error": "Refused by this world's delegation ceiling (propose): …", "reason": "ceiling"}`. A `null` level, the GM's undo, is not bounded. The ceiling is read at each request, so a change applies at once.
 - The Core logs the refusal as a failed action and writes a **call** on the GM, `kind: ceiling_refusal`, in `calls/` ([workspace-layout.md](workspace-layout.md)).
 - Only a GM user changes it: Foundry keeps world settings to users with the *Modify configuration settings* permission, and the module refuses the change in the client of a user who is not a GM, even when that permission was granted to players. A change by a non-GM user that still lands is put back by the active GM client.
@@ -136,7 +136,7 @@ While a GM client is connected, the bridge sends it each desired scene it has no
 
 The **ceiling** bounds a realisation (DEL-19a), checked when the scene is realised, since the GM may also edit the file. `level` is the effective level of the `prepare_scene` entry that last wrote the desired state, or null when the GM wrote it last, by hand or by an undo, which the ceiling does not bound. Above the ceiling the module refuses it before reading anything, with `reason: "ceiling"`, and warns the GM. A refused realisation is not an action: no entry is logged and no call is made; the refusal is the scene's report, and the bridge sends the scene again after the next change of the ceiling (its `ceiling` observation).
 
-With no GM client the desired state waits: every connection starts by sending all of them, which changes nothing in a scene already realised. The Core keeps each scene's last report in `.secondchair/scenes/<key>.json`; the read `scene_report(key)` returns it, with `pending` when the desired state changed since. A compendium Actor is imported into the world once, the first time a token needs it.
+With no GM client the desired state waits: every connection starts by sending all of them, which changes nothing in a scene already realised. [Prepared documents](#prepared-world-documents-arc-07-arc-10) are sent first in each look, and every scene again after a document is sent, so a scene uses the documents it refers to. The Core keeps each scene's last report in `.secondchair/scenes/<key>.json`; the read `scene_report(key)` returns it, with `pending` when the desired state changed since. A compendium Actor is imported into the world once, the first time a token needs it.
 
 **Reconciliation**, transplanted from v3 and run by the module (`scenes.js`): the Scene and each object it places carry, in their `secondchair-foundry` flags, their key, the fingerprint of what prep asked for (`spec`) and of what was written, read back from Foundry with the play state left out (`local`). For each object:
 
@@ -154,6 +154,21 @@ With no GM client the desired state waits: every connection starts by sending al
 A Token whose `actor` prep changed is rebound to the new Actor on update. A copy the GM pasted carries the same key: only one object per key is prep's, the others are the GM's.
 
 The **play state** is never compared nor rewritten: a token's position, elevation, rotation, visibility and actor delta, a door's state, a light, sound, tile or drawing's visibility, whether a region's behaviours are disabled. So a token the GM or a player moved stays where it is when prep changes it. A retouch is judged on the fields prep wrote only. The scene itself (`_scene`) is reconciled the same way, never deleted. An object that cannot be written is reported in `errors`; the others are still realised.
+
+### Prepared world documents (ARC-07, ARC-10)
+
+Prep also holds the world documents a session needs as desired states, `documents/<key>.yaml` ([workspace layout](workspace-layout.md#documents)), written by the delegated action `prepare_document(key, type, data, base, choice)` (prep, reversible): an NPC `Actor`, a GM handoff or handout `JournalEntry`, a treasure `Item`, a music `Playlist`, a `RollTable`. Its format is the schema's `desired_document`: `type`, `data` (the document's Foundry fields), `base` (the UUID of a compendium or world document it is made from, `data` merged on top) and the GM's `choice`. A journal's text page may give `text.markdown`: the module stores it as HTML (`text.content`, `format` 1), converted with the showdown Foundry's client ships. A document is created the GM's only (`ownership.default` 0) unless `data` sets `ownership`.
+
+The bridge sends them as it sends scenes, before the scenes in each look, and keeps each report in `.secondchair/documents/<key>.json`, returned by the read `document_report(key)`:
+
+```json
+{"type": "realise_document", "id": "6d1a…", "document": "ransom-note", "desired": {"type": "JournalEntry", "data": {"name": "The ransom note", "pages": [{"name": "Note", "type": "text", "text": {"markdown": "Bring **100 gp**."}}]}}, "level": "act-then-review"}
+{"type": "realised", "id": "6d1a…", "ok": true, "report": {"document": "jR7…", "summary": {"create": 1}, "actions": [{"action": "create", "key": "ransom-note"}], "errors": []}}
+```
+
+The module (`documents.js`) finds the document by its key in its `secondchair-foundry` flags (`document`), in any of the five types, and reconciles it as one object of a scene ([above](#prepared-scenes-arc-10-bve-02)): `create`, `update`, `noop`, `retouched`, `conflict`, `kept-deleted` (deleted in Foundry since it was created: the world remembers the keys it created, in a hidden world setting), `recreate` on the GM's choice; a change of type creates the new one and deletes the old one. `report.document` is its Foundry id, null when it is not in the world. Its play state is never compared nor rewritten: its `ownership` (a journal published to the players), a playlist's or sound's `playing` and `pausedTime`, a table result's `drawn`. On update, the embedded documents `data` gives (a journal's `pages`, a playlist's `sounds`, an actor's `items`, a table's `results`) are replaced as a whole, so their ids change. A document dropped from prep stays in the world.
+
+**References**: in a desired document or scene, a string value `"@prepared:<key>"` is the realised prepared document's id, and a Token item's `actor: "@prepared:<key>"` that Actor's UUID; `"@prepared:<playlist key>/<sound name>"` is that playlist sound's id (a Scene's `playlist` and `playlistSound`). The module resolves them before reconciling; one with no realised document is null, and an error in the report.
 
 ### Behaviour traces (TRC-01 to TRC-05; ADR 0012)
 
@@ -219,7 +234,15 @@ While a live session is open, in every mode of play, the PF2e adapter emits a `p
 
 ### Reads (CAN-20, RUL-22)
 
-What only the VTT knows, asked by the Core: `{"type": "read", "id", "op", "params"}`, answered `{"type": "reply", "id", "ok": true, "result": …}`, or with `ok: false` and an `error`. A read changes nothing, so it is neither queued nor recorded with the handled requests. The library answers it with the adapter's `reads[op](params, {language})` and refuses it when there is none. With no GM client, or no reply within 15 seconds, the read fails with a message for the agent.
+What only the VTT knows, asked by the Core: `{"type": "read", "id", "op", "params"}`, answered `{"type": "reply", "id", "ok": true, "result": …}`, or with `ok: false` and an `error`. A read changes nothing, so it is neither queued nor recorded with the handled requests. The library answers its own generic reads (ARC-07), then the adapter's `reads[op](params, {language})`, and refuses one neither knows. With no GM client, or no reply within 15 seconds, the read fails with a message for the agent.
+
+The generic reads, answered by `secondchair-foundry` whatever the system, each bounded to 100 entries so a reply stays small; the Core's tools of the same names (prep) forward them, for an agent to find the maps, sounds, tokens and creatures of the GM's install:
+
+| `op` | `params` | `result` |
+|---|---|---|
+| `browse_files` | `{path, source, extensions}` | `{dirs, files, more?}`: Foundry's file picker browse of `path` in `source` (`data`, `public`), files filtered by `extensions` when given; `more` counts what was left out |
+| `search_compendium` | `{query, type, limit}` | `[{uuid, name, type, pack, img}]`: every pack's index entries whose name contains `query` (any case), `type` a document type (Actor, Item…) or the entry's system type (npc, loot…), at most `limit` (20 by default) |
+| `list_world_documents` | `{type, query}` | `[{uuid, id, name, prepared_key}]`: the world's documents of `type` (Actor, JournalEntry, Item, Playlist, RollTable, Scene) whose name contains `query`; `prepared_key` the key of the prepared document or scene it realises, else null |
 
 | `op` | `params` | `result` (PF2e adapter) |
 |---|---|---|

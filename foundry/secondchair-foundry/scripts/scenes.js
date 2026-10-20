@@ -30,6 +30,12 @@ export const PLAYED = {
   Drawing: ["hidden"],
   Region: ["behaviors.disabled"],
   Token: ["x", "y", "elevation", "hidden", "rotation", "delta", "sort"],
+  // World documents (documents.js): who sees one is a disclosure in play (publish_journal).
+  JournalEntry: ["ownership"],
+  Actor: ["ownership"],
+  Item: ["ownership"],
+  Playlist: ["ownership", "playing", "sounds.playing", "sounds.pausedTime"],
+  RollTable: ["ownership", "results.drawn"],
 };
 
 /**
@@ -148,7 +154,7 @@ export function summary(actions) {
 }
 
 /** @param {string} text */
-async function sha(text) {
+export async function sha(text) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)]
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -170,7 +176,7 @@ function project(value, shape) {
 
 /** The local fingerprint: the fields prep wrote, as the VTT holds them now, play state left out.
  * @param {string} type @param {Doc} doc @param {Data} shape */
-const local = (type, doc, shape) =>
+export const local = (type, doc, shape) =>
   sha(canonical(withoutPlayed(type, project(doc.toObject(), shape))));
 
 /** @param {SceneDoc} scene @param {string} type @param {string} id */
@@ -179,7 +185,7 @@ const embedded = (scene, type, id) =>
 
 /** Our flags: the shape is kept as text, so an update replaces it instead of merging it.
  * @param {Data} fields */
-const ours = (fields) => ({ flags: { [MODULE]: fields } });
+export const ours = (fields) => ({ flags: { [MODULE]: fields } });
 
 /**
  * Realise one desired scene: create it, or reconcile it with what the VTT holds now.

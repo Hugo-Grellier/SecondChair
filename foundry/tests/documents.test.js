@@ -1,0 +1,344 @@
+// Realising a prepared world document, its references, and the generic reads (ARC-07, ARC-10,
+// docs/contracts/foundry-bridge.md).
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+  finder,
+  genericReads,
+  LIMIT,
+  realiseDocument,
+  resolve,
+} from "../secondchair-foundry/scripts/documents.js";
+import { MODULE } from "../secondchair-foundry/scripts/scenes.js";
+import { validMessage as valid } from "./schema.js";
+
+/** @param {Record<string, any>} target @param {Record<string, any>} changes */
+function merge(target, changes) {
+  for (const [k, v] of Object.entries(changes)) {
+    if (
+      v &&
+      typeof v === "object" &&
+      !Array.isArray(v) &&
+      target[k] &&
+      typeof target[k] === "object"
+    )
+      merge(target[k], v);
+    else target[k] = structuredClone(v);
+  }
+}
+
+/** The embedded field each embedded document type lives in. */
+/** @type {Record<string, string>} */
+const FIELD = { JournalEntryPage: "pages", PlaylistSound: "sounds", Item: "items" };
+
+let ids = 0;
+/** A stand-in for a world document, its embedded documents kept in its source.
+ * @param {string} documentName @param {Record<string, any>} data */
+function doc(documentName, data) {
+  /** @type {Record<string, any>} */
+  const source = { ...structuredClone(data), _id: `d${++ids}` };
+  for (const field of Object.values(FIELD))
+    source[field] = source[field]?.map((/** @type {any} */ e) => ({ ...e, _id: `e${++ids}` }));
+  /** @param {string} type */
+  const list = (type) => /** @type {any[]} */ ((source[FIELD[type]] ??= []));
+  /** Only the id and name are read. @param {any} e @returns {any} */
+  const wrap = (e) => ({ id: e._id, name: e.name });
+  return {
+    documentName,
+    deleted: false,
+    get id() {
+      return source._id;
+    },
+    get uuid() {
+      return `${documentName}.${source._id}`;
+    },
+    get name() {
+      return source.name;
+    },
+    get flags() {
+      return source.flags ?? {};
+    },
+    source,
+    toObject: () => structuredClone(source),
+    /** @param {Record<string, any>} changes */
+    update: async (changes) => merge(source, changes),
+    /** @param {string} type */
+    getEmbeddedCollection: (type) => list(type).map(wrap),
+    /** @param {string} type @param {Record<string, any>[]} datas */
+    createEmbeddedDocuments: async (type, datas) => {
+      const made = datas.map((d) => ({ ...structuredClone(d), _id: `e${++ids}` }));
+      list(type).push(...made);
+      return made.map(wrap);
+    },
+    updateEmbeddedDocuments: async () => [],
+    /** @param {string} type @param {string[]} gone */
+    deleteEmbeddedDocuments: async (type, gone) => {
+      source[FIELD[type]] = list(type).filter((e) => !gone.includes(e._id));
+    },
+    async delete() {
+      this.deleted = true;
+    },
+  };
+}
+
+function world() {
+  /** @type {ReturnType<typeof doc>[]} */
+  const docs = [];
+  /** @type {Record<string, boolean>} */
+  let created = {};
+  const deps = {
+    findDocument: (/** @type {string} */ key) =>
+      docs.find((d) => !d.deleted && d.flags[MODULE]?.document === key) ?? null,
+    createDocument: async (/** @type {string} */ type, /** @type {Record<string, any>} */ data) => {
+      const made = doc(type, data);
+      docs.push(made);
+      return made;
+    },
+    fromBase: async (
+      /** @type {string} */ _type,
+      /** @type {string} */ base,
+      /** @type {Record<string, any>} */ data,
+    ) => {
+      const imported = { name: "Goblin Warrior", img: "goblin.webp", system: { level: -1 } };
+      return { ...imported, ...data, flags: { core: { sourceId: base } } };
+    },
+    markdown: (/** @type {string} */ text) =>
+      `<p>${text.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")}</p>`,
+    created: {
+      load: () => created,
+      save: async (/** @type {Record<string, boolean>} */ c) => {
+        created = structuredClone(c);
+      },
+    },
+  };
+  return { docs, deps };
+}
+
+const handout = () => ({
+  type: "JournalEntry",
+  data: {
+    name: "The ransom note",
+    pages: [{ name: "Note", type: "text", text: { markdown: "Bring **100 gp**." } }],
+  },
+});
+
+/** @param {ReturnType<typeof world>} w @param {any} desired @param {string} [key] */
+async function realiseChecked(w, desired, key = "ransom") {
+  const message = { type: "realise_document", id: "r1", document: key, desired, level: null };
+  assert.ok(valid(message), JSON.stringify(valid.errors));
+  const report = await realiseDocument(key, desired, w.deps);
+  const reply = { type: "realised", id: "r1", ok: true, report };
+  assert.ok(valid(reply), JSON.stringify(valid.errors));
+  return report;
+}
+
+test("a journal is created for the GM only, its Markdown page as HTML, then left alone", async () => {
+  const w = world();
+  const report = await realiseChecked(w, handout());
+  assert.deepEqual(report.summary, { create: 1 });
+  const [journal] = w.docs;
+  assert.equal(report.document, journal.id);
+  assert.deepEqual(journal.source.ownership, { default: 0 });
+  assert.deepEqual(journal.source.pages[0].text, {
+    content: "<p>Bring <b>100 gp</b>.</p>",
+    format: 1,
+  });
+  assert.equal(journal.source.flags[MODULE].document, "ransom");
+  assert.deepEqual((await realiseChecked(w, handout())).summary, { noop: 1 });
+});
+
+test("publishing a journal in play is not a retouch", async () => {
+  const w = world();
+  await realiseChecked(w, handout());
+  await w.docs[0].update({ ownership: { default: 2 } }); // publish_journal
+  assert.deepEqual((await realiseChecked(w, handout())).summary, { noop: 1 });
+});
+
+test("a prep change updates the document and replaces its pages wholesale", async () => {
+  const w = world();
+  await realiseChecked(w, handout());
+  const [journal] = w.docs;
+  const changed = handout();
+  changed.data.pages = [
+    { name: "Note", type: "text", text: { markdown: "Bring 200 gp." } },
+    { name: "Map", type: "text", text: { markdown: "The mill." } },
+  ];
+  const report = await realiseChecked(w, changed);
+  assert.deepEqual(report.summary, { update: 1 });
+  assert.deepEqual(
+    journal.source.pages.map((/** @type {any} */ p) => p.text.content),
+    ["<p>Bring 200 gp.</p>", "<p>The mill.</p>"],
+  );
+  assert.deepEqual((await realiseChecked(w, changed)).summary, { noop: 1 });
+});
+
+test("a GM retouch is kept, and a prep change to it waits for the GM's choice", async () => {
+  const w = world();
+  await realiseChecked(w, handout());
+  const [journal] = w.docs;
+  await journal.update({ name: "Ransom (GM)" });
+  assert.equal((await realiseChecked(w, handout())).summary.retouched, 1);
+
+  const changed = handout();
+  changed.data.name = "The ransom letter";
+  assert.equal((await realiseChecked(w, changed)).summary.conflict, 1);
+  assert.equal(journal.source.name, "Ransom (GM)");
+  await realiseChecked(w, { ...changed, choice: "overwrite" });
+  assert.equal(journal.source.name, "The ransom letter");
+});
+
+test("a document deleted in Foundry is not recreated, unless the GM chooses so", async () => {
+  const w = world();
+  await realiseChecked(w, handout());
+  await w.docs[0].delete();
+  const report = await realiseChecked(w, handout());
+  assert.equal(report.actions[0].action, "kept-deleted");
+  assert.equal(report.document, null);
+  assert.equal((await realiseChecked(w, { ...handout(), choice: "recreate" })).summary.create, 1);
+});
+
+test("an actor is made from its compendium base, the prep's fields on top", async () => {
+  const w = world();
+  const base = "Compendium.pf2e.pathfinder-bestiary.Actor.goblin";
+  const npc = { type: "Actor", base, data: { name: "Grik" } };
+  await realiseChecked(w, npc, "grik");
+  const [actor] = w.docs;
+  assert.deepEqual([actor.source.name, actor.source.system.level], ["Grik", -1]);
+  assert.equal(actor.source.flags.core.sourceId, base);
+  assert.equal(actor.source.flags[MODULE].base, base);
+  assert.deepEqual((await realiseChecked(w, npc, "grik")).summary, { noop: 1 });
+});
+
+test("a playlist stopped or played in Foundry is not a retouch", async () => {
+  const w = world();
+  const music = {
+    type: "Playlist",
+    data: { name: "Mill", mode: 0, sounds: [{ name: "Rain", path: "rain.ogg", repeat: true }] },
+  };
+  await realiseChecked(w, music, "mill");
+  const [playlist] = w.docs;
+  playlist.source.playing = true;
+  playlist.source.sounds[0].playing = true;
+  assert.deepEqual((await realiseChecked(w, music, "mill")).summary, { noop: 1 });
+});
+
+test("a document that cannot be written is reported", async () => {
+  const w = world();
+  w.deps.createDocument = async () => {
+    throw new Error("validation failed: name");
+  };
+  const report = await realiseChecked(w, handout());
+  assert.deepEqual(report.errors, ["ransom: validation failed: name"]);
+});
+
+test("@prepared references resolve to ids, a token's actor to a UUID, a sound by name", async () => {
+  const w = world();
+  await realiseChecked(w, { type: "Actor", data: { name: "Grik" } }, "grik");
+  const mill = { type: "Playlist", data: { name: "Mill", sounds: [{ name: "Rain" }] } };
+  await realiseChecked(w, mill, "mill");
+  const [grik, playlist] = w.docs;
+  const find = finder((key) => w.deps.findDocument(key));
+  /** @type {string[]} */
+  const errors = [];
+  const scene = resolve(
+    {
+      scene: { name: "Mill", playlist: "@prepared:mill", playlistSound: "@prepared:mill/Rain" },
+      items: [{ key: "grik", type: "Token", actor: "@prepared:grik", data: { x: 1 } }],
+    },
+    find,
+    errors,
+  );
+  assert.deepEqual(scene.scene, {
+    name: "Mill",
+    playlist: playlist.id,
+    playlistSound: playlist.source.sounds[0]._id,
+  });
+  assert.equal(scene.items[0].actor, `Actor.${grik.id}`);
+  assert.deepEqual(errors, []);
+
+  const missing = resolve(
+    { playlist: "@prepared:nowhere", sound: "@prepared:mill/Wind" },
+    find,
+    errors,
+  );
+  assert.deepEqual(missing, { playlist: null, sound: null });
+  assert.equal(errors.length, 2);
+});
+
+test("generic reads: files, compendium entries and world documents, bounded", async () => {
+  const files = Array.from({ length: LIMIT + 5 }, (_, i) => `maps/m${i}.webp`);
+  /** @type {unknown[]} */
+  const browsed = [];
+  const reads = genericReads({
+    browse: async (source, path, options) => {
+      browsed.push(source, path, options);
+      return { dirs: ["maps/old"], files };
+    },
+    packs: () => [
+      {
+        collection: "pf2e.pathfinder-bestiary",
+        documentName: "Actor",
+        getIndex: async () => [
+          { _id: "a1", name: "Goblin Warrior", type: "npc", img: "g.webp" },
+          { _id: "a2", name: "Ogre", type: "npc" },
+        ],
+      },
+      {
+        collection: "pf2e.equipment-srd",
+        documentName: "Item",
+        getIndex: async () => [{ _id: "i1", name: "Goblin pick", type: "weapon" }],
+      },
+    ],
+    documents: (type) =>
+      type === "Actor"
+        ? [
+            /** @type {any} */ ({
+              uuid: "Actor.x",
+              id: "x",
+              name: "Grik",
+              flags: { [MODULE]: { document: "grik" } },
+            }),
+            /** @type {any} */ ({ uuid: "Actor.y", id: "y", name: "Valeros", flags: {} }),
+          ]
+        : null,
+  });
+
+  const listing = /** @type {any} */ (
+    await reads.browse_files({ path: "maps", extensions: [".webp"] })
+  );
+  assert.deepEqual(browsed, ["data", "maps", { extensions: [".webp"] }]);
+  assert.equal(listing.files.length, LIMIT);
+  assert.equal(listing.more, 5);
+
+  const goblins = /** @type {any[]} */ (await reads.search_compendium({ query: "GOBLIN" }));
+  assert.deepEqual(goblins, [
+    {
+      uuid: "Compendium.pf2e.pathfinder-bestiary.Actor.a1",
+      name: "Goblin Warrior",
+      type: "npc",
+      pack: "pf2e.pathfinder-bestiary",
+      img: "g.webp",
+    },
+    {
+      uuid: "Compendium.pf2e.equipment-srd.Item.i1",
+      name: "Goblin pick",
+      type: "weapon",
+      pack: "pf2e.equipment-srd",
+      img: null,
+    },
+  ]);
+  const npcs = /** @type {any[]} */ (await reads.search_compendium({ query: "o", type: "npc" }));
+  assert.deepEqual(
+    npcs.map((e) => e.name),
+    ["Goblin Warrior", "Ogre"],
+  );
+  assert.equal(
+    /** @type {any[]} */ (await reads.search_compendium({ query: "", limit: 1 })).length,
+    1,
+  );
+
+  assert.deepEqual(await reads.list_world_documents({ type: "Actor", query: "gri" }), [
+    { uuid: "Actor.x", id: "x", name: "Grik", prepared_key: "grik" },
+  ]);
+  await assert.rejects(reads.list_world_documents({ type: "Wallpaper" }));
+});

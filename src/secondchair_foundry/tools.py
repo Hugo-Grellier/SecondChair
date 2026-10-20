@@ -2,7 +2,7 @@
 
 Generic VTT actions each describe one operation the `secondchair-foundry` module takes in the GM's
 client (docs/contracts/foundry-bridge.md); the Core logs it and has the bridge send it (ARC-04).
-A prepared scene is a desired state in the workspace, realised by the bridge.
+A prepared scene or world document is a desired state in the workspace, realised by the bridge.
 """
 
 import hashlib
@@ -19,6 +19,11 @@ from secondchair.core.workspace import STATE_DIR, Workspace
 DOOR_STATES = {"closed": 0, "open": 1, "locked": 2}  # Foundry's wall door states (`ds`)
 SCENES_DIR = "scenes"  # the desired scenes, one YAML file per scene key
 REPORTS_DIR = f"{STATE_DIR}/scenes"  # each scene's last reconciliation report (derived)
+DOCUMENTS_DIR = "documents"  # the desired world documents, one YAML file per document key
+DOCUMENT_REPORTS_DIR = f"{STATE_DIR}/documents"  # each document's last report (derived)
+DOCUMENT_TYPES = ("JournalEntry", "Actor", "Item", "Playlist", "RollTable")
+# A world or compendium document's UUID, its type captured: Actor.<id>, Compendium.<pack>.Actor.<id>
+UUID = re.compile(r"^(?:Compendium\.[\w-]+\.[\w-]+\.)?(\w+)\.[A-Za-z0-9]+$")
 ITEM_TYPES = ("Token", "Wall", "AmbientLight", "AmbientSound", "Note", "Tile", "Drawing", "Region")
 KEY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
@@ -132,6 +137,98 @@ def _check(key: str, desired: dict[str, Any]) -> None:
             raise ValueError(f"{k}: only a Token takes an `actor`, an Actor's UUID.")
 
 
+def prepare_document(
+    key: str,
+    type: Literal["JournalEntry", "Actor", "Item", "Playlist", "RollTable"],
+    data: dict[str, Any],
+    base: str | None = None,
+    choice: Choice | None = None,
+) -> Change:
+    """Write a world document's desired state: a journal, an NPC actor, an item, a playlist or a
+    roll table that must exist in Foundry after prep. The GM's client realises it by
+    reconciliation as soon as one is connected, keeping what the GM retouched; `document_report`
+    says how it went. Documents are realised before scenes, so a scene can use them.
+
+    `key` names the document in the campaign (lowercase words joined by dashes). `type` is its
+    Foundry document type, `data` its Foundry fields. `base` is the UUID of a compendium or world
+    document to make it from (`Compendium.pf2e.pathfinder-bestiary.Actor.<id>`), `data` set on
+    top of it; without `base`, `data` needs a `name`. By type:
+    - JournalEntry: `{name, pages: [{name, type: "text", text: {markdown: "..."}}]}`, the
+      Markdown shown as HTML in Foundry. Only the GM sees it unless `ownership` says otherwise:
+      `publish_journal` shows it to the players.
+    - Actor: `base` a bestiary entry, `data` `{name}` and any field to change (`img`,
+      `prototypeToken`, `system`…).
+    - Item: `base` an equipment or treasure entry, `data` `{name}` or other changes.
+    - Playlist: `{name, mode, sounds: [{name, path, repeat, volume}]}`, `mode` 0 in order,
+      1 shuffled, 2 soundboard only; `path` a sound file found with `browse_files`.
+    - RollTable: `{name, formula, results: [{type: "text", description, range: [low, high]}]}`.
+    The pages, sounds, results, and an actor's `items` when `data` gives them, are replaced as a
+    whole when prep changes them. In this document or a prepared scene, a string value
+    `@prepared:<key>` stands for that prepared document's Foundry id (a Token's `actor`: its
+    UUID), and `@prepared:<playlist key>/<sound name>` for that sound's id (a Scene's
+    `playlistSound`). `choice` is the GM's call on a conflict: `keep` the VTT's version,
+    `overwrite` it, or `recreate` a document deleted in Foundry. Writing the same state again
+    changes nothing."""
+    desired: dict[str, Any] = {"type": type}
+    if base is not None:
+        desired["base"] = base
+    desired["data"] = data
+    if choice is not None:
+        desired["choice"] = choice
+    _check_document(key, desired)
+    text = yaml.safe_dump(desired, sort_keys=False, allow_unicode=True)
+    return Change(path=f"{DOCUMENTS_DIR}/{key}.yaml", after=text)
+
+
+def _check_document(key: str, desired: dict[str, Any]) -> None:
+    """Refuse what the module could not realise (foundry-bridge.schema.json, desired_document)."""
+    if not KEY.match(key):
+        raise ValueError(f"Document key {key!r}: use lowercase words joined by dashes.")
+    kind, data, base = desired["type"], desired["data"], desired.get("base")
+    if kind not in DOCUMENT_TYPES:
+        raise ValueError(f"Type {kind!r} is not one of {', '.join(DOCUMENT_TYPES)}.")
+    if not isinstance(data, dict):
+        raise ValueError("`data` must hold the document's fields.")
+    if base is None and not (isinstance(data.get("name"), str) and data["name"]):
+        raise ValueError("Without a `base`, the document needs a `name` in `data`.")
+    found = UUID.match(base) if isinstance(base, str) else None
+    if base is not None and (not found or found[1] != kind):
+        raise ValueError(f"`base` {base!r}: give the UUID of a {kind}, world or compendium.")
+
+
+def browse_files(
+    path: str = "", source: str = "data", extensions: list[str] | None = None
+) -> dict[str, Any]:
+    """The folders and files in a directory of the GM's Foundry install, to find maps, tokens,
+    sounds and music for prep: `{dirs, files}`, paths to use as they are (a scene's
+    `background.src`, a playlist sound's `path`). `source` is `data` (the user data: `worlds/`,
+    `modules/<id>/…`, `assets/`) or `public` (Foundry's own icons and sounds); `extensions` keeps
+    only those files, such as `[".webp", ".jpg", ".png", ".webm"]` for maps or
+    `[".ogg", ".mp3"]` for sounds. Long listings are cut short, with `more` saying how many were
+    left out."""
+    params: dict[str, Any] = {"path": path, "source": source, "extensions": extensions}
+    return vtt.read("browse_files", params)
+
+
+def search_compendium(query: str, type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    """The compendium entries of the GM's install whose name contains `query` (any case), each
+    `{uuid, name, type, pack, img}`: the UUID to make a prepared document or a token from.
+    `type` keeps one document type (Actor, Item, JournalEntry, Scene, Playlist, RollTable…) or
+    one system type (pf2e: npc, hazard, loot, weapon, equipment…). At most `limit` entries (up
+    to 100)."""
+    return vtt.read("search_compendium", {"query": query, "type": type, "limit": limit})
+
+
+def list_world_documents(
+    type: Literal["Actor", "JournalEntry", "Item", "Playlist", "RollTable", "Scene"],
+    query: str = "",
+) -> list[dict[str, Any]]:
+    """The documents of one type already in the Foundry world, whose name contains `query`
+    (any case), each `{uuid, id, name, prepared_key}`: `prepared_key` the key of the prepared
+    document or scene it realises, null when the GM made it. At most 100."""
+    return vtt.read("list_world_documents", {"type": type, "query": query})
+
+
 class OfficialName(TypedDict):
     name: str | None
     official_reference: dict[str, str | None]
@@ -156,14 +253,11 @@ def official_name(key: str, pack: str | None = None) -> OfficialName:
 
 
 def tools(ws: Workspace) -> list[Tool]:
-    def scene_report(key: str) -> dict[str, Any]:
-        """How a prepared scene was last realised in Foundry: `realised`, then `pending` (the
-        desired state changed since and waits for a GM client), and the GM client's `report`
-        (what each object became, conflicts waiting for the GM's choice, errors) or `error`."""
-        desired = ws.root / SCENES_DIR / f"{key}.yaml"
+    def report(folder: str, reports: str, what: str, key: str) -> dict[str, Any]:
+        desired = ws.root / folder / f"{key}.yaml"
         if not KEY.match(key) or not desired.is_file():
-            raise ValueError(f"No prepared scene {key!r}.")
-        path = ws.root / REPORTS_DIR / f"{key}.json"
+            raise ValueError(f"No prepared {what} {key!r}.")
+        path = ws.root / reports / f"{key}.json"
         if not path.is_file():
             return {
                 "realised": False,
@@ -172,6 +266,19 @@ def tools(ws: Workspace) -> list[Tool]:
         record = json.loads(path.read_text())
         pending = record.pop("desired") != digest(desired.read_text())
         return {"realised": True, "pending": pending, **record}
+
+    def scene_report(key: str) -> dict[str, Any]:
+        """How a prepared scene was last realised in Foundry: `realised`, then `pending` (the
+        desired state changed since and waits for a GM client), and the GM client's `report`
+        (what each object became, conflicts waiting for the GM's choice, errors) or `error`."""
+        return report(SCENES_DIR, REPORTS_DIR, "scene", key)
+
+    def document_report(key: str) -> dict[str, Any]:
+        """How a prepared world document was last realised in Foundry: `realised`, then
+        `pending` (the desired state changed since and waits for a GM client), and the GM
+        client's `report` (its Foundry id, what it became, a conflict waiting for the GM's
+        choice, errors such as an unresolved `@prepared:` reference) or `error`."""
+        return report(DOCUMENTS_DIR, DOCUMENT_REPORTS_DIR, "document", key)
 
     return [
         Tool(
@@ -186,6 +293,13 @@ def tools(ws: Workspace) -> list[Tool]:
         Tool(fn=whisper, responsibility="disclosure", delegated_action=True, reversible=False),
         Tool(fn=prepare_scene, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=scene_report, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(fn=prepare_document, responsibility="prep", delegated_action=True, reversible=True),
+        Tool(fn=document_report, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(fn=browse_files, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(fn=search_compendium, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(
+            fn=list_world_documents, responsibility="prep", delegated_action=False, reversible=True
+        ),
         # ponytail: a read sits under memory (canon and continuity), as the Core's own reads.
         Tool(fn=official_name, responsibility="memory", delegated_action=False, reversible=True),
     ]
