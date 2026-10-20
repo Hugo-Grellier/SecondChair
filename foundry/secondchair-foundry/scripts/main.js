@@ -386,6 +386,12 @@ Hooks.once("ready", () => {
             return picker.browse(source, path, options);
           },
           packs: () => game.packs,
+          // Foundry's texture loader takes images and videos alike (a .webm map).
+          imageSize: async (path) => {
+            const texture = await foundry.canvas.loadTexture(path);
+            if (!texture) throw new Error(`Cannot load ${path} in the GM's client.`);
+            return { width: texture.width, height: texture.height };
+          },
           documents: (type) => (type === "Scene" ? game.scenes : collection(type)),
         }),
       });
@@ -462,6 +468,10 @@ const world = {
   tokenData: async (item) => {
     const actor = await worldActor(/** @type {string} */ (item.actor));
     return (await actor.getTokenDocument(item.data)).toObject();
+  },
+  // Foundry 14 keeps a scene's map in its levels (scenes.js).
+  get levels() {
+    return game.release.generation >= 14;
   },
 };
 

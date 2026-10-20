@@ -330,6 +330,7 @@ test("generic reads: files, compendium entries and world documents, bounded", as
             /** @type {any} */ ({ uuid: "Actor.y", id: "y", name: "Valeros", flags: {} }),
           ]
         : null,
+    imageSize: async (path) => ({ width: path.length * 100, height: 1000 }),
   });
 
   const listing = /** @type {any} */ (
@@ -376,6 +377,8 @@ test("generic reads: files, compendium entries and world documents, bounded", as
     { uuid: "Actor.x", id: "x", name: "Grik", prepared_key: "grik" },
   ]);
   await assert.rejects(reads.list_world_documents({ type: "Wallpaper" }));
+  assert.deepEqual(await reads.image_size({ path: "maps/a.webp" }), { width: 1100, height: 1000 });
+  await assert.rejects(reads.image_size({}));
 });
 
 test("prep never sets who sees a document: ownership is forced to the GM's only", async () => {

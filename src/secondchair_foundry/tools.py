@@ -101,10 +101,12 @@ def prepare_scene(
 
     `key` names the scene in the campaign (lowercase words joined by dashes). `scene` holds the
     Scene's Foundry fields, `name` required (for example `width`, `height`, `grid`,
-    `background`). `items` are the objects placed on it, each `{key, type, data}`: a key stable
-    across preparations, a type among Token, Wall, AmbientLight, AmbientSound, Note, Tile,
-    Drawing and Region, and the document's Foundry fields; a Token also takes `actor`, the UUID of
-    the Actor (world or compendium) it is made from. `choices` are the GM's calls by object key
+    `background`: `{src}`, the map, found with `browse_files`, its size read with `image_size`;
+    the module writes it where the Foundry version keeps it). `items` are the objects placed on
+    it, each `{key, type, data}`: a key stable across preparations, a type among Token, Wall,
+    AmbientLight, AmbientSound, Note, Tile, Drawing and Region, and the document's Foundry
+    fields; a Token also takes `actor`, the UUID of the Actor (world or compendium) it is made
+    from. `choices` are the GM's calls by object key
     (`_scene` for the scene itself): `keep` the VTT's version of a conflict, `overwrite` it, or
     `recreate` an object deleted in play. Never set `ownership`, nor a Region behaviour of type
     `executeScript`; HTML is sanitized. Writing the same state again changes nothing."""
@@ -242,6 +244,14 @@ def browse_files(
     return vtt.read("browse_files", params)
 
 
+def image_size(path: str) -> dict[str, Any]:
+    """An image's or video's size in pixels, `{width, height}`, loaded in the GM's client:
+    `path` as `browse_files` gives it. Set a scene's `width` and `height` from its map's, and its
+    `grid.size` so the map's squares fall on the grid (a map drawn at 140 pixels a square takes
+    `grid: {size: 140}`)."""
+    return vtt.read("image_size", {"path": path})
+
+
 def search_compendium(query: str, type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """The compendium entries of the GM's install whose name contains `query` (any case), each
     `{uuid, name, type, pack, img, level, rarity, traits}`: the UUID to make a prepared document or
@@ -330,6 +340,7 @@ def tools(ws: Workspace) -> list[Tool]:
         Tool(fn=document_report, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=browse_files, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=search_compendium, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(fn=image_size, responsibility="prep", delegated_action=False, reversible=True),
         Tool(
             fn=list_world_documents, responsibility="prep", delegated_action=False, reversible=True
         ),

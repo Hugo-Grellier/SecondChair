@@ -184,6 +184,10 @@ declare const ChatMessage: {
 };
 declare const Actor: { create(data: object): Promise<FoundryDoc> };
 
+declare namespace foundry.canvas {
+  function loadTexture(src: string): Promise<{ width: number; height: number } | null>;
+}
+
 declare namespace foundry.canvas.placeables {
   const Token: { prototype: FoundryDoc };
 }

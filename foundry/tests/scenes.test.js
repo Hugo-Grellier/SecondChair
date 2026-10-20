@@ -104,7 +104,14 @@ test("canonical ignores key order", () => {
 /** @param {Record<string, any>} target @param {Record<string, any>} changes */
 function merge(target, changes) {
   for (const [k, v] of Object.entries(changes)) {
-    if (
+    // Foundry updates an embedded entry named by its _id, as a scene's levels.
+    if (Array.isArray(v) && Array.isArray(target[k]) && v.every((e) => e?._id)) {
+      for (const e of v) {
+        const have = target[k].find((/** @type {any} */ t) => t._id === e._id);
+        if (have) merge(have, e);
+        else target[k].push(structuredClone(e));
+      }
+    } else if (
       v &&
       typeof v === "object" &&
       !Array.isArray(v) &&
@@ -135,7 +142,7 @@ function doc(data) {
   };
 }
 
-function world() {
+function world(levels = false) {
   /** @type {ReturnType<typeof fakeScene>[]} */
   const scenes = [];
   function fakeScene(/** @type {Record<string, any>} */ data) {
@@ -174,12 +181,15 @@ function world() {
     findScene: (/** @type {string} */ key) =>
       scenes.find((s) => s.flags[MODULE]?.scene === key) ?? null,
     createScene: async (/** @type {Record<string, any>} */ data) => {
-      const scene = fakeScene(data);
+      // Foundry 14 gives a new scene its default level, which holds the map.
+      const level = { _id: "defaultLevel0000", name: "Niveau", background: { src: null } };
+      const scene = fakeScene(levels ? { ...data, levels: [level] } : data);
       scenes.push(scene);
       return scene;
     },
     /** @param {{actor?: string, data: Record<string, any>}} item @returns {Promise<Record<string, any>>} */
     tokenData: async (item) => ({ actorId: `actor-of-${item.actor}`, ...item.data }),
+    levels,
   };
   return { scenes, deps };
 }
@@ -327,4 +337,31 @@ test("a created object keeps the flags its data or actor gave it", async () => {
   const { flags } = w.scenes[0].embedded.Token[0].source;
   assert.deepEqual(flags.pf2e, { linkToActorSize: true });
   assert.equal(flags[MODULE].key, "boss");
+});
+
+test("in Foundry 14 the map goes to the scene's default level, and a GM change is a retouch", async () => {
+  const w = world(true);
+  const mapped = cave({ scene: { name: "Goblin cave", background: { src: "maps/cave.webp" } } });
+  await realiseChecked(w, mapped);
+  const [scene] = w.scenes;
+  assert.equal(scene.source.background, undefined);
+  assert.deepEqual(scene.source.levels, [
+    { _id: "defaultLevel0000", name: "Niveau", background: { src: "maps/cave.webp" } },
+  ]);
+  assert.deepEqual((await realiseChecked(w, mapped)).summary, { noop: 3 });
+
+  const moved = cave({ scene: { name: "Goblin cave", background: { src: "maps/cave-2.webp" } } });
+  assert.equal((await realiseChecked(w, moved)).actions[0].action, "update");
+  assert.equal(scene.source.levels[0].background.src, "maps/cave-2.webp");
+  assert.equal(scene.source.levels.length, 1);
+
+  await scene.update({ levels: [{ _id: "defaultLevel0000", background: { src: "gm.webp" } }] });
+  assert.equal((await realiseChecked(w, moved)).actions[0].action, "retouched");
+});
+
+test("before Foundry 14 the map stays the scene's background", async () => {
+  const w = world();
+  await realiseChecked(w, cave({ scene: { name: "Cave", background: { src: "maps/cave.webp" } } }));
+  assert.deepEqual(w.scenes[0].source.background, { src: "maps/cave.webp" });
+  assert.equal(w.scenes[0].source.levels, undefined);
 });

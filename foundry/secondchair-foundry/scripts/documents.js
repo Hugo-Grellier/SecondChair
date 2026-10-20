@@ -272,9 +272,11 @@ const matches = (name, query) =>
  *   Foundry's file picker browse
  * @param {() => Iterable<{collection: string, documentName: string, getIndex(options: {fields: string[]}): Promise<Iterable<Data>>}>} env.packs
  * @param {(type: string) => Iterable<WorldDoc> | null} env.documents  a world collection
+ * @param {(path: string) => Promise<{width: number, height: number}>} env.imageSize
+ *   an image's or video's size in pixels, loaded in the GM's client
  * @returns {Record<string, (params: Data) => Promise<unknown>>}
  */
-export function genericReads({ browse, packs, documents }) {
+export function genericReads({ browse, packs, documents, imageSize }) {
   /** @param {string[]} list */
   const cut = (list) => list.slice(0, LIMIT);
   return {
@@ -309,6 +311,11 @@ export function genericReads({ browse, packs, documents }) {
         }
       }
       return found;
+    },
+    async image_size({ path }) {
+      if (typeof path !== "string" || !path) throw new Error("image_size needs a `path`.");
+      const { width, height } = await imageSize(path);
+      return { width, height };
     },
     async list_world_documents({ type, query = "" }) {
       const collection = documents(String(type));

@@ -58,6 +58,7 @@ export const PLAYED = {
  *   findScene(key: string): SceneDoc | null | Promise<SceneDoc | null>,
  *   createScene(data: Data): Promise<SceneDoc>,
  *   tokenData(item: Item): Promise<Data>,
+ *   levels?: boolean,
  * }} World
  */
 
@@ -179,6 +180,33 @@ function project(value, shape) {
 export const local = (type, doc, shape) =>
   sha(canonical(withoutPlayed(type, project(doc.toObject(), shape))));
 
+/** The id of the level Foundry 14 gives a new scene. */
+const DEFAULT_LEVEL = "defaultLevel0000";
+
+/** The fields of a scene's map, which Foundry 14 keeps in the scene's default level. */
+const MAP = ["background", "foreground"];
+
+/** A desired scene head, as Foundry writes it: with levels, the map goes to the default level,
+ * `levels[0]`, and `background` on the Scene is ignored.
+ * @param {Data} head @param {Data | null} scene  the scene as it is now, null to create it
+ * @param {boolean} levels */
+export function headWritten(head, scene, levels) {
+  if (!levels || !MAP.some((k) => k in head)) return { ...head };
+  const rest = Object.fromEntries(Object.entries(head).filter(([k]) => !MAP.includes(k)));
+  const _id = scene?.levels?.[0]?._id ?? DEFAULT_LEVEL;
+  const map = Object.fromEntries(MAP.filter((k) => k in head).map((k) => [k, head[k]]));
+  // ponytail: a parent update with an embedded entry's _id updates that level only.
+  return { ...rest, levels: [{ _id, ...map }] };
+}
+
+/** A scene as prep reads it back: with levels, its map is its default level's.
+ * @param {Data} scene @param {boolean} levels */
+export function headRead(scene, levels) {
+  if (!levels) return scene;
+  const level = scene.levels?.[0] ?? {};
+  return { ...scene, background: level.background, foreground: level.foreground };
+}
+
 /** @param {SceneDoc} scene @param {string} type @param {string} id */
 const embedded = (scene, type, id) =>
   /** @type {Doc} */ ([...scene.getEmbeddedCollection(type)].find((d) => d.id === id));
@@ -194,7 +222,7 @@ export const ours = (fields) => ({ flags: { [MODULE]: fields } });
  * @param {World} world
  * @returns {Promise<Report>}
  */
-export async function realise(key, desired, { findScene, createScene, tokenData }) {
+export async function realise(key, desired, { findScene, createScene, tokenData, levels = false }) {
   const choices = desired.choices ?? {};
   const head = desired.scene;
   const headSpec = await sha(canonical(head));
@@ -203,12 +231,17 @@ export async function realise(key, desired, { findScene, createScene, tokenData 
   /** @type {string[]} */
   const errors = [];
   let scene = await findScene(key);
+  /** @param {SceneDoc} s @returns {Doc} the scene as prep reads it back */
+  const asRead = (s) => ({ ...s, toObject: () => headRead(s.toObject(), levels) });
   if (!scene) {
-    scene = await createScene({ ...head, ...ours({ scene: key, created: {} }) });
+    // With levels, the map goes into the default level the new scene comes with.
+    const { levels: _, ...fields } = headWritten(head, null, levels);
+    scene = await createScene({ ...fields, ...ours({ scene: key, created: {} }) });
+    if (levels) await scene.update(headWritten(head, scene.toObject(), levels));
     actions.push({ action: "create", key: "_scene", type: "Scene" });
   } else {
     const f = scene.flags[MODULE];
-    const current = await local("Scene", scene, JSON.parse(f.shape ?? "{}"));
+    const current = await local("Scene", asRead(scene), JSON.parse(f.shape ?? "{}"));
     const have = {
       key: "_scene",
       type: "Scene",
@@ -220,11 +253,12 @@ export async function realise(key, desired, { findScene, createScene, tokenData 
     actions.push(
       ...reconcile([{ key: "_scene", type: "Scene", spec: headSpec }], [have], {}, choices),
     );
-    if (actions[0].action === "update") await scene.update(head);
+    if (actions[0].action === "update")
+      await scene.update(headWritten(head, scene.toObject(), levels));
   }
   if (["create", "update"].includes(actions[0].action)) {
     await scene.update(ours({ spec: headSpec, shape: JSON.stringify(head) }));
-    await scene.update(ours({ local: await local("Scene", scene, head) }));
+    await scene.update(ours({ local: await local("Scene", asRead(scene), head) }));
   }
 
   const items = new Map(desired.items.map((item) => [item.key, item]));

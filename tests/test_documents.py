@@ -182,3 +182,22 @@ def test_a_generic_read_is_asked_of_the_gm_client(
     reply = answered["reply"]
     assert not reply.is_error
     assert reply.structured_content == ({"result": result} if isinstance(result, list) else result)
+
+
+def test_an_image_size_is_asked_of_the_gm_client(bridge: str, token: str) -> None:  # noqa: F811
+    with gm_client(bridge, token) as socket:
+        answered: dict[str, Any] = {}
+        thread = threading.Thread(
+            target=lambda: answered.update(
+                reply=mcp(bridge, "image_size", {"path": "maps/cave.webp"})
+            ),
+            daemon=True,
+        )
+        thread.start()
+        read = next_of(socket, "read")
+        assert (read["op"], read["params"]) == ("image_size", {"path": "maps/cave.webp"})
+        result = {"width": 4200, "height": 2800}
+        socket.send(json.dumps({"type": "reply", "id": read["id"], "ok": True, "result": result}))
+        thread.join(timeout=10)
+
+    assert answered["reply"].structured_content == {"width": 4200, "height": 2800}
