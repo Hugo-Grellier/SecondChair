@@ -376,7 +376,9 @@ def test_notes_agreeing_with_the_clock_settle_it_and_disagreeing_ask_the_gm(
     jobs.end(ws, job)
     clock(ws, 1, "4726-01-01", "4726-01-05")
 
-    with pytest.raises(delegation.DelegationError, match="4726-01-05.*--start, --end"):
+    with pytest.raises(
+        delegation.DelegationError, match=r"4726-01-05\. Give the interval \(--start, --end\)"
+    ):
         capture.wrap(ws, 1, authenticated=True)
     settled = capture.wrap(ws, 1, authenticated=True, end="4726-01-05")["settled"]
 
