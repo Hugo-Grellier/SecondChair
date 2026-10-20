@@ -467,3 +467,30 @@ def test_the_cli_round_puts_contradictions_first(
     assert "contradiction" in lines[0] and "The gauge moved." in lines[0]
     assert "held for your approval" in lines[1]
     assert capture.time(ws)["current_date"] is None
+
+
+def test_a_transcript_quote_is_checked_in_its_segment_as_spoken_with_its_speaker(
+    ws: Workspace, tmp_path: Path
+) -> None:
+    said = 'Edda dit : « Payez-moi » et sonne "la cloche".'
+    transcript = tmp_path / "session-1.jsonl"
+    transcript.write_text(
+        json.dumps({"speaker": "alice_42", "start": 0, "end": 1, "text": "Bonsoir."})
+        + "\n"
+        + json.dumps({"speaker": "gm_hugo", "start": 2, "end": 4, "text": said})
+        + "\n"
+    )
+    job = capture.queue_wrap(ws, {"session": "1", "transcript": str(transcript)})["id"]
+    jobs.start(ws, job, {"host": "h", "model": "m", "effort": "e"}, manual=True)
+    at = {"source": str(transcript), "locator": f"{transcript}:2"}
+
+    assert submit(ws, job, "« Payez-moi »", **at | {"locator": f"{transcript}:1"})["status"] == (
+        "dropped"  # not in the segment the locator names
+    )
+    assert submit(ws, job, '\\"la cloche\\"', **at)["status"] == "dropped"  # the raw JSON line
+    assert submit(ws, job, "Payez-moi", **at | {"locator": "nowhere"})["status"] == "dropped"
+    assert submit(ws, job, said, **at)["status"] == "captured"
+    assert submit(ws, job, 'sonne "la cloche"', **at)["status"] == "captured"
+    assert {c["speaker"] for c in capture.candidates(ws, 1)} == {"gm_hugo"}
+    [done, _] = capture.consolidate(ws, job)
+    assert done["origin"]["speaker"] == "gm_hugo"

@@ -127,7 +127,7 @@ def change_moment(ws: Workspace, moment: str, notes: str | None = None) -> bool:
     session gives it the next session id; ending one queues "wrap a session" (DEL-03, DEL-04).
     `notes`, the GM's notes for the session ending, become the wrap job's Source. Only an
     authenticated Surface may call this (DEL-03a)."""
-    from secondchair.core import calls, capture, jobs  # they build on this module
+    from secondchair.core import calls, capture  # they build on this module
 
     if moment not in MOMENTS:
         raise DelegationError(f"Unknown moment {moment!r}; expected one of {', '.join(MOMENTS)}.")
@@ -142,14 +142,7 @@ def change_moment(ws: Workspace, moment: str, notes: str | None = None) -> bool:
         ended = current_session(ws)
         _write_moment(ws.root, moment, seq + 1, session + (moment == "live-session"))
     if ended is not None:
-        jobs.queue(
-            ws,
-            playbook=capture.PLAYBOOK,
-            inputs={"session": str(ended), **({"notes": notes} if notes else {})},
-            expected_output="The session's candidate facts consolidated into canon.",
-            responsibility="memory",
-            tier="standard",
-        )
+        capture.queue_wrap(ws, {"session": str(ended), **({"notes": notes} if notes else {})})
     return True
 
 

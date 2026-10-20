@@ -145,7 +145,7 @@ seq: 1         # grows by one at every moment change
 session: 0     # the last live session's id; the open one's while moment is live-session
 ```
 
-Only `secondchair moment <moment>`, `secondchair session start` and `secondchair session end` in an interactive terminal, and Start / End session on the Director's Desk ([foundry-bridge.md](foundry-bridge.md)), change it (DEL-03, DEL-03a). `session start` opens `live-session` with the next session id and is refused while one is open; `session end` returns to `between-sessions` (DEL-03b). Ending a live session, by any of these, queues the "wrap a session" job (`wrap-a-session`, under memory, its input `session` the session id; DEL-04, CAP-09); `session end --notes <file>` gives it the GM's notes for the session as its optional `notes` input, its Source ([capture](#capture)). The end of a moment is the last deadline of its calls: every call still open takes its safe default (`calls/`). While `live-session` is open, only `between-sessions` (ending it) is accepted (DEL-03b). Each action log entry records the `seq` it was taken in; once the moment changes, those entries are frozen and can no longer be undone, approved or rejected (DEL-25).
+Only `secondchair moment <moment>`, `secondchair session start` and `secondchair session end` in an interactive terminal, and Start / End session on the Director's Desk ([foundry-bridge.md](foundry-bridge.md)), change it (DEL-03, DEL-03a). `session start` opens `live-session` with the next session id and is refused while one is open; `session end` returns to `between-sessions` (DEL-03b). Ending a live session, by any of these, queues the "wrap a session" job (`wrap-a-session`, under memory, its input `session` the session id; DEL-04, CAP-09); `session end --notes <file>` gives it the GM's notes for the session as its optional `notes` input, its Source ([capture](#capture)); `secondchair transcribe` gives it the session transcript as its optional `transcript` input ([sources](#sources)). The end of a moment is the last deadline of its calls: every call still open takes its safe default (`calls/`). While `live-session` is open, only `between-sessions` (ending it) is accepted (DEL-03b). Each action log entry records the `seq` it was taken in; once the moment changes, those entries are frozen and can no longer be undone, approved or rejected (DEL-25).
 
 ## `action-log/`
 
@@ -328,6 +328,7 @@ job: 4
 source: /home/gm/notes/01-dry-bell.md   # one of the job's inputs
 locator: 01-dry-bell.md:7
 quote: Edda paid the party 12 silver coins for inspecting the bell chain.
+speaker: null            # the segment's Discord user, for a transcript quote
 translation: null        # the quote in the campaign language, when the Source is in another
 statement: Edda Vale paid the party 12 silver coins.
 date: '0302-04-26'
@@ -346,7 +347,7 @@ error: null
 fact: f-5e6f7a8b         # once applied, or the fact a duplicate repeats
 ```
 
-- **No quote, no fact**: a candidate whose quote is empty or not in the Source, read from the job's input, is dropped and never stored.
+- **No quote, no fact**: a candidate whose quote is empty or not in the Source, read from the job's input, is dropped and never stored. In the job's `transcript`, the locator is `<file>:<line>`, the quote must be in that segment's `text` (decoded, not the JSON line), and the candidate gets a `speaker` field, the segment's Discord user, which rides in its origin; it is null for other Sources.
 - **Near-miss** (CAN-23, CAP-12): the Core makes a candidate a `blocking_ambiguity` when its statement, or one of its `new_names`, is close to a canon name without being it (spelling similarity of 0.75 or more, case and a possessive `'s` ignored).
 - **Consolidation** (`consolidate_candidates`, CAP-10), under the wrap job, bound by the job's moment: a `certain` or `non_blocking_ambiguity` candidate is recorded with `record_fact` at the memory cell's level (`pending` when the cell holds it for approval), from its date, or opened by a played `record_event` closing `closes`; then `record_knowledge` for each of `known_by` on its date (CAP-08). Its origin is an `observation` with the quote and locator, ranked played (CAP-05), or a `job` origin carrying them, ranked agent_proposal, when `inferred`; a `translation` rides in the origin. A `duplicate` adds no fact: the candidate file is the added provenance, and its `known_by` learn the repeated fact. A `contradiction` or `blocking_ambiguity` is always a call on the GM, whatever the memory level: its `record_fact` is held at propose (`held`), the call's `message` saying why. The GM approves it to admit it as written, or rejects it (`rejected`). A candidate whose fact the table held for approval is `pending`; once the GM approves either, the wrap records its event and knowledge. A candidate whose actions fail part way is `failed`, its `error` and the entries already applied kept for the GM.
 - **New names** (CAP-12): an entity is created for a name in `new_names` only once two candidates attest it; until then the candidate is `unattested` (flagged, nothing applied) and is reconsidered at the next consolidation. A held candidate never creates an entity.
@@ -503,7 +504,7 @@ alice_42: {player: Alice, pc: Valeros}
 
 ## `sources/`
 
-Raw audio and full transcripts are Sources outside the workspace (CAP-15, PKG-12). `secondchair transcribe --session <id> <discord-user>=<audio> …` runs the engine per speaker track (WhisperX by default, the campaign vocabulary as hotwords) and writes the transcript in the transcript format ([`transcript.schema.json`](transcript.schema.json)) outside the workspace; `secondchair transcribe --session <id> --from <transcript>` references one any engine produced. A single-track input is refused. Each Source gets one reference file here; where it lives on disk is machine configuration (`$XDG_CONFIG_HOME/secondchair/sources.yaml`, id → path), never the workspace.
+Raw audio and full transcripts are Sources outside the workspace (CAP-15, PKG-12). `secondchair transcribe --session <id> <discord-user>=<audio> …` runs the engine per speaker track (WhisperX by default, the campaign vocabulary as hotwords) and writes the transcript in the transcript format ([`transcript.schema.json`](transcript.schema.json)) outside the workspace; `secondchair transcribe --session <id> --from <transcript>` references one any engine produced. A single-track input is refused. Either way the transcript becomes the `transcript` input of the session's wrap job: the last `wrap-a-session` job for that session takes it while it is queued (replacing an earlier transcript), otherwise a new one is queued, with the last one's `notes`. Each Source gets one reference file here; where it lives on disk is machine configuration (`$XDG_CONFIG_HOME/secondchair/sources.yaml`, id → path), never the workspace.
 
 ```yaml
 id: s-1a2b3c4d      # s- and the first 8 hex digits of the hash

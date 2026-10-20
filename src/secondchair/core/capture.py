@@ -1,13 +1,13 @@
 """Capture and the wrap (04-canon-memory-capture.md, CAP-04..14, CAN-23; 05, LW-07, CAL-14).
 
-The "wrap a session" job reads the session's Sources (here the GM's text notes) and submits
-**candidate facts**, each quoting its Source verbatim with a locator; the Core drops a candidate
-whose quote is not in the Source, and keys the rest by Source and quote so a rerun yields only
-what is new. The job classifies each candidate against canon; the Core routes it by class:
-certain and non-blocking candidates go through the memory cell of the job's moment, a duplicate
-adds provenance and knowledge but no fact, and a contradiction or blocking ambiguity is always a
-call on the GM. The Core itself turns a near-miss of a known name into a blocking question and
-creates an entity for a new name only once two candidates attest it.
+The "wrap a session" job reads the session's Sources (the GM's text notes, the transcript) and
+submits **candidate facts**, each quoting its Source verbatim with a locator; the Core drops a
+candidate whose quote is not in the Source, and keys the rest by Source and quote so a rerun
+yields only what is new. The job classifies each candidate against canon; the Core routes it by
+class: certain and non-blocking candidates go through the memory cell of the job's moment, a
+duplicate adds provenance and knowledge but no fact, and a contradiction or blocking ambiguity
+is always a call on the GM. The Core itself turns a near-miss of a known name into a blocking
+question and creates an entity for a new name only once two candidates attest it.
 
 The GM's wrap (`secondchair wrap`) is the grouped round: questions first, then what was applied.
 It settles the session's fictional interval, moves the current date to its end and queues the
@@ -18,6 +18,7 @@ and `time.yaml` for the current date and the sessions' intervals.
 """
 
 import hashlib
+import json
 import re
 from collections.abc import Sequence
 from difflib import SequenceMatcher
@@ -77,6 +78,39 @@ def near_misses(vocabulary: list[str], text: str, names: Sequence[str] = ()) -> 
     return sorted(set(found))
 
 
+def queue_wrap(ws: Workspace, inputs: dict[str, str]) -> dict:
+    """Queue the "wrap a session" job on the session's Sources (CAP-09)."""
+    return jobs.queue(
+        ws,
+        playbook=PLAYBOOK,
+        inputs=inputs,
+        expected_output="The session's candidate facts consolidated into canon.",
+        responsibility="memory",
+        tier="standard",
+    )
+
+
+def attach_transcript(ws: Workspace, session: int, transcript: Path) -> tuple[dict, bool]:
+    """Give the session's wrap job its transcript as the `transcript` input (CAP-01, CAP-04):
+    the session's last wrap job takes it, replacing any, while it is queued, since an agent
+    reads the contract only when it starts the job. Otherwise a new wrap job is queued, with the
+    last one's notes. Returns the job and whether it is a new one."""
+    with locked(ws):
+        wraps = [
+            j
+            for j in calls._jobs(ws)
+            if j["playbook"] == PLAYBOOK and j["inputs"].get("session") == str(session)
+        ]
+        inputs = {"session": str(session), "transcript": str(transcript)}
+        if wraps and wraps[-1]["status"] == "queued":
+            job = wraps[-1]
+            job["inputs"] = jobs._licensed(ws, {**job["inputs"], **inputs})
+            delegation._save(ws, job, delegation.JOBS_DIR)
+            return job, False
+        notes = wraps[-1]["inputs"].get("notes") if wraps else None
+        return queue_wrap(ws, {**inputs, **({"notes": notes} if notes else {})}), True
+
+
 def capture(
     ws: Workspace,
     job: int,
@@ -104,7 +138,17 @@ def capture(
         raise CanonError(f"{source!r} is not a Source of job {job}: {record['inputs']}.")
     if not quote.strip():
         return {"key": None, "status": "dropped", "reason": "no quote, no fact"}
-    if quote not in Path(source).read_text():
+    speaker = None
+    if source == record["inputs"].get("transcript"):
+        try:  # CAP-04: the quote is in the segment the locator names, as spoken
+            n = int(locator.rpartition(":")[2])
+            segment = json.loads(Path(source).read_text().splitlines()[n - 1] if n > 0 else "")
+            said, speaker = segment["text"], segment["speaker"]
+        except ValueError, IndexError, KeyError, TypeError:
+            return {"key": None, "status": "dropped", "reason": f"{locator} is not a segment"}
+    else:
+        said = Path(source).read_text()
+    if quote not in said:
         return {"key": None, "status": "dropped", "reason": f"the quote is not in {source}"}
     candidate_key = key(source, quote)
     path = ws.root / CAPTURE_DIR / f"{candidate_key}.yaml"
@@ -140,6 +184,7 @@ def capture(
         "source": source,
         "locator": locator,
         "quote": quote,
+        "speaker": speaker,
         "translation": translation,
         "statement": statement.strip(),
         "date": ws.calendar.canonical(date, partial=True),
@@ -210,6 +255,8 @@ def _route(ws: Workspace, c: dict, job: int, act: Any) -> None:
         c["origin"] = {"kind": "job", "job": str(job), **c["origin"]}
     if c["translation"]:
         c["origin"]["translation"] = c["translation"]
+    if c.get("speaker"):  # absent from candidates captured before transcripts
+        c["origin"]["speaker"] = c["speaker"]
     held = c["classification"] in HELD
     if c["duplicate_of"] is not None and not held:
         _cascade(c, c["duplicate_of"], act)
@@ -441,8 +488,9 @@ def agent_tools(ws: Workspace) -> list:
         translation: str | None = None,
     ) -> dict[str, Any]:
         """Submit one candidate fact from a Source of your started wrap job. `quote` is the
-        Source's exact words, in its language, with `locator` (file:line, or a timestamp); with
-        no verbatim quote the candidate is dropped. `statement` is the fact in the campaign
+        Source's exact words, in its language, with `locator` (file:line); with no verbatim quote
+        the candidate is dropped. In a transcript, the line is the segment's and the quote is in
+        its `text`; the Core records the segment's speaker. `statement` is the fact in the campaign
         language; `translation` the quote in it, when the Source is in another language.
         `date` is the campaign date it happened (the session end unless the Source says).
         `classification` against canon: certain, duplicate (name the fact in `duplicate_of`),
