@@ -1195,7 +1195,7 @@
         },
         "data": {
           "type": "object",
-          "description": "The document's fields; a JournalEntry text page may give `text.markdown`, stored as HTML."
+          "description": "The document's fields, never `ownership` (a disclosure: publish_journal); a JournalEntry text page may give `text.markdown`, stored as sanitized HTML."
         },
         "choice": {
           "enum": [

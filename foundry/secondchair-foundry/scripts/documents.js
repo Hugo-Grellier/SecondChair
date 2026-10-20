@@ -44,6 +44,7 @@ export const PREPARED = "@prepared:";
  *   createDocument(type: string, data: Data): Promise<WorldDoc>,
  *   fromBase(type: string, base: string, data: Data): Promise<Data>,
  *   markdown(text: string): string,
+ *   clean(html: string): string,
  *   created: {load(): Record<string, boolean>, save(created: Record<string, boolean>): Promise<unknown>},
  * }} World
  */
@@ -91,16 +92,28 @@ export function finder(findDocument) {
   };
 }
 
-/** `data` as Foundry stores it: a journal's Markdown pages turned into HTML ones.
- * @param {string} type @param {Data} data @param {(text: string) => string} markdown */
-export function written(type, data, markdown) {
-  if (type !== "JournalEntry" || !Array.isArray(data.pages)) return data;
-  const pages = data.pages.map((/** @type {Data} */ page) => {
-    if (typeof page?.text?.markdown !== "string") return page;
-    const { markdown: text, ...rest } = page.text;
-    return { type: "text", ...page, text: { ...rest, content: markdown(text), format: HTML } };
+/**
+ * `data` as Foundry stores it: no `ownership` anywhere, since who sees a document is a disclosure
+ * only `publish_journal` makes (DEL-09); a journal's Markdown pages turned into HTML ones, and
+ * every page's HTML sanitized, so a prepared page runs no script in the GM's or a player's client.
+ * @param {string} type @param {Data} data
+ * @param {{markdown(text: string): string, clean(html: string): string}} html
+ */
+export function written(type, data, { markdown, clean }) {
+  const { ownership: _, ...rest } = data;
+  const [field] = EMBEDDED[type] ?? [];
+  if (!field || !Array.isArray(rest[field])) return rest;
+  rest[field] = rest[field].map((/** @type {Data} */ entry) => {
+    const { ownership: __, ...e } = entry ?? {};
+    if (type !== "JournalEntry" || !e.text || typeof e.text !== "object") return e;
+    const { markdown: md, ...text } = e.text;
+    if (typeof md === "string")
+      return { type: "text", ...e, text: { ...text, content: clean(markdown(md)), format: HTML } };
+    if (typeof text.content === "string")
+      return { ...e, text: { ...text, content: clean(text.content) } };
+    return e;
   });
-  return { ...data, pages };
+  return rest;
 }
 
 /**
@@ -113,7 +126,7 @@ export function written(type, data, markdown) {
  */
 export async function realiseDocument(key, desired, world) {
   const { type, base } = desired;
-  const data = written(type, desired.data, world.markdown);
+  const data = written(type, desired.data, world);
   const spec = await sha(canonical({ base: base ?? null, data: desired.data }));
   const doc = await world.findDocument(key);
   /** @type {import("./scenes.js").Existing[]} */
@@ -144,8 +157,8 @@ export async function realiseDocument(key, desired, world) {
           ...(base && { base }),
         });
         target = await world.createDocument(type, {
-          ownership: { default: 0 }, // the GM's only, until the GM or publish_journal shares it
           ...made,
+          ownership: { default: 0 }, // the GM's only, whatever its base, until publish_journal
           flags: { ...made.flags, ...flags },
         });
         realised = target;

@@ -104,6 +104,9 @@ function world() {
     },
     markdown: (/** @type {string} */ text) =>
       `<p>${text.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")}</p>`,
+    // A stand-in for Foundry's cleanHTML: scripts and event handlers go.
+    clean: (/** @type {string} */ html) =>
+      html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/\s+on\w+="[^"]*"/gi, ""),
     created: {
       load: () => created,
       save: async (/** @type {Record<string, boolean>} */ c) => {
@@ -341,4 +344,44 @@ test("generic reads: files, compendium entries and world documents, bounded", as
     { uuid: "Actor.x", id: "x", name: "Grik", prepared_key: "grik" },
   ]);
   await assert.rejects(reads.list_world_documents({ type: "Wallpaper" }));
+});
+
+test("prep never sets who sees a document: ownership is forced to the GM's only", async () => {
+  const w = world();
+  const shared = handout();
+  /** @type {any} */ (shared.data).ownership = { default: 2 };
+  /** @type {any} */ (shared.data.pages[0]).ownership = { default: 2 };
+  await realiseChecked(w, shared);
+  const [journal] = w.docs;
+  assert.deepEqual(journal.source.ownership, { default: 0 });
+  assert.equal(journal.source.pages[0].ownership, undefined);
+
+  /** @type {any} */ (shared.data).name = "Renamed";
+  /** @type {any} */ (shared.data).ownership = { default: 3 };
+  await realiseChecked(w, shared);
+  assert.deepEqual(journal.source.ownership, { default: 0 }); // nor on update
+  assert.equal(journal.source.name, "Renamed");
+
+  w.deps.fromBase = async (type, base, data) => ({
+    ...(await world().deps.fromBase(type, base, data)),
+    ownership: { default: 2 },
+  });
+  const npc = { type: "Actor", base: "Actor.shared1", data: { name: "Grik" } };
+  await realiseChecked(w, npc, "grik");
+  assert.deepEqual(w.docs[1].source.ownership, { default: 0 });
+});
+
+test("a page's HTML is sanitized, from Markdown or given as HTML", async () => {
+  const w = world();
+  const payload = 'Hi<script>alert(1)</script><img src="x" onerror="alert(1)">';
+  const page = (/** @type {object} */ text) => ({ name: "P", type: "text", text });
+  const desired = {
+    type: "JournalEntry",
+    data: { name: "Trap", pages: [page({ markdown: payload }), page({ content: payload })] },
+  };
+  await realiseChecked(w, desired);
+  for (const { text } of w.docs[0].source.pages) {
+    assert.doesNotMatch(text.content, /script|onerror/);
+    assert.match(text.content, /<img src="x">/);
+  }
 });

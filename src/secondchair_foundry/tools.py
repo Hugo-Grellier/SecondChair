@@ -22,6 +22,7 @@ REPORTS_DIR = f"{STATE_DIR}/scenes"  # each scene's last reconciliation report (
 DOCUMENTS_DIR = "documents"  # the desired world documents, one YAML file per document key
 DOCUMENT_REPORTS_DIR = f"{STATE_DIR}/documents"  # each document's last report (derived)
 DOCUMENT_TYPES = ("JournalEntry", "Actor", "Item", "Playlist", "RollTable")
+EMBEDDED = ("pages", "sounds", "items", "results")  # embedded documents a prepared one may give
 # A world or compendium document's UUID, its type captured: Actor.<id>, Compendium.<pack>.Actor.<id>
 UUID = re.compile(r"^(?:Compendium\.[\w-]+\.[\w-]+\.)?(\w+)\.[A-Za-z0-9]+$")
 ITEM_TYPES = ("Token", "Wall", "AmbientLight", "AmbientSound", "Note", "Tile", "Drawing", "Region")
@@ -154,8 +155,8 @@ def prepare_document(
     document to make it from (`Compendium.pf2e.pathfinder-bestiary.Actor.<id>`), `data` set on
     top of it; without `base`, `data` needs a `name`. By type:
     - JournalEntry: `{name, pages: [{name, type: "text", text: {markdown: "..."}}]}`, the
-      Markdown shown as HTML in Foundry. Only the GM sees it unless `ownership` says otherwise:
-      `publish_journal` shows it to the players.
+      Markdown shown as sanitized HTML in Foundry. Only the GM sees it: `publish_journal`
+      shows it to the players; `data` never sets `ownership`.
     - Actor: `base` a bestiary entry, `data` `{name}` and any field to change (`img`,
       `prototypeToken`, `system`…).
     - Item: `base` an equipment or treasure entry, `data` `{name}` or other changes.
@@ -189,6 +190,12 @@ def _check_document(key: str, desired: dict[str, Any]) -> None:
         raise ValueError(f"Type {kind!r} is not one of {', '.join(DOCUMENT_TYPES)}.")
     if not isinstance(data, dict):
         raise ValueError("`data` must hold the document's fields.")
+    embedded = [e for f in EMBEDDED for e in data.get(f) or [] if isinstance(e, dict)]
+    if any("ownership" in d for d in (data, *embedded)):
+        raise ValueError(
+            "`ownership` is not prep's: a prepared document is the GM's only, and only "
+            "`publish_journal` shows a journal to the players."
+        )
     if base is None and not (isinstance(data.get("name"), str) and data["name"]):
         raise ValueError("Without a `base`, the document needs a `name` in `data`.")
     found = UUID.match(base) if isinstance(base, str) else None

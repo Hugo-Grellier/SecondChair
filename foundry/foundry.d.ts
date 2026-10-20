@@ -190,6 +190,11 @@ declare namespace foundry.canvas.placeables {
 
 declare namespace foundry.utils {
   function mergeObject<T extends object>(original: T, other: object, options?: object): T;
+  const cleanHTML: ((html: string) => string) | undefined;
+}
+
+declare namespace foundry.applications.ux {
+  const TextEditor: { implementation: { cleanHTML?: (html: string) => string } } | undefined;
 }
 
 declare namespace foundry.applications.apps {

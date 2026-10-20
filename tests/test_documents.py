@@ -65,6 +65,11 @@ def test_prep_writes_a_document_desired_state(ws: Workspace) -> None:  # noqa: F
         ({"type": "JournalEntry", "data": {}}, "name"),
         ({"type": "Item", "base": GOBLIN, "data": {}}, "Item"),
         ({"type": "Actor", "base": "goblin", "data": {}}, "UUID"),
+        ({"type": "JournalEntry", "data": {"name": "x", "ownership": {"default": 2}}}, "ownership"),
+        (
+            {"type": "JournalEntry", "data": {"name": "x", "pages": [{"ownership": {}}]}},
+            "publish_journal",
+        ),
     ],
 )
 def test_a_malformed_desired_document_is_refused(ws: Workspace, desired: dict, error: str) -> None:  # noqa: F811

@@ -488,6 +488,13 @@ const documentWorld = {
   },
   // Foundry's client ships showdown, which its own Markdown pages render with.
   markdown: (text) => new showdown.Converter(CONST.SHOWDOWN_OPTIONS).makeHtml(text),
+  // Foundry's own sanitizer: showdown passes raw HTML through, and has no option to refuse it.
+  clean: (html) => {
+    const clean =
+      foundry.utils.cleanHTML ?? foundry.applications.ux?.TextEditor?.implementation?.cleanHTML;
+    if (!clean) throw new Error("No HTML sanitizer in this Foundry: the page was not written.");
+    return clean(html);
+  },
   created: {
     load: () =>
       /** @type {Record<string, boolean>} */ (game.settings.get(MODULE, "prepared") ?? {}),
