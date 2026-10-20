@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
+import pytest
 import yaml
 from mcp import Client
 from test_delegation import call, log, ws  # noqa: F401  (ws is a fixture)
@@ -19,6 +20,7 @@ from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Origin
 
 from secondchair.core.workspace import Workspace
+from secondchair_foundry.bridge import scene_level
 
 CAVE = {
     "scene": {"name": "Goblin cave", "width": 2000, "height": 1500},
@@ -82,6 +84,15 @@ def test_prep_writes_the_desired_state_in_the_workspace(ws: Workspace) -> None: 
     assert log(ws)[0]["responsibility"] == "prep"
 
 
+def test_a_prepared_scene_is_not_read_as_a_hand_edit_of_canon(ws: Workspace) -> None:  # noqa: F811
+    call(ws, "prepare_scene", {"key": "cave", **CAVE, "agent": "claude-prep"})
+    call(ws, "search_entities", {"text": ""})  # rebuilds the index, logging hand edits
+
+    assert [e["kind"] for e in log(ws)] == ["action"]
+    path = ws.root / "scenes/cave.yaml"
+    assert scene_level(ws, path, path.read_text()) == "act-then-review"  # bounded by the ceiling
+
+
 def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F811
     bad = {**CAVE, "items": [{"key": "x", "type": "Wallpaper", "data": {}}]}
     result = call(ws, "prepare_scene", {"key": "cave", **bad, "agent": "claude-prep"})
@@ -89,6 +100,87 @@ def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F
     assert result.is_error
     assert "Wallpaper" in result.content[0].text
     assert not (ws.root / "scenes").exists()
+
+
+@pytest.mark.parametrize(
+    ("bad", "error"),
+    [
+        ({**CAVE, "scene": {**CAVE["scene"], "ownership.default": 2}}, "ownership"),
+        (
+            {**CAVE, "items": [{"key": "n", "type": "Note", "data": {"-=ownership": None}}]},
+            "ownership",
+        ),
+        (
+            {
+                **CAVE,
+                "items": [
+                    {
+                        "key": "t",
+                        "type": "Region",
+                        "data": {"behaviors": [{"type": "executeScript"}]},
+                    }
+                ],
+            },
+            "executeScript",
+        ),
+        (
+            {**CAVE, "items": [{"key": "g", "type": "Token", "data": {"delta": {"name": "x"}}}]},
+            "delta",
+        ),
+        (
+            {**CAVE, "items": [{"key": "g", "type": "Token", "data": {"actorData": {"a": 1}}}]},
+            "delta",
+        ),
+        *(
+            ({**CAVE, "items": [{"key": "r", "type": "Region", "data": data}]}, error)
+            for data, error in [
+                ({"behaviors": [{"type": "executeMacro"}]}, "executeMacro"),
+                ({"behaviors": [{"type": "my-module.run"}]}, "my-module.run"),
+                ({"behaviors.0.type": "executeScript"}, "must be a list"),
+                ({"behaviors": {"0": {"type": "pauseGame"}}}, "must be a list"),
+                ({"behaviors": ["pauseGame"]}, "must be a list"),
+                ({"==behaviors": []}, "operator"),
+                ({"flags": {"pf2e": {}}}, "pf2e"),
+                ({"flags.core.sheetClass": "x"}, "core"),
+                ({"flags": {"secondchair-foundry": {"key": "boss"}}}, "reconciliation"),
+                ({"flags.secondchair-foundry.spec": "s"}, "reconciliation"),
+                ({"behaviors": [{"type": "toggleBehavior"}]}, "toggleBehavior"),
+                ({"behaviors": [{"type": "pauseGame", "system": {"-=once": None}}]}, "operator"),
+            ]
+        ),
+        *(
+            ({**CAVE, "scene": {"name": "Cave", **extra}}, error)
+            for extra, error in [
+                ({"tokens": []}, "as items"),
+                ({"walls.0.c": [0, 0, 1, 1]}, "as items"),
+                ({"levels": [{}]}, "as items"),
+                ({"-=regions": None}, "operator"),
+                ({"grid": {"==size": 100}}, "operator"),
+                ({"flags": {"secondchair-foundry": {"scene": "x"}}}, "reconciliation"),
+                ({"flags": {"core": {}}}, "core"),
+            ]
+        ),
+    ],
+)
+def test_a_scene_never_sets_ownership_nor_runs_a_script(
+    ws: Workspace,  # noqa: F811
+    bad: dict,
+    error: str,
+) -> None:
+    result = call(ws, "prepare_scene", {"key": "cave", **bad, "agent": "claude-prep"})
+
+    assert result.is_error
+    assert error in result.content[0].text
+    assert not (ws.root / "scenes").exists()
+
+
+def test_a_scene_may_place_an_allowed_region_behaviour(ws: Workspace) -> None:  # noqa: F811
+    behaviors = [{"type": "pauseGame"}, {"type": "modifyMovementCost"}]
+    region = {"key": "r", "type": "Region", "data": {"behaviors": behaviors}}
+    flags = {"flags": {"secondchair-foundry": {"note": "mine"}}}
+    tile = {"key": "t", "type": "Tile", "data": flags}
+    arguments = {"key": "cave", **CAVE, "items": [region, tile], "agent": "claude-prep"}
+    assert not call(ws, "prepare_scene", arguments).is_error
 
 
 def test_with_no_gm_client_open_the_desired_state_waits_and_is_applied_on_connection(

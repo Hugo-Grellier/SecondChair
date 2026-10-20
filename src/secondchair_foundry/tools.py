@@ -2,13 +2,15 @@
 
 Generic VTT actions each describe one operation the `secondchair-foundry` module takes in the GM's
 client (docs/contracts/foundry-bridge.md); the Core logs it and has the bridge send it (ARC-04).
-A prepared scene is a desired state in the workspace, realised by the bridge.
+A prepared scene or world document is a desired state in the workspace, realised by the bridge.
 """
 
 import hashlib
 import json
 import re
+from collections.abc import Iterator
 from typing import Any, Literal, TypedDict
+from urllib.parse import unquote
 
 import yaml
 
@@ -19,7 +21,31 @@ from secondchair.core.workspace import STATE_DIR, Workspace
 DOOR_STATES = {"closed": 0, "open": 1, "locked": 2}  # Foundry's wall door states (`ds`)
 SCENES_DIR = "scenes"  # the desired scenes, one YAML file per scene key
 REPORTS_DIR = f"{STATE_DIR}/scenes"  # each scene's last reconciliation report (derived)
+DOCUMENTS_DIR = "documents"  # the desired world documents, one YAML file per document key
+DOCUMENT_REPORTS_DIR = f"{STATE_DIR}/documents"  # each document's last report (derived)
+DOCUMENT_TYPES = ("JournalEntry", "Actor", "Item", "Playlist", "RollTable")
+EMBEDDED = ("pages", "sounds", "items", "results")  # embedded documents, each replaced whole
+# A world or compendium document's UUID, its type captured: Actor.<id>, Compendium.<pack>.Actor.<id>
+UUID = re.compile(r"^(?:Compendium\.[\w-]+\.[\w-]+\.)?(\w+)\.[A-Za-z0-9]+$")
 ITEM_TYPES = ("Token", "Wall", "AmbientLight", "AmbientSound", "Note", "Tile", "Drawing", "Region")
+MODULE = "secondchair-foundry"  # the only flags namespace prep may write on a placed object
+# The Region behaviour types prep may place: any other (executeScript, executeMacro, a module's,
+# toggleBehavior, which enables any behaviour by UUID) could run code in every client.
+BEHAVIORS = (
+    "adjustDarknessLevel",
+    "displayScrollingText",
+    "pauseGame",
+    "suppressWeather",
+    "modifyMovementCost",
+    "teleportToken",
+)
+# The module's identity flags, which only reconciliation writes: prep may not forge them.
+RESERVED = ("scene", "document", "created", "spec", "shape", "local", "source", "base", "key")
+# A Scene's embedded collections: what a scene places only arrives as an item.
+SCENE_EMBEDDED = (
+    *("drawings", "levels", "lights", "notes", "regions", "sounds", "templates", "tiles"),
+    *("tokens", "walls"),
+)
 KEY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 type Choice = Literal["keep", "overwrite", "recreate"]
@@ -94,12 +120,18 @@ def prepare_scene(
 
     `key` names the scene in the campaign (lowercase words joined by dashes). `scene` holds the
     Scene's Foundry fields, `name` required (for example `width`, `height`, `grid`,
-    `background`). `items` are the objects placed on it, each `{key, type, data}`: a key stable
-    across preparations, a type among Token, Wall, AmbientLight, AmbientSound, Note, Tile,
-    Drawing and Region, and the document's Foundry fields; a Token also takes `actor`, the UUID of
-    the Actor (world or compendium) it is made from. `choices` are the GM's calls by object key
+    `background`: `{src}`, the map, found with `browse_files`, its size read with `image_size`;
+    the module writes it where the Foundry version keeps it). `items` are the objects placed on
+    it, each `{key, type, data}`: a key stable across preparations, a type among Token, Wall,
+    AmbientLight, AmbientSound, Note, Tile, Drawing and Region, and the document's Foundry
+    fields; a Token also takes `actor`, the UUID of the Actor (world or compendium) it is made
+    from. `choices` are the GM's calls by object key
     (`_scene` for the scene itself): `keep` the VTT's version of a conflict, `overwrite` it, or
-    `recreate` an object deleted in play. Writing the same state again changes nothing."""
+    `recreate` an object deleted in play. Never set `ownership`, an update operator (`-=`, `==`),
+    another module's `flags` or the module's own identity flags, nor a Token's `delta`; a
+    Region's `behaviors` are of the types adjustDarknessLevel, displayScrollingText, pauseGame,
+    suppressWeather, modifyMovementCost, teleportToken only; HTML is sanitized. Writing the same
+    state again changes nothing."""
     desired: dict[str, Any] = {"scene": scene, "items": items}
     if choices:
         desired["choices"] = choices
@@ -130,6 +162,216 @@ def _check(key: str, desired: dict[str, Any]) -> None:
             raise ValueError(f"{k}: an item has only key, type, actor and data.")
         if "actor" in item and (item["type"] != "Token" or not isinstance(item["actor"], str)):
             raise ValueError(f"{k}: only a Token takes an `actor`, an Actor's UUID.")
+    if _sets_ownership([desired["scene"], *(i["data"] for i in desired["items"])]):
+        raise ValueError("`ownership` is not prep's: who sees a scene is the GM's call in Foundry.")
+    for item in desired["items"]:
+        _check_fields(item["key"], item["data"])
+        _check_placed(item["key"], item["data"])
+        if item["type"] == "Token" and any(
+            p[0] in ("delta", "actorData") for p in _paths(item["data"])
+        ):
+            raise ValueError(f"{item['key']}: no `delta` in prep: a token is its actor's.")
+    _check_fields("_scene", desired["scene"])
+    if placed := sorted({str(f).split(".")[0] for f in desired["scene"]} & set(SCENE_EMBEDDED)):
+        raise ValueError(f"_scene: place {', '.join(placed)} as items, not in the scene.")
+
+
+def _paths(value: object, prefix: tuple[str, ...] = ()) -> Iterator[tuple[str, ...]]:
+    """Every field path in `value`, dotted keys split as Foundry expands them, a list's entries
+    under their index."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            path = (*prefix, *str(k).split("."))
+            yield path
+            yield from _paths(v, path)
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            yield from _paths(v, (*prefix, str(i)))
+
+
+def _check_fields(what: str, data: dict[str, Any]) -> None:
+    """Refuse, at any depth of a document's or a placed object's fields, what only Foundry or
+    reconciliation writes: an update operator (`-=`, `==`), flags of another namespace than the
+    module's, the module's own identity flags. An embedded document's flags are checked too."""
+    for path in _paths(data):
+        if operator := next((s for s in path if s.startswith(("-=", "=="))), None):
+            raise ValueError(f"{what}: no update operator ({operator}) in prep.")
+        at = 2 if len(path) > 2 and path[0] in EMBEDDED else 0
+        if len(path) > at + 1 and path[at] == "flags":
+            if path[at + 1] != MODULE:
+                raise ValueError(f"{what}: flags of {path[at + 1]} are not prep's.")
+            if len(path) > at + 2 and path[at + 2] in RESERVED:
+                raise ValueError(f"{what}: the module's `{path[at + 2]}` flag is reconciliation's.")
+
+
+def _check_placed(key: str, data: dict[str, Any]) -> None:
+    """Refuse a Region's behaviours unless they are a list of the types prep may place."""
+    if any(str(f).startswith("behaviors.") for f in data) or not (
+        isinstance(data.get("behaviors", []), list)
+        and all(isinstance(b, dict) for b in data.get("behaviors", []))
+    ):
+        raise ValueError(f"{key}: `behaviors` must be a list of behaviours.")
+    for behavior in data.get("behaviors", []):
+        if behavior.get("type") not in BEHAVIORS:
+            raise ValueError(
+                f"{key}: a Region behaviour of type {behavior.get('type')!r} is not prep's; "
+                f"prep places {', '.join(BEHAVIORS)}."
+            )
+
+
+def prepare_document(
+    key: str,
+    type: Literal["JournalEntry", "Actor", "Item", "Playlist", "RollTable"],
+    data: dict[str, Any],
+    base: str | None = None,
+    choice: Choice | None = None,
+) -> Change:
+    """Write a world document's desired state: a journal, an NPC actor, an item, a playlist or a
+    roll table that must exist in Foundry after prep. The GM's client realises it by
+    reconciliation as soon as one is connected, keeping what the GM retouched; `document_report`
+    says how it went. Documents are realised before scenes, so a scene can use them.
+
+    `key` names the document in the campaign (lowercase words joined by dashes). `type` is its
+    Foundry document type, `data` its Foundry fields. `base` is the UUID of a compendium or world
+    document to make it from (`Compendium.pf2e.pathfinder-bestiary.Actor.<id>`), `data` set on
+    top of it; without `base`, `data` needs a `name`. By type:
+    - JournalEntry: `{name, pages: [{name, type: "text", text: {markdown: "..."}}]}`, the
+      Markdown shown as sanitized HTML in Foundry. Only the GM sees it: `publish_journal`
+      shows it to the players; `data` never sets `ownership`.
+    - Actor: `base` a bestiary entry, `data` `{name}` and any field to change (`img`,
+      `prototypeToken`, `system`…).
+    - Item: `base` an equipment or treasure entry, `data` `{name}` or other changes.
+    - Playlist: `{name, mode, sounds: [{name, path, repeat, volume}]}`, `mode` 0 in order,
+      1 shuffled, 2 soundboard only; `path` a sound file found with `browse_files`.
+    - RollTable: `{name, formula, results: [{type: "text", description, range: [low, high]}]}`.
+    The pages, sounds, results, and an actor's `items` when `data` gives them, are replaced as a
+    whole when prep changes them. In this document or a prepared scene, a string value
+    `@prepared:<key>` stands for that prepared document's Foundry id (a Token's `actor`: its
+    UUID), and `@prepared:<playlist key>/<sound name>` for that sound's id (a Scene's
+    `playlistSound`). `choice` is the GM's call on a conflict: `keep` the VTT's version,
+    `overwrite` it, or `recreate` a document deleted in Foundry. Never set `ownership`, an update
+    operator (`-=`, `==`), another module's `flags` or the module's own identity flags. Writing
+    the same state again changes nothing."""
+    desired: dict[str, Any] = {"type": type}
+    if base is not None:
+        desired["base"] = base
+    desired["data"] = data
+    if choice is not None:
+        desired["choice"] = choice
+    _check_document(key, desired)
+    text = yaml.safe_dump(desired, sort_keys=False, allow_unicode=True)
+    return Change(path=f"{DOCUMENTS_DIR}/{key}.yaml", after=text)
+
+
+def _check_document(key: str, desired: dict[str, Any]) -> None:
+    """Refuse what the module could not realise (foundry-bridge.schema.json, desired_document)."""
+    if not KEY.match(key):
+        raise ValueError(f"Document key {key!r}: use lowercase words joined by dashes.")
+    kind, data, base = desired["type"], desired["data"], desired.get("base")
+    if kind not in DOCUMENT_TYPES:
+        raise ValueError(f"Type {kind!r} is not one of {', '.join(DOCUMENT_TYPES)}.")
+    if not isinstance(data, dict):
+        raise ValueError("`data` must hold the document's fields.")
+    for k, v in data.items():
+        field = str(k).split(".")[0]
+        if field in EMBEDDED and (k != field or not isinstance(v, list)):
+            raise ValueError(f"`{field}` must be given whole, as a list of its documents.")
+    if _sets_ownership(data):
+        raise ValueError(
+            "`ownership` is not prep's: a prepared document is the GM's only, and only "
+            "`publish_journal` shows a journal to the players."
+        )
+    _check_fields(key, data)
+    if base is None and not (isinstance(data.get("name"), str) and data["name"]):
+        raise ValueError("Without a `base`, the document needs a `name` in `data`.")
+    found = UUID.match(base) if isinstance(base, str) else None
+    if base is not None and (not found or found[1] != kind):
+        raise ValueError(f"`base` {base!r}: give the UUID of a {kind}, world or compendium.")
+
+
+def _sets_ownership(value: object) -> bool:
+    """Whether a key anywhere in `value` sets who sees a document, however Foundry spells it:
+    `ownership`, `ownership.default`, `-=ownership`, `==ownership`, `pages.0.ownership`, at any
+    depth."""
+    if isinstance(value, list):
+        return any(_sets_ownership(v) for v in value)
+    if not isinstance(value, dict):
+        return False
+    return any(
+        any(s.removeprefix("-=").removeprefix("==") == "ownership" for s in str(k).split("."))
+        or _sets_ownership(v)
+        for k, v in value.items()
+    )
+
+
+def _data_path(path: str) -> str:
+    """`path` if it is relative to Foundry's data: no scheme or URL (`https:`, `data:`, `//`), no
+    leading `/`, no `..` segment, no control character, checked as given and percent-decoded
+    (Foundry lists paths encoded, `Log%20Fume`): a read never leaves the GM's install."""
+    refused = ValueError(f"{path!r} is not a path in Foundry's data: give a relative one.")
+    # A malformed or non-UTF-8 percent sequence, which decodeURIComponent refuses too.
+    if re.search(r"%(?![0-9A-Fa-f]{2})", path):
+        raise refused
+    try:
+        decoded = unquote(path, errors="strict")
+    except UnicodeDecodeError:
+        raise refused from None
+    for text in (path, decoded):
+        if (
+            re.match(r"^[a-z][\w+.-]*:", text, re.IGNORECASE)
+            or text.lstrip() != text  # the URL parser drops a leading space: " //evil"
+            or text.startswith(("/", "\\"))
+            or ".." in re.split(r"[/\\]", text)
+            or re.search(r"[\x00-\x1f\x7f]", text)
+        ):
+            raise refused
+    return path
+
+
+def browse_files(
+    path: str = "", source: str = "data", extensions: list[str] | None = None
+) -> dict[str, Any]:
+    """The folders and files in a directory of the GM's Foundry install, to find maps, tokens,
+    sounds and music for prep: `{dirs, files}`, paths to use as they are (a scene's
+    `background.src`, a playlist sound's `path`). `source` is `data` (the user data: `worlds/`,
+    `modules/<id>/…`, `assets/`) or `public` (Foundry's own icons and sounds); `extensions` keeps
+    only those files, such as `[".webp", ".jpg", ".png", ".webm"]` for maps or
+    `[".ogg", ".mp3"]` for sounds. Long listings are cut short, with `more` saying how many were
+    left out."""
+    if source not in ("data", "public"):
+        raise ValueError(f"Source {source!r}: `data` or `public`.")
+    params = {"path": _data_path(path), "source": source, "extensions": extensions}
+    return vtt.read("browse_files", params)
+
+
+def image_size(path: str) -> dict[str, Any]:
+    """An image's or video's size in pixels, `{width, height}`, loaded in the GM's client:
+    `path` as `browse_files` gives it. Set a scene's `width` and `height` from its map's, and its
+    `grid.size` so the map's squares fall on the grid (a map drawn at 140 pixels a square takes
+    `grid: {size: 140}`)."""
+    if not path:
+        raise ValueError("Give the image's path.")
+    return vtt.read("image_size", {"path": _data_path(path)})
+
+
+def search_compendium(query: str, type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    """The compendium entries of the GM's install whose name contains `query` (any case), each
+    `{uuid, name, type, pack, img, level, rarity, traits}`: the UUID to make a prepared document or
+    a token from, and pf2e's level, rarity and traits (null elsewhere) to calibrate encounters.
+    `type` keeps one document type (Actor, Item, JournalEntry, Scene, Playlist, RollTable…) or
+    one system type (pf2e: npc, hazard, loot, weapon, equipment…). At most `limit` entries (up
+    to 100)."""
+    return vtt.read("search_compendium", {"query": query, "type": type, "limit": limit})
+
+
+def list_world_documents(
+    type: Literal["Actor", "JournalEntry", "Item", "Playlist", "RollTable", "Scene"],
+    query: str = "",
+) -> list[dict[str, Any]]:
+    """The documents of one type already in the Foundry world, whose name contains `query`
+    (any case), each `{uuid, id, name, prepared_key}`: `prepared_key` the key of the prepared
+    document or scene it realises, null when the GM made it. At most 100."""
+    return vtt.read("list_world_documents", {"type": type, "query": query})
 
 
 class OfficialName(TypedDict):
@@ -156,14 +398,11 @@ def official_name(key: str, pack: str | None = None) -> OfficialName:
 
 
 def tools(ws: Workspace) -> list[Tool]:
-    def scene_report(key: str) -> dict[str, Any]:
-        """How a prepared scene was last realised in Foundry: `realised`, then `pending` (the
-        desired state changed since and waits for a GM client), and the GM client's `report`
-        (what each object became, conflicts waiting for the GM's choice, errors) or `error`."""
-        desired = ws.root / SCENES_DIR / f"{key}.yaml"
+    def report(folder: str, reports: str, what: str, key: str) -> dict[str, Any]:
+        desired = ws.root / folder / f"{key}.yaml"
         if not KEY.match(key) or not desired.is_file():
-            raise ValueError(f"No prepared scene {key!r}.")
-        path = ws.root / REPORTS_DIR / f"{key}.json"
+            raise ValueError(f"No prepared {what} {key!r}.")
+        path = ws.root / reports / f"{key}.json"
         if not path.is_file():
             return {
                 "realised": False,
@@ -172,6 +411,19 @@ def tools(ws: Workspace) -> list[Tool]:
         record = json.loads(path.read_text())
         pending = record.pop("desired") != digest(desired.read_text())
         return {"realised": True, "pending": pending, **record}
+
+    def scene_report(key: str) -> dict[str, Any]:
+        """How a prepared scene was last realised in Foundry: `realised`, then `pending` (the
+        desired state changed since and waits for a GM client), and the GM client's `report`
+        (what each object became, conflicts waiting for the GM's choice, errors) or `error`."""
+        return report(SCENES_DIR, REPORTS_DIR, "scene", key)
+
+    def document_report(key: str) -> dict[str, Any]:
+        """How a prepared world document was last realised in Foundry: `realised`, then
+        `pending` (the desired state changed since and waits for a GM client), and the GM
+        client's `report` (its Foundry id, what it became, a conflict waiting for the GM's
+        choice, errors such as an unresolved `@prepared:` reference) or `error`."""
+        return report(DOCUMENTS_DIR, DOCUMENT_REPORTS_DIR, "document", key)
 
     return [
         Tool(
@@ -186,6 +438,14 @@ def tools(ws: Workspace) -> list[Tool]:
         Tool(fn=whisper, responsibility="disclosure", delegated_action=True, reversible=False),
         Tool(fn=prepare_scene, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=scene_report, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(fn=prepare_document, responsibility="prep", delegated_action=True, reversible=True),
+        Tool(fn=document_report, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(fn=browse_files, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(fn=search_compendium, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(fn=image_size, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(
+            fn=list_world_documents, responsibility="prep", delegated_action=False, reversible=True
+        ),
         # ponytail: a read sits under memory (canon and continuity), as the Core's own reads.
         Tool(fn=official_name, responsibility="memory", delegated_action=False, reversible=True),
     ]

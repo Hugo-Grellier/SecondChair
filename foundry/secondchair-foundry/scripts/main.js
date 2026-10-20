@@ -3,6 +3,14 @@ import { aboveCeiling, CEILING, createActions, missingTranslation } from "./acti
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
 import { createDesk, deskHtml, esc } from "./desk.js";
+import {
+  DOCUMENT_TYPES,
+  finder,
+  genericReads,
+  guardedScene,
+  realiseDocument,
+  resolve,
+} from "./documents.js";
 import { MODULE, realise } from "./scenes.js";
 import { createOutbox, createRecorder, describe, keyInput } from "./traces.js";
 
@@ -273,6 +281,14 @@ Hooks.once("init", () => {
     type: String,
     default: "",
   });
+  // The keys of the prepared documents created once in this world: one deleted since is not
+  // recreated silently (documents.js), as a scene keeps its own in its flags.
+  game.settings.register(MODULE, "prepared", {
+    scope: "world",
+    config: false,
+    type: Object,
+    default: {},
+  });
   // The ceiling (DEL-19a): each change is recorded as an observation by the active GM client,
   // which also puts back a change made by a user who is not a GM.
   game.settings.register(MODULE, "ceiling", {
@@ -364,6 +380,21 @@ Hooks.once("ready", () => {
         say: (token, line) => post({ speaker: ChatMessage.getSpeaker({ token }) }, line),
         // To one player only: a whisper, which capture observes as not seen by the table (CAP-08).
         tell: (user, line) => post({ whisper: [user.id] }, line),
+        reads: genericReads({
+          browse: async (source, path, options) => {
+            const picker = foundry.applications.apps?.FilePicker?.implementation ?? FilePicker;
+            return picker.browse(source, path, options);
+          },
+          packs: () => game.packs,
+          origin: location.origin,
+          // Foundry's texture loader takes images and videos alike (a .webm map).
+          imageSize: async (path) => {
+            const texture = await foundry.canvas.loadTexture(path);
+            if (!texture) throw new Error(`Cannot load ${path} in the GM's client.`);
+            return { width: texture.width, height: texture.height };
+          },
+          documents: (type) => (type === "Scene" ? game.scenes : collection(type)),
+        }),
       });
       /** The calls due now the Desk already showed. @type {Set<number>} */
       let seen = new Set();
@@ -390,8 +421,8 @@ Hooks.once("ready", () => {
           else if (message.type === "ack") {
             if (!message.ok) console.error("SecondChair: observation refused:", message.error);
             capture.ack(message.id);
-          } else if (message.type === "realise")
-            socket.send(JSON.stringify(await asSecondChair(() => realiseScene(message))));
+          } else if (message.type === "realise" || message.type === "realise_document")
+            socket.send(JSON.stringify(await asSecondChair(() => realiseOne(message))));
         } catch (error) {
           // A malformed frame or a closed socket: the Core times the request out as failed.
           console.error("SecondChair:", error);
@@ -426,7 +457,7 @@ Hooks.once("ready", () => {
   });
 });
 
-/** Scenes are realised one at a time. */
+/** Scenes and documents are realised one at a time. */
 /** @type {Promise<unknown>} */
 let realising = Promise.resolve();
 
@@ -438,6 +469,56 @@ const world = {
   tokenData: async (item) => {
     const actor = await worldActor(/** @type {string} */ (item.actor));
     return (await actor.getTokenDocument(item.data)).toObject();
+  },
+  // Foundry 14 keeps a scene's map in its levels (scenes.js).
+  get levels() {
+    return game.release.generation >= 14;
+  },
+};
+
+/** The world collection of a prepared document type, or null. @param {string} type */
+function collection(type) {
+  if (!DOCUMENT_TYPES.includes(type)) return null;
+  return /** @type {any} */ (game).collections.get(type);
+}
+
+/** The prepared document of a key, of whatever type, or null. @param {string} key */
+function preparedDocument(key) {
+  for (const type of DOCUMENT_TYPES) {
+    const found = collection(type)?.find(
+      (/** @type {FoundryDoc} */ d) => d.flags?.[MODULE]?.document === key,
+    );
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The Foundry calls a document realisation makes (documents.js stays free of Foundry globals). */
+/** @type {import("./documents.js").World} */
+const documentWorld = {
+  findDocument: preparedDocument,
+  createDocument: (type, data) => collection(type).documentClass.create(data),
+  fromBase: async (type, base, data) => {
+    const source = await fromUuid(base);
+    if (!source) throw new Error(`No ${type} ${base} in this world or its compendiums.`);
+    const imported = collection(type).fromCompendium(source);
+    return foundry.utils.mergeObject(imported, data, { inplace: false });
+  },
+  // Foundry's client ships showdown, which its own Markdown pages render with.
+  markdown: (text) => new showdown.Converter(CONST.SHOWDOWN_OPTIONS).makeHtml(text),
+  // Foundry's own sanitizer: showdown passes raw HTML through, and has no option to refuse it.
+  clean: (html) => {
+    const clean =
+      foundry.utils.cleanHTML ?? foundry.applications.ux?.TextEditor?.implementation?.cleanHTML;
+    if (!clean) throw new Error("No HTML sanitizer in this Foundry: the page was not written.");
+    return clean(html);
+  },
+  // Dotted keys (`ownership.default`) expanded as Foundry's update would, before any is dropped.
+  expand: (data) => foundry.utils.expandObject(data),
+  created: {
+    load: () =>
+      /** @type {Record<string, boolean>} */ (game.settings.get(MODULE, "prepared") ?? {}),
+    save: (created) => game.settings.set(MODULE, "prepared", created),
   },
 };
 
@@ -454,24 +535,37 @@ async function worldActor(uuid) {
 }
 
 /**
- * Realise a desired scene the Core sent, and report back (docs/contracts/foundry-bridge.md).
- * Reconciliation is idempotent, so a replayed request only finds nothing to do.
- * The world's ceiling bounds it at the level of whoever last wrote it (DEL-19a).
- * @param {{id: string, scene: string, desired: import("./scenes.js").Desired, level: string | null}} request
+ * Realise a desired scene or world document the Core sent, and report back
+ * (docs/contracts/foundry-bridge.md). Its `@prepared:` references are resolved first, so a scene
+ * uses the documents realised before it. Reconciliation is idempotent, so a replayed request only
+ * finds nothing to do. The world's ceiling bounds it at the level of whoever last wrote it
+ * (DEL-19a).
+ * @param {{id: string, scene?: string, document?: string, desired: any, level: string | null}} request
  */
-function realiseScene({ id, scene, desired, level }) {
+function realiseOne({ id, scene, document, desired, level }) {
+  const what = document ? `document "${document}"` : `scene "${scene}"`;
   const run = realising.then(async () => {
     const refusal = aboveCeiling(game.settings.get(MODULE, "ceiling"), level);
     if (refusal) {
-      ui.notifications.warn(`SecondChair: scene "${scene}" not realised. ${refusal}`);
+      ui.notifications.warn(`SecondChair: ${what} not realised. ${refusal}`);
       return { type: "realised", id, ok: false, error: refusal, reason: "ceiling" };
     }
     try {
-      const report = await realise(scene, desired, world);
+      /** @type {string[]} */
+      const unresolved = [];
+      const resolved = resolve(desired, finder(preparedDocument), unresolved);
+      const report = document
+        ? await realiseDocument(document, resolved, documentWorld)
+        : await realise(
+            /** @type {string} */ (scene),
+            guardedScene(resolved, documentWorld),
+            world,
+          );
+      report.errors.push(...unresolved);
       const { conflict = 0 } = report.summary;
       if (conflict || report.errors.length) {
         ui.notifications.warn(
-          `SecondChair: scene "${desired.scene.name}" realised with ${conflict} conflict(s) and ${report.errors.length} error(s); ask your agent for the report.`,
+          `SecondChair: ${what} realised with ${conflict} conflict(s) and ${report.errors.length} error(s); ask your agent for the report.`,
         );
       }
       return { type: "realised", id, ok: true, report };

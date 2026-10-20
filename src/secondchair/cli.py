@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from secondchair import runner, transcribe
+from secondchair import review, runner, transcribe
 from secondchair.core import (
     calls,
     campaign_skill,
@@ -94,13 +94,20 @@ def _transcribe_command(args: argparse.Namespace) -> None:
             raise transcribe.TranscriptionError("Give either speaker tracks or --from, not both.")
         source_id = transcribe.register(ws, args.session, args.source)
         print(f"Referenced transcript {source_id} for session {args.session}.")
-        return
-    tracks = dict(args.tracks)
-    if len(tracks) != len(args.tracks):
-        raise transcribe.TranscriptionError("Give one track per speaker.")
-    template = configured_transcription()
-    out = transcribe.transcribe(ws, args.session, tracks, args.out, args.language, template)
-    print(f"Transcript of session {args.session}: {out}")
+        out = args.source.expanduser().resolve()
+    else:
+        tracks = dict(args.tracks)
+        if len(tracks) != len(args.tracks):
+            raise transcribe.TranscriptionError("Give one track per speaker.")
+        template = configured_transcription()
+        out = transcribe.transcribe(ws, args.session, tracks, args.out, args.language, template)
+        print(f"Transcript of session {args.session}: {out}")
+    job, new = capture.attach_transcript(ws, args.session, out)
+    n, done = job["id"], "queued on it" if new else "given it"
+    print(
+        f'Job {n} "wrap a session" {done}: run it (secondchair jobs run, or ask your agent '
+        f"to start job {n}), then secondchair wrap {args.session}."
+    )
 
 
 HOST_SETUP = {
@@ -178,7 +185,13 @@ def _gm_command(args: argparse.Namespace) -> str:
         if not auth:  # DEL-03a
             raise DelegationError("Starting or ending a session needs an interactive terminal.")
         if args.action == "start":
+            unwrapped = _unwrapped(ws)  # read before: the new session is not played yet
             started = f"Session {delegation.start_session(ws)} started: moment live-session."
+            if unwrapped:
+                started += (
+                    f" Warning: session {unwrapped} is not wrapped yet; what was played there "
+                    "is not in canon (secondchair status)."
+                )
             return _session_started(ws, started)
         notes = str(Path(args.notes).expanduser().resolve()) if args.notes else None
         live = delegation.end_session(ws, notes)
@@ -233,19 +246,20 @@ def _gm_command(args: argparse.Namespace) -> str:
     if args.command == "confirm":
         if not auth:  # DEL-29
             raise DelegationError("Confirming a GM decision needs an interactive terminal.")
-        entry = canon.confirm(ws, args.id, "cli", auth)
-        return f"Confirmed {args.id} as a GM decision (entry {entry['id']})."
+        done = [f"{i} (entry {canon.confirm(ws, i, 'cli', auth)['id']})" for i in args.id]
+        return f"Confirmed as GM decisions: {', '.join(done)}."
     if args.command == "wrap":
         return _describe_wrap(capture.wrap(ws, args.session, auth, args.start, args.end))
     if args.command == "promote":
         delegation.promote(ws, args.entry, "cli", auth)
         return f"Promoted hand edit {args.entry} to a GM decision."
     if args.command == "approve":
-        if _in_vtt(ws, args.entry):
-            _relay(ws, {"gesture": "approve", "entry": args.entry, "authenticated": auth})
-        else:
-            delegation.approve(ws, args.entry, "cli", auth)
-        return f"Approved and applied entry {args.entry}."
+        for entry in args.entry:  # one at a time, in order: the first refusal stops the rest
+            if _in_vtt(ws, entry):
+                _relay(ws, {"gesture": "approve", "entry": entry, "authenticated": auth})
+            else:
+                delegation.approve(ws, entry, "cli", auth)
+        return f"Approved and applied {_entries(args.entry)}."
     if args.command == "reject":
         delegation.reject(ws, args.entry, args.reason, "cli", auth)
         return f"Rejected entry {args.entry} ({args.reason})."
@@ -255,6 +269,64 @@ def _gm_command(args: argparse.Namespace) -> str:
     else:
         delegation.undo(ws, args.entry, args.reason, "cli", auth)
     return f"Undid entry {args.entry} ({args.reason})."
+
+
+def _entries(ids: list[int]) -> str:
+    return f"entry {ids[0]}" if len(ids) == 1 else f"entries {', '.join(map(str, ids))}"
+
+
+def _unwrapped(ws: workspace.Workspace) -> int | None:
+    """The last played session when it is not wrapped yet, else None."""
+    last = delegation.last_session(ws)
+    if last and not capture.time(ws)["sessions"].get(last, {}).get("wrapped"):
+        return last
+    return None
+
+
+def status(ws: workspace.Workspace) -> str:
+    """Where the campaign stands and what the GM does next, in a few lines."""
+    moment, _ = delegation.current_moment(ws)
+    live = delegation.current_session(ws)
+    entries, _ = delegation.read_log(ws)
+    held = [e["id"] for e in entries if e.get("status") == "pending"]
+    open_calls = [c for c in calls.read_calls(ws) if c.get("status") == "open"]
+    pending_jobs = jobs.pending(ws)
+    entities, facts, events = index.counts(ws)
+    played = delegation.last_session(ws)
+    lines = [
+        f"Moment: {moment}" + (f" (session {live} is live)" if live else ""),
+        f"Campaign date: {capture.time(ws)['current_date'] or 'not set'}",
+        f"Canon: {entities} entities, {facts} facts, {events} events",
+        f"Sessions played: {played}",
+    ]
+    nexts = []
+    if not capture.time(ws)["current_date"] and not live:
+        nexts.append("secondchair date <date>  (set the campaign's current date before play)")
+    if (unwrapped := _unwrapped(ws)) and not live:
+        lines.append(f"Session {unwrapped} is not wrapped: what was played is not in canon yet.")
+        nexts.append(f"secondchair wrap {unwrapped}  (after its wrap job)")
+    for job in pending_jobs:
+        lines.append(f"Job {job['id']} {job['status']}: {job['playbook']} (tier {job['tier']})")
+        if job["status"] == "queued":
+            nexts.append(
+                f'ask your agent: "start SecondChair job {job["id"]}", or secondchair jobs run '
+                f"{job['id']} with a runner"
+            )
+    if held:
+        lines.append(f"Awaiting your approval: {_entries(held)}")
+        nexts.append(f"secondchair approve {' '.join(map(str, held))}  (or reject <entry>)")
+    if open_calls:
+        lines.append(f"Open calls on you: {len(open_calls)} (secondchair break shows them)")
+    handoff = ws.root / "prep" / f"session-{played + 1}" / "handoff.md"
+    if not live and not unwrapped:  # prepare from what was played, once it is canon
+        if handoff.is_file():
+            lines.append(f"Next session's handoff: {handoff.relative_to(ws.root)}")
+        else:
+            nexts.append(
+                f'ask your agent: "prepare session {played + 1}" (prepare-a-session playbook)'
+            )
+    lines += [f"Next: {n}" for n in nexts] or ["Next: nothing waits on you."]
+    return "\n".join(lines)
 
 
 def _describe_call(call: dict) -> str:
@@ -639,16 +711,17 @@ def main(argv: list[str] | None = None) -> int:
     rule_sub.add_parser(
         "remove", parents=[in_workspace], help="remove a house rule: its checks run again"
     ).add_argument("name")
-    for name, help_text, parents in (
-        ("approve", "approve a pending action", [in_workspace]),
-        ("reject", "reject a pending action", [in_workspace, reason]),
-    ):
-        commands.add_parser(name, parents=parents, help=help_text).add_argument("entry", type=int)
+    commands.add_parser(
+        "approve", parents=[in_workspace], help="approve pending actions, in the order given"
+    ).add_argument("entry", type=int, nargs="+")
+    commands.add_parser(
+        "reject", parents=[in_workspace, reason], help="reject a pending action"
+    ).add_argument("entry", type=int)
     commands.add_parser(
         "confirm",
         parents=[in_workspace],
-        help="confirm a fact or event relayed from your words as a GM decision (interactive only)",
-    ).add_argument("id", help="the fact or event id, f-… or v-…")
+        help="confirm facts or events relayed from your words as GM decisions (interactive only)",
+    ).add_argument("id", nargs="+", help="the fact or event ids, f-… or v-…")
     wrap_cmd = commands.add_parser(
         "wrap",
         parents=[in_workspace],
@@ -658,6 +731,9 @@ def main(argv: list[str] | None = None) -> int:
     wrap_cmd.add_argument("session", type=int)
     wrap_cmd.add_argument("--start", help="the session's first campaign date, over the notes'")
     wrap_cmd.add_argument("--end", help="the session's last campaign date, over the notes'")
+    commands.add_parser(
+        "status", parents=[in_workspace], help="where the campaign stands and what to do next"
+    )
     commands.add_parser(
         "check", parents=[in_workspace], help="rebuild the derived index and report invalid files"
     )
@@ -818,10 +894,13 @@ def main(argv: list[str] | None = None) -> int:
                     f"Upgraded {args.workspace} from schema version {before} to {after} in place; "
                     "review the diff (git diff) and commit it."
                 )
+        elif args.command == "status":
+            print(status(workspace.load(args.workspace)))
         elif args.command == "check":
             return check(workspace.load(args.workspace))
         elif args.command == "serve":
-            serve(workspace.load(args.workspace), configured_port())
+            ws = workspace.load(args.workspace)
+            serve(ws, configured_port(), review.routes(ws))
         elif args.command == "jobs":
             return _jobs_command(args)
         elif args.command == "transcribe":

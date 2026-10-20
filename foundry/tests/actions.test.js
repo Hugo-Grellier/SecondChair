@@ -151,6 +151,15 @@ test("a token move replies with where it goes, though Foundry v14 applies it aft
   assert.deepEqual(reply.ok && reply.after, { x: 400, y: 300 });
 });
 
+test("the reply's after-state holds only the fields the action sets, though Foundry adds _id to them (#165)", async () => {
+  const { docs, handle } = world();
+  const token = docs["Scene.s.Token.t"];
+  const update = token.update;
+  token.update = async (changes) => update.call(token, Object.assign(changes, { _id: "t" }));
+  const reply = await handle(move("r1", 400, 300));
+  assert.deepEqual(reply.ok && reply.after, { x: 400, y: 300 });
+});
+
 test("a replayed request id is applied once and gets the first reply", async () => {
   const { docs, handle } = world();
   const [first, second] = await Promise.all([
@@ -446,4 +455,35 @@ test("a campaign language whose translation module is inactive refuses the conne
     missingTranslation(null, "fr", () => false),
     null,
   );
+});
+
+test("the library's generic reads answer before the system adapter, which keeps its own", async () => {
+  const adapter = {
+    ops: {},
+    reads: { official_name: async () => "adapter", browse_files: async () => "adapter" },
+  };
+  const actions = createActions({
+    resolve: async () => null,
+    store: { load: () => [], save: async () => {} },
+    adapter: () => adapter,
+    ceiling: () => CEILING.default,
+    language: () => "fr",
+    say: async () => "",
+    tell: async () => "",
+    reads: { browse_files: async (params) => ({ dirs: [], files: [], asked: params }) },
+  });
+  const files = await actions.read({
+    type: "read",
+    id: "q",
+    op: "browse_files",
+    params: { path: "maps" },
+  });
+  assert.deepEqual(files, {
+    type: "reply",
+    id: "q",
+    ok: true,
+    result: { dirs: [], files: [], asked: { path: "maps" } },
+  });
+  const name = await actions.read({ type: "read", id: "q", op: "official_name", params: {} });
+  assert.deepEqual(name, { type: "reply", id: "q", ok: true, result: "adapter" });
 });

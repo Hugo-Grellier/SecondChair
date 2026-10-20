@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/blob/main/docs/contracts/foundry-bridge.schema.json",
   "title": "Foundry bridge message",
-  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies, the live session and observations, and the scenes to realise, and behaviour traces.",
+  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies, the live session and observations, and the scenes and world documents to realise, and behaviour traces.",
   "oneOf": [
     {
       "title": "hello",
@@ -171,7 +171,7 @@
         "op": {
           "type": "string",
           "minLength": 1,
-          "description": "What to read, answered by the system adapter: rules_context, official_name."
+          "description": "What to read: browse_files, search_compendium, image_size, list_world_documents, answered by the library; rules_context, official_name, answered by the system adapter."
         },
         "params": {
           "type": "object"
@@ -390,7 +390,7 @@
             "autonomous",
             null
           ],
-          "description": "The level the module checks against the world's ceiling (DEL-19a): the effective level of the prepare_scene entry that last wrote the desired state; null when the GM last wrote it, by hand or by an undo, which the ceiling does not bound."
+          "description": "The level the module checks against the world's ceiling (DEL-19a): the effective level of the prepare_scene or prepare_document entry that last wrote the desired state; null when the GM last wrote it, by hand or by an undo, which the ceiling does not bound."
         }
       },
       "required": [
@@ -403,8 +403,48 @@
       "additionalProperties": false
     },
     {
+      "title": "realise_document",
+      "description": "The Core asks the GM client to realise a desired world document by reconciliation, before the scenes, which may refer to it.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "realise_document"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "document": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The document's key in the workspace."
+        },
+        "desired": {
+          "$ref": "#/$defs/desired_document"
+        },
+        "level": {
+          "enum": [
+            "manual",
+            "propose",
+            "act-then-review",
+            "autonomous",
+            null
+          ],
+          "description": "The level the module checks against the world's ceiling (DEL-19a): the effective level of the prepare_scene or prepare_document entry that last wrote the desired state; null when the GM last wrote it, by hand or by an undo, which the ceiling does not bound."
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "document",
+        "desired",
+        "level"
+      ],
+      "additionalProperties": false
+    },
+    {
       "title": "realised",
-      "description": "The GM client's reconciliation report, or why it could not realise the scene.",
+      "description": "The GM client's reconciliation report of a scene or a world document, or why it could not realise it.",
       "type": "object",
       "oneOf": [
         {
@@ -424,6 +464,13 @@
                 "scene": {
                   "type": "string",
                   "description": "The Foundry id of the Scene."
+                },
+                "document": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The Foundry id of the world document; null when it is not in the world (deleted in Foundry and not recreated)."
                 },
                 "summary": {
                   "type": "object",
@@ -467,16 +514,27 @@
                   "items": {
                     "type": "string"
                   },
-                  "description": "Objects that could not be written, each with why."
+                  "description": "Objects that could not be written, and references (@prepared:) that could not be resolved, each with why."
                 }
               },
               "required": [
-                "scene",
                 "summary",
                 "actions",
                 "errors"
               ],
-              "additionalProperties": false
+              "additionalProperties": false,
+              "oneOf": [
+                {
+                  "required": [
+                    "scene"
+                  ]
+                },
+                {
+                  "required": [
+                    "document"
+                  ]
+                }
+              ]
             }
           },
           "required": [
@@ -843,7 +901,7 @@
   "$defs": {
     "desired_scene": {
       "title": "desired scene",
-      "description": "What prep asks a scene to look like (a workspace's scenes/<key>.yaml). The Foundry connector gives the data its meaning: Foundry document fields.",
+      "description": "What prep asks a scene to look like (a workspace's scenes/<key>.yaml). The Foundry connector gives the data its meaning: Foundry document fields. A string value \"@prepared:<key>\" stands for a prepared document's id (a Token's actor: its UUID), \"@prepared:<playlist key>/<sound name>\" for a playlist sound's id.",
       "type": "object",
       "properties": {
         "scene": {
@@ -1113,6 +1171,44 @@
         "message",
         "detail",
         "reversible"
+      ],
+      "additionalProperties": false
+    },
+    "desired_document": {
+      "title": "desired document",
+      "description": "What prep asks a world document to be (a workspace's documents/<key>.yaml). The Foundry connector gives the data its meaning: Foundry document fields.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "JournalEntry",
+            "Actor",
+            "Item",
+            "Playlist",
+            "RollTable"
+          ]
+        },
+        "base": {
+          "type": "string",
+          "pattern": "^(Compendium\\.[\\w-]+\\.[\\w-]+\\.)?\\w+\\.[A-Za-z0-9]+$",
+          "description": "The UUID of the compendium or world document it is made from, `data` set on top."
+        },
+        "data": {
+          "type": "object",
+          "description": "The document's fields, never `ownership` (a disclosure: publish_journal); a JournalEntry text page may give `text.markdown`, stored as sanitized HTML."
+        },
+        "choice": {
+          "enum": [
+            "keep",
+            "overwrite",
+            "recreate"
+          ],
+          "description": "The GM's call: keep the VTT's version of a conflict, overwrite it, or recreate the document deleted in Foundry."
+        }
+      },
+      "required": [
+        "type",
+        "data"
       ],
       "additionalProperties": false
     }

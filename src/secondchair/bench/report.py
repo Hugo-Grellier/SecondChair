@@ -9,8 +9,9 @@ scored with no LLM judge:
 - leaks: a canary in any entity (names, aliases, player-facing description) and every leak of
   canon knowledge (`s0.leaks`);
 - narrative direction, from the log's actions (`s0.narrative_direction`);
-- the fact probes passed, from the agent's stored reply (`s0.score_answers`), and the continuity
-  errors: refused contradictions, rejections and undos for `contradiction`, failed probes.
+- the fact probes and the knowledge probes passed, from the agent's stored reply
+  (`s0.score_answers`), and the continuity errors: refused contradictions, rejections and undos
+  for `contradiction`, failed probes.
 
 Only the two invariants gate (MET-05a): a run passes when it has no leak and no narrative breach.
 Every metric is reported per table as median and min-max over the runs (BEN-04).
@@ -36,10 +37,11 @@ METRICS = (
     "leaks",
     "narrative_direction",
     "fact_probes",
+    "knowledge_probes",
     "continuity_errors",
 )
 META_FILE = "bench.yaml"
-REPLY_FILE = "probes-reply.txt"  # the agent's reply to the fact probes, beside the workspace
+REPLY_FILE = "probes-reply.txt"  # the agent's reply to the probes, beside the workspace
 GOLD_FILE = "gold.yaml"
 
 
@@ -68,7 +70,7 @@ def score_run(stored: Path, gold: dict) -> dict:
         narrative = s0.narrative_direction(ws, actions)
         reply = stored.parent / REPLY_FILE
         answers = s0.parse_answers(reply.read_text()) if reply.is_file() else {}
-        probes = s0.score_answers(ws, gold, answers, s0.FACT_PROBES)
+        probes = s0.score_answers(ws, gold, answers)
     labels = {n: label for label, e in gold["entities"].items() for n in e["names"]}
     named = [e for e in entities if e["names"]]
     matching = [e for e in named if labels.keys() & set(e["names"])]
@@ -79,7 +81,8 @@ def score_run(stored: Path, gold: dict) -> dict:
         "entity_precision": len(matching) / len(named) if named else 0.0,
         "leaks": leaks,
         "narrative_direction": narrative,
-        "fact_probes": sum(probes["probes"].values()),
+        "fact_probes": sum(probes["probes"][p] for p in s0.FACT_PROBES),
+        "knowledge_probes": sum(probes["probes"][p] for p in s0.KNOWLEDGE_PROBES),
         "continuity_errors": probes["continuity_errors"]["total"],
         "probes": probes["probes"],
     }
