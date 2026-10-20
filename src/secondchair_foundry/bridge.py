@@ -237,7 +237,7 @@ class Bridge:
                     last_desk = now
                 if now[0][1] != last_seq:  # a new moment: its rules context
                     last_seq = now[0][1]
-                    task = asyncio.create_task(asyncio.to_thread(self._record_rules_context))
+                    task = asyncio.create_task(self._record_rules_context(socket))
                     reading.add(task)
                     task.add_done_callback(reading.discard)
             except (WorkspaceError, CanonError, OSError) as e:  # keep the session id flowing
@@ -259,15 +259,17 @@ class Bridge:
             await socket.send_json(result)
             await self._send_desk(socket)
 
-    def _record_rules_context(self) -> None:
+    async def _record_rules_context(self, socket: WebSocket) -> None:
         """Read the rules context from the GM client and record it, unless this moment already
-        recorded the same one (RUL-22). Without a system adapter there is none."""
+        recorded the same one (RUL-22). Without a system adapter there is none. Waits on the
+        event loop, not in a worker thread, so a GM client slow to answer holds no thread."""
+        read = {"type": "read", "id": uuid.uuid4().hex, "op": RULES_CONTEXT, "params": {}}
         try:
-            context = self.read(RULES_CONTEXT, {})
-        except VttError:
+            reply = await asyncio.wait_for(self._request(socket, read), REPLY_TIMEOUT)
+        except TimeoutError, VttError:
             return
-        if isinstance(context, dict):
-            self._record(RULES_CONTEXT, context)
+        if reply.get("ok") is True and isinstance(reply.get("result"), dict):
+            await asyncio.to_thread(self._record, RULES_CONTEXT, reply["result"])
 
     def _record(self, kind: str, payload: dict) -> None:
         """Record an observation the Core makes itself through the GM client, as the module's
