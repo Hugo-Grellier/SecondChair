@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from secondchair import runner, transcribe
+from secondchair import review, runner, transcribe
 from secondchair.core import (
     calls,
     canon,
@@ -758,7 +758,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "check":
             return check(workspace.load(args.workspace))
         elif args.command == "serve":
-            serve(workspace.load(args.workspace), configured_port())
+            ws = workspace.load(args.workspace)
+            serve(ws, configured_port(), review.routes(ws))
         elif args.command == "jobs":
             return _jobs_command(args)
         elif args.command == "transcribe":

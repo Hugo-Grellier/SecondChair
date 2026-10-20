@@ -52,6 +52,10 @@ runners:
 
 The playbooks ship as a Claude Code plugin and a Codex skill bundle; `secondchair host setup` prints how to install them.
 
+## Review and read your prep
+
+`serve` also shows a read-only page at `http://127.0.0.1:7240/`, for a second screen or a tablet next to Foundry: the pending proposals and open calls with their diff, the recent action log, the Markdown under `prep/` and `notes/` (rendered, with a table of contents, printable), the desired scenes and their last reconciliation, canon search and jobs. It refreshes itself every few seconds. It approves nothing: each entry shows the `secondchair approve`, `reject` or `log undo` command to run in your terminal, since only the CLI and the Director's Desk are authenticated Surfaces. It answers on loopback only, to `127.0.0.1` or `localhost` Host headers, and never serves a file outside `prep/` and `notes/`.
+
 ## Development
 
 ```sh

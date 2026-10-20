@@ -3,6 +3,7 @@
 import hmac
 import json
 import socket
+from collections.abc import Sequence
 from importlib.metadata import entry_points
 
 import uvicorn
@@ -143,12 +144,14 @@ def build_server(ws: Workspace) -> MCPServer:
     return server
 
 
-def serve(ws: Workspace, port: int) -> None:
+def serve(ws: Workspace, port: int, surface: Sequence[BaseRoute] = ()) -> None:
+    """Serve `ws` on loopback, with a Surface's read-only `surface` routes ahead of the Core's."""
     server = build_server(ws)
     # Loopback only, unauthenticated (PKG-05, PKG-06); binding beyond it is deferred (PKG-20).
     # The SDK turns on Host/Origin checks against DNS rebinding for a loopback host.
     app = server.streamable_http_app(streamable_http_path=MCP_PATH, host=LOOPBACK)
     app.router.routes.extend(load_connector_routes(ws))
+    app.router.routes[:0] = surface
     sock = socket.socket()
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((LOOPBACK, port))
@@ -157,7 +160,10 @@ def serve(ws: Workspace, port: int) -> None:
     (ws.root / STATE_DIR).mkdir(exist_ok=True)
     serve_file = ws.root / STATE_DIR / SERVE_FILE
     serve_file.write_text(json.dumps({"port": sock.getsockname()[1]}))
-    print(f"Serving {ws.root} on http://{LOOPBACK}:{sock.getsockname()[1]}", flush=True)
+    url = f"http://{LOOPBACK}:{sock.getsockname()[1]}"
+    print(f"Serving {ws.root} on {url}", flush=True)
+    if surface:
+        print(f"Review changes and read your prep at {url}/ (read-only)", flush=True)
     try:
         uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
     finally:  # the CLI must not relay a gesture (and the token) to a later listener
