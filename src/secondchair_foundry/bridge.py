@@ -17,9 +17,11 @@ from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from secondchair.core import PROTOCOL_VERSION, delegation, observations, traces, vtt
+from secondchair.core.index import CanonError
 from secondchair.core.machine import foundry_token
 from secondchair.core.vtt import CeilingRefusal, VttError
 from secondchair.core.workspace import Workspace, WorkspaceError
+from secondchair_foundry import desk
 from secondchair_foundry.tools import REPORTS_DIR, SCENES_DIR, digest
 
 PATH = "/foundry"
@@ -151,6 +153,7 @@ class Bridge:
         self.loop = asyncio.get_running_loop()
         watch: asyncio.Task | None = None
         realising: asyncio.Task | None = None
+        gestures: set[asyncio.Task] = set()  # kept referenced until done
         try:
             await socket.send_json(
                 {
@@ -160,7 +163,7 @@ class Bridge:
                     "campaign_language": self.ws.campaign_language,
                 }
             )
-            watch = asyncio.create_task(self._watch_session(socket))
+            watch = asyncio.create_task(self._watch(socket))
             realising = asyncio.create_task(self._realise(socket))
             while True:
                 try:
@@ -175,6 +178,9 @@ class Bridge:
                     await self._observe(socket, message.get("envelope"))
                 elif kind in ("traces", "erase_traces"):
                     await self._trace(campaign, message)
+                elif kind == "gesture":  # in a task: an approval may wait on a VTT reply
+                    gestures.add(task := asyncio.create_task(self._gesture(socket, message)))
+                    task.add_done_callback(gestures.discard)
                 elif waiting and not waiting.done():
                     waiting.set_result(message)
         except WebSocketDisconnect:
@@ -189,17 +195,48 @@ class Bridge:
                 if not waiting.done():
                     waiting.set_exception(VttError(NO_GM))
 
-    async def _watch_session(self, socket: WebSocket) -> None:
+    async def _watch(self, socket: WebSocket) -> None:
         """Tell the GM client the live session id, now and whenever `secondchair session` opens
-        or ends one, so it captures observations tagged with it (CAP-03, DEL-03)."""
-        last: object = ...
+        or ends one, so it captures observations tagged with it (CAP-03, DEL-03); and send the
+        Director's Desk its state whenever the moment or the calls due now change (ARC-14)."""
+        last_session: object = ...
+        last_desk: object = ...
         while True:
-            # ponytail: polls moment.yaml; events in the first second of a session are missed.
+            # ponytail: polls moment.yaml and calls/ every second; events in the first second of
+            # a session are missed, and the poll reads every call: index calls if they pile up.
             session = delegation.current_session(self.ws)
-            if session != last:
+            if session != last_session:
                 await socket.send_json({"type": "session", "session": session})
-                last = session
+                last_session = session
+            try:  # every new log entry may be a decision to confirm
+                now = await asyncio.to_thread(
+                    lambda: (
+                        delegation.current_moment(self.ws),
+                        desk.due_now(self.ws),
+                        len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
+                    )
+                )
+                if now != last_desk:
+                    await self._send_desk(socket)
+                    last_desk = now
+            except (WorkspaceError, CanonError, OSError) as e:  # keep the session id flowing
+                print(f"SecondChair: Director's Desk not refreshed: {e}", file=sys.stderr)
             await asyncio.sleep(POLL)
+
+    async def _send_desk(self, socket: WebSocket) -> None:
+        await socket.send_json(await asyncio.to_thread(desk.state, self.ws))
+
+    async def _gesture(self, socket: WebSocket, message: dict) -> None:
+        """Take a GM gesture from the Director's Desk, answer it, then refresh the Desk. In a
+        worker thread: approving a VTT action waits on this event loop for the GM client."""
+        try:
+            result = await asyncio.to_thread(desk.take, self.ws, message)
+        except Exception as e:  # the GM still gets an answer, never a gesture left hanging
+            error = f"The Core could not take this gesture: {e}"
+            result = {"type": "result", "id": str(message.get("id")), "ok": False, "error": error}
+        with contextlib.suppress(WebSocketDisconnect, RuntimeError):  # the GM client left
+            await socket.send_json(result)
+            await self._send_desk(socket)
 
     async def _observe(self, socket: WebSocket, envelope: object) -> None:
         """Record one observation durably, then acknowledge it so the module drops its copy."""

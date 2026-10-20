@@ -2,6 +2,7 @@
 import { CEILING, createActions } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
+import { createDesk, deskHtml } from "./desk.js";
 import { MODULE, realise } from "./scenes.js";
 import { createOutbox, createRecorder, describe, keyInput } from "./traces.js";
 
@@ -114,6 +115,66 @@ const isActiveGM = () => game.user.isGM && game.users.activeGM?.id === game.user
 /** The ceiling as this client last saw it, to record each change's before. */
 let ceiling = CEILING.default;
 
+/** The Director's Desk's link to the Core, once connected (ARC-14). */
+/** @type {ReturnType<typeof createDesk> | null} */
+let desk = null;
+
+/** The Director's Desk window, a minimal panel with no tabs, for the GM only (ARC-13, ARC-14). */
+class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
+  static DEFAULT_OPTIONS = {
+    id: "secondchair-desk",
+    window: { title: "Director's Desk", resizable: true },
+    position: { width: 440, height: /** @type {const} */ ("auto") },
+    actions: {
+      /** @param {Event} _event @param {HTMLElement} target */
+      gesture: async (_event, target) => {
+        const { gesture, entry, doc } = target.dataset;
+        /** @type {Record<string, unknown>} */
+        const fields = {};
+        if (entry) fields.entry = Number(entry);
+        if (doc) fields.doc = doc;
+        if (gesture === "reject") {
+          const select = target.parentElement?.querySelector("select");
+          fields.reason = select?.value;
+        }
+        try {
+          const result = await desk?.gesture(String(gesture), fields);
+          if (result && !result.ok) ui.notifications.error(`SecondChair: ${result.error}`);
+        } catch (error) {
+          ui.notifications.error(`SecondChair: ${/** @type {Error} */ (error).message}`);
+        }
+      },
+      dismiss: () => desk?.dismissPile(),
+    },
+  };
+
+  async _renderHTML() {
+    if (desk?.closed && game.user.isGM)
+      return "<p>Not connected to the Core: reload the world to connect again.</p>";
+    return deskHtml({
+      isGM: game.user.isGM,
+      state: desk?.state ?? null,
+      pile: desk?.pile ?? null,
+      ceiling,
+    });
+  }
+
+  /** @param {unknown} result @param {HTMLElement} content */
+  _replaceHTML(result, content) {
+    content.innerHTML = String(result);
+  }
+}
+
+/** @type {DirectorsDesk | null} */
+let deskWindow = null;
+
+/** Show the Desk, or refresh it when open; only ever for a GM (ARC-13). */
+function showDesk(force = false) {
+  if (!game.user.isGM) return;
+  deskWindow ??= new DirectorsDesk();
+  if (force || deskWindow.rendered) deskWindow.render({ force: true });
+}
+
 Hooks.once("init", () => {
   /** @type {{api?: object}} */ (game.modules.get(MODULE)).api = {
     /** @param {Adapter} systemAdapter */
@@ -177,6 +238,7 @@ Hooks.once("init", () => {
     onChange: (value, _options, userId) => {
       const before = ceiling;
       ceiling = String(value);
+      showDesk();
       if (!isActiveGM()) return;
       // Recorded in every moment, tagged with the live session when one is open.
       capture.observe({
@@ -204,6 +266,16 @@ Hooks.once("init", () => {
   };
   Hooks.on("preCreateSetting", guard);
   Hooks.on("preUpdateSetting", guard);
+  game.keybindings.register(MODULE, "desk", {
+    name: "Open the Director's Desk",
+    editable: [{ key: "KeyD", modifiers: ["Shift"] }],
+    restricted: true,
+    onDown: () => {
+      if (desk && !desk.closed) showDesk(true);
+      else ui.notifications.warn("SecondChair: not connected to the Core.");
+      return true;
+    },
+  });
 });
 
 Hooks.once("ready", () => {
@@ -237,9 +309,23 @@ Hooks.once("ready", () => {
         // Read at each request, so a change applies at once (DEL-19).
         ceiling: () => game.settings.get(MODULE, "ceiling"),
       });
+      /** The calls due now the Desk already showed. @type {Set<number>} */
+      let seen = new Set();
+      desk = createDesk({
+        send: (message) => socket.send(JSON.stringify(message)),
+        isGM: () => game.user.isGM,
+        // A new call due now opens the Desk: it is an interruption (DEL-33).
+        onChange: () => {
+          const due = (desk?.state?.calls ?? []).map((c) => c.id);
+          const fresh = due.some((id) => !seen.has(id));
+          seen = new Set(due);
+          showDesk(fresh);
+        },
+      });
       socket.addEventListener("message", async (event) => {
         try {
           const message = JSON.parse(String(event.data));
+          if (desk?.receive(message)) return;
           if (message.type === "request")
             socket.send(JSON.stringify(await actions.handle(message)));
           else if (message.type === "session") capture.setSession(message.session);
@@ -256,6 +342,8 @@ Hooks.once("ready", () => {
       socket.addEventListener("close", () => {
         capture.disconnect();
         core = null;
+        desk?.close();
+        showDesk();
       });
       core = socket;
       capture.connect((message) => socket.send(JSON.stringify(message)));
@@ -263,6 +351,7 @@ Hooks.once("ready", () => {
         await game.settings.set(MODULE, "campaign", welcome.campaign);
       }
       ui.notifications.info("SecondChair: connected to the Core.");
+      showDesk(true);
     },
     onRefused: (refusal) =>
       ui.notifications.error(`SecondChair: ${refusal.message}`, { permanent: true }),

@@ -338,7 +338,7 @@ def wrap(
     if waiting := [c["key"] for c in found if c["status"] == "captured"]:
         raise DelegationError(f"Candidates {waiting} are not consolidated yet.")
     held = {c["entries"][0] for c in found if c["status"] in ("held", "pending")}
-    questions = [c for c in calls._calls(ws) if c["status"] == "open" and c["entry"] in held]
+    questions = [c for c in calls.read_calls(ws) if c["status"] == "open" and c["entry"] in held]
     summary = {"questions": questions, "candidates": found, "settled": None, "job": None}
     if questions:
         return summary

@@ -376,13 +376,13 @@ def test_an_occurrence_contradicting_played_canon_becomes_a_call_and_stays_queue
     turn(ws, "4725-01-08")
 
     assert occ(ws, key)["status"] == "queued" and clock(ws, tolls) == 3
-    [call] = [c for c in calls._calls(ws) if c["id"] == occ(ws, key)["call"]]
+    [call] = [c for c in calls.read_calls(ws) if c["id"] == occ(ws, key)["call"]]
     assert (call["kind"], call["status"]) == ("exception", "open")
     assert played in call["message"]
     turn(ws, "4725-01-08")
     assert queued(ws) == [key]  # still queued by default
     world.decide(ws, key, "reject", authenticated=True)
-    assert [c["status"] for c in calls._calls(ws) if c["id"] == call["id"]] == ["answered"]
+    assert [c["status"] for c in calls.read_calls(ws) if c["id"] == call["id"]] == ["answered"]
 
 
 def test_a_world_turn_is_refused_during_a_live_session(ws: Workspace) -> None:
@@ -480,7 +480,7 @@ def test_at_propose_rule_effects_wait_for_the_gm(ws: Workspace) -> None:
     turn(ws, "4725-01-08")
 
     assert queued(ws) == [key] and clock(ws, tolls) == 0
-    assert calls._calls(ws)[-1]["kind"] == "proposal"
+    assert calls.read_calls(ws)[-1]["kind"] == "proposal"
     world.decide(ws, key, "accept", authenticated=True)
     assert clock(ws, tolls) == 1
 

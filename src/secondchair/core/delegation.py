@@ -143,6 +143,29 @@ def change_moment(ws: Workspace, moment: str, notes: str | None = None) -> bool:
     return True
 
 
+def start_session(ws: Workspace) -> int:
+    """Start session (DEL-03): open live-session, refused while one is open (DEL-03b); the new
+    session's id. Only an authenticated Surface may call this (DEL-03a)."""
+    with locked(ws):  # two Surfaces starting at once: one is refused
+        live = current_session(ws)
+        if live is not None:
+            raise DelegationError(f"Session {live} is already open; end it first.")
+        change_moment(ws, "live-session")
+        return last_session(ws)
+
+
+def end_session(ws: Workspace, notes: str | None = None) -> int:
+    """End session (DEL-03): open between-sessions, which queues "wrap a session" (DEL-04), given
+    the GM's `notes` file if any; the ended session's id. Only an authenticated Surface may call
+    this (DEL-03a)."""
+    with locked(ws):
+        live = current_session(ws)
+        if live is None:
+            raise DelegationError("No live session is open.")
+        change_moment(ws, "between-sessions", notes)
+        return live
+
+
 def _write_moment(root: Path, moment: str, seq: int, session: int = 0) -> None:
     data = {"moment": moment, "seq": seq, "session": session}
     _write(root / MOMENT_FILE, yaml.safe_dump(data, sort_keys=False))
@@ -620,7 +643,7 @@ def _withdraw(ws: Workspace, override: dict, interaction: int) -> None:
             job["status"] = "withdrawn"
             _save(ws, job, JOBS_DIR)
             calls._log_default(ws, None, None, job["id"], interaction)
-    for call in calls._calls(ws):
+    for call in calls.read_calls(ws):
         job = jobs.get(call["job"]) if call["job"] is not None else None
         if call["entry"] is not None:
             entity = read_entry(ws, call["entry"]).get("entity")

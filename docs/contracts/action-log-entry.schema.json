@@ -60,7 +60,7 @@
               "required": ["channel", "authenticated", "quote", "interaction"],
               "additionalProperties": false,
               "properties": {
-                "channel": {"enum": ["cli", "via agent"]},
+                "channel": {"enum": ["cli", "desk", "via agent"]},
                 "authenticated": {"type": "boolean"},
                 "quote": {"type": ["string", "null"], "description": "The GM's words, required via agent (DEL-28)."},
                 "interaction": {"type": "integer", "description": "The gm_interaction entry recording the approval."}
@@ -81,8 +81,8 @@
         "target": {"type": "string", "description": "confirm only: the canon file it rewrites."},
         "before": {"type": "string", "description": "confirm only: that file's content before."},
         "after": {"type": "string", "description": "confirm only: that file's content after, at the gm_decision rank."},
-        "channel": {"enum": ["cli", "via agent"], "description": "The Surface it came through."},
-        "authenticated": {"type": "boolean", "description": "Whether that Surface was authenticated (ARC-13): the CLI in an interactive terminal."},
+        "channel": {"enum": ["cli", "desk", "via agent"], "description": "The Surface it came through."},
+        "authenticated": {"type": "boolean", "description": "Whether that Surface was authenticated (ARC-13): the CLI in an interactive terminal, or the Director's Desk."},
         "quote": {"type": ["string", "null"], "description": "The GM's quoted words when relayed by an agent."},
         "reason": {"enum": ["contradiction", "rules", "tone", "other", null], "description": "The rejection reason (DEL-26), required for reject and undo."},
         "override": {
