@@ -73,6 +73,13 @@ def test_prep_writes_a_document_desired_state(ws: Workspace) -> None:  # noqa: F
             {"type": "Playlist", "data": {"name": "x", "sounds": [{"-=ownership.default": 2}]}},
             "ownership",
         ),
+        ({"type": "JournalEntry", "data": {"name": "x", "pages.0.ownership.default": 2}}, "list"),
+        ({"type": "JournalEntry", "data": {"name": "x", "pages": {"0": {"name": "p"}}}}, "list"),
+        ({"type": "Actor", "data": {"name": "x", "system": {"a.ownership": 2}}}, "ownership"),
+        (
+            {"type": "Actor", "data": {"name": "x", "flags": {"m": {"==ownership": {}}}}},
+            "ownership",
+        ),
         (
             {"type": "JournalEntry", "data": {"name": "x", "pages": [{"ownership": {}}]}},
             "publish_journal",

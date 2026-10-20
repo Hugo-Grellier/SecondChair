@@ -107,10 +107,18 @@ function cleaned(value, clean) {
   return value;
 }
 
-/** One document's fields, dotted keys expanded as Foundry would, its ownership keys dropped.
- * @param {Data} fields @param {(data: Data) => Data} expand @returns {Data} */
-const owned = (fields, expand) =>
-  Object.fromEntries(Object.entries(expand(fields ?? {})).filter(([k]) => !OWNERSHIP.test(k)));
+/** `value` with dotted keys expanded as Foundry would, then its ownership keys dropped at every
+ * depth, embedded documents included (`pages.0.ownership` too).
+ * @param {any} value @param {(data: Data) => Data} expand @returns {any} */
+function unowned(value, expand) {
+  if (Array.isArray(value)) return value.map((v) => unowned(v, expand));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(expand(value))
+      .filter(([k]) => !OWNERSHIP.test(k))
+      .map(([k, v]) => [k, unowned(v, expand)]),
+  );
+}
 
 /**
  * `data` as Foundry stores it: no `ownership` anywhere, since who sees a document is a disclosure
@@ -121,11 +129,13 @@ const owned = (fields, expand) =>
  * @param {{markdown(text: string): string, clean(html: string): string, expand(data: Data): Data}} html
  */
 export function written(type, data, { markdown, clean, expand }) {
-  const rest = cleaned(owned(data, expand), clean);
+  const rest = cleaned(unowned(data, expand), clean);
   const [field] = EMBEDDED[type] ?? [];
-  if (!field || !Array.isArray(rest[field])) return rest;
-  rest[field] = rest[field].map((/** @type {Data} */ entry) => {
-    const e = owned(entry, expand);
+  if (field && field in rest && !Array.isArray(rest[field])) {
+    throw new Error(`\`${field}\` must be a list of ${EMBEDDED[type][1]} documents.`);
+  }
+  if (!field || !rest[field]) return rest;
+  rest[field] = rest[field].map((/** @type {Data} */ e) => {
     const md = e.text?.markdown;
     if (type !== "JournalEntry" || typeof md !== "string") return e;
     const { markdown: _, ...text } = e.text;

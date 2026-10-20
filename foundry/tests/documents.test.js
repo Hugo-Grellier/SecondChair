@@ -441,3 +441,20 @@ test("every HTML string is sanitized, whatever field it is in", async () => {
   ])
     assert.equal(html, '<p>Notes</p><img src="x">');
 });
+
+test("ownership is dropped at any depth, and an embedded field must be a list", async () => {
+  const w = world();
+  const desired = handout();
+  /** @type {any} */ (desired.data).flags = { x: { "-=ownership": null, deep: { ownership: 2 } } };
+  /** @type {any} */ (desired.data.pages[0]).text.ownership = { default: 2 };
+  await realiseChecked(w, desired);
+  const [journal] = w.docs;
+  assert.doesNotMatch(JSON.stringify(journal.source.pages), /ownership/);
+  assert.deepEqual(journal.source.flags.x, { deep: {} });
+  assert.deepEqual(journal.source.ownership, { default: 0 });
+
+  const dotted = { type: "JournalEntry", data: { name: "Map", "pages.0.ownership.default": 2 } };
+  const other = world();
+  await assert.rejects(realiseDocument("map", dotted, other.deps), /`pages` must be a list/);
+  assert.equal(other.docs.length, 0);
+});

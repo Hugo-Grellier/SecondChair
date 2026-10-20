@@ -22,6 +22,7 @@ REPORTS_DIR = f"{STATE_DIR}/scenes"  # each scene's last reconciliation report (
 DOCUMENTS_DIR = "documents"  # the desired world documents, one YAML file per document key
 DOCUMENT_REPORTS_DIR = f"{STATE_DIR}/documents"  # each document's last report (derived)
 DOCUMENT_TYPES = ("JournalEntry", "Actor", "Item", "Playlist", "RollTable")
+EMBEDDED = ("pages", "sounds", "items", "results")  # embedded documents, each replaced whole
 # A world or compendium document's UUID, its type captured: Actor.<id>, Compendium.<pack>.Actor.<id>
 UUID = re.compile(r"^(?:Compendium\.[\w-]+\.[\w-]+\.)?(\w+)\.[A-Za-z0-9]+$")
 ITEM_TYPES = ("Token", "Wall", "AmbientLight", "AmbientSound", "Note", "Tile", "Drawing", "Region")
@@ -189,6 +190,10 @@ def _check_document(key: str, desired: dict[str, Any]) -> None:
         raise ValueError(f"Type {kind!r} is not one of {', '.join(DOCUMENT_TYPES)}.")
     if not isinstance(data, dict):
         raise ValueError("`data` must hold the document's fields.")
+    for k, v in data.items():
+        field = str(k).split(".")[0]
+        if field in EMBEDDED and (k != field or not isinstance(v, list)):
+            raise ValueError(f"`{field}` must be given whole, as a list of its documents.")
     if _sets_ownership(data):
         raise ValueError(
             "`ownership` is not prep's: a prepared document is the GM's only, and only "
@@ -203,13 +208,14 @@ def _check_document(key: str, desired: dict[str, Any]) -> None:
 
 def _sets_ownership(value: object) -> bool:
     """Whether a key anywhere in `value` sets who sees a document, however Foundry spells it:
-    `ownership`, `ownership.default`, `-=ownership`, `==ownership`."""
+    `ownership`, `ownership.default`, `-=ownership`, `==ownership`, `pages.0.ownership`, at any
+    depth."""
     if isinstance(value, list):
         return any(_sets_ownership(v) for v in value)
     if not isinstance(value, dict):
         return False
     return any(
-        str(k).removeprefix("-=").removeprefix("==").split(".")[0] == "ownership"
+        any(s.removeprefix("-=").removeprefix("==") == "ownership" for s in str(k).split("."))
         or _sets_ownership(v)
         for k, v in value.items()
     )
