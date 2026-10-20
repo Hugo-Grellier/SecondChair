@@ -43,6 +43,7 @@ class GmClient:
         self.context = context
         self.date = "4725-03-01"
         self.names = {"goblin-warrior": "Gobelin guerrier"}
+        self.results: list[dict] = []  # the Core's answers to Director's Desk gestures
 
     def send(self, message: dict) -> None:
         BRIDGE.validate(message)
@@ -69,6 +70,8 @@ class GmClient:
                 self.send({"type": "reply", "id": message["id"], **self.read(message)})
             elif message["type"] == "request":
                 self.send({"type": "reply", "id": message["id"], **self.act(message)})
+            elif message["type"] == "result":
+                self.results.append(message)
 
     def act(self, request: dict) -> dict:
         date = request["params"]["date"]
@@ -162,6 +165,21 @@ def test_session_start_pushes_the_current_date_and_records_the_clock(
         assert "from 4725-03-01 to 4725-05-12" in capsys.readouterr().out
         [clock] = recorded(workspace, "clock")
         assert (clock["payload"], clock["session"]) == ({"date": "4725-05-12"}, 1)
+
+
+def test_session_start_from_the_directors_desk_pushes_the_date_too(
+    bridge: str,  # noqa: F811
+    token: str,  # noqa: F811
+    workspace: Path,  # noqa: F811
+) -> None:
+    assert gm(workspace, "date", "4725-05-12") == 0
+    with gm_client(bridge, token) as client:
+        client.send({"type": "gesture", "id": "g1", "gesture": "start_session"})
+        settle()
+
+        assert client.date == "4725-05-12"
+        [result] = client.results
+        assert result["ok"] and "4725-05-12" in result["message"]
 
 
 def test_a_date_the_adapter_refuses_is_a_failed_push_and_the_session_still_starts(
