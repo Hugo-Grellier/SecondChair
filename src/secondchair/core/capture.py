@@ -140,12 +140,9 @@ def capture(
         return {"key": None, "status": "dropped", "reason": "no quote, no fact"}
     speaker = None
     if source == record["inputs"].get("transcript"):
-        try:  # CAP-04: the quote is in the segment the locator names, as spoken
-            n = int(locator.rpartition(":")[2])
-            segment = json.loads(Path(source).read_text().splitlines()[n - 1] if n > 0 else "")
-            said, speaker = segment["text"], segment["speaker"]
-        except ValueError, IndexError, KeyError, TypeError:
+        if (segment := _segment(source, locator)) is None:
             return {"key": None, "status": "dropped", "reason": f"{locator} is not a segment"}
+        said, speaker = segment["text"], segment["speaker"]
     else:
         said = Path(source).read_text()
     if quote not in said:
@@ -369,11 +366,21 @@ def observed_interval(ws: Workspace, session: int) -> dict[str, str] | None:
         return None  # a clock set back by hand: the GM gives the interval
 
 
-def report_interval(ws: Workspace, job: int, start: str, end: str, quote: str) -> dict:
-    """The session's fictional interval as the job's Source states it, quoted (CAL-14)."""
+def report_interval(
+    ws: Workspace, job: int, start: str, end: str, quote: str, locator: str | None = None
+) -> dict:
+    """The session's fictional interval as the job's Source states it, quoted (CAL-14); in the
+    transcript, in the segment `locator` names."""
     record, session = _wrap_job(ws, job)
-    if not quote.strip() or not any(
-        Path(s).is_file() and quote in Path(s).read_text() for s in record["inputs"].values()
+    transcript = record["inputs"].get("transcript")
+    segment = _segment(transcript, locator) if transcript and locator else None
+    if not quote.strip() or not (
+        (segment is not None and quote in segment["text"])
+        or any(
+            Path(s).is_file() and quote in Path(s).read_text()
+            for s in record["inputs"].values()
+            if s != transcript
+        )
     ):
         raise CanonError("Quote the interval verbatim from one of the job's Sources.")
     with locked(ws):
@@ -520,11 +527,14 @@ def agent_tools(ws: Workspace) -> list:
                 translation=translation,
             )
 
-    def report_session_interval(job: int, start: str, end: str, quote: str) -> dict[str, Any]:
+    def report_session_interval(
+        job: int, start: str, end: str, quote: str, locator: str | None = None
+    ) -> dict[str, Any]:
         """Report the session's fictional interval (campaign dates) as a Source of your wrap job
-        states it, quoting the Source's words."""
+        states it, quoting the Source's words; from the transcript, give the segment's `locator`
+        (file:line) too."""
         with _for_agent():
-            return report_interval(ws, job, start, end, quote)
+            return report_interval(ws, job, start, end, quote, locator)
 
     def consolidate_candidates(job: int) -> list[dict[str, Any]]:
         """Once every candidate is submitted, have the Core route them: certain ones applied at
@@ -553,6 +563,16 @@ def turn(ws: Workspace, job: int) -> list[dict]:
         raise DelegationError(f"Job {job} is not a started {WORLD_TURN} job.")
     since = None if world.cursor(ws) else record["inputs"]["since"]
     return world.world_turn(ws, record["inputs"]["until"], since=since)
+
+
+def _segment(transcript: str, locator: str) -> dict | None:
+    """The transcript segment a `<file>:<line>` locator names (CAP-04), None when none."""
+    try:
+        n = int(locator.rpartition(":")[2])
+        segment = json.loads(Path(transcript).read_text().splitlines()[n - 1] if n > 0 else "")
+        return segment if isinstance(segment["text"], str) and segment["speaker"] else None
+    except ValueError, IndexError, KeyError, TypeError:
+        return None
 
 
 def _wrap_job(ws: Workspace, job: int) -> tuple[dict, int]:

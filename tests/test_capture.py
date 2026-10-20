@@ -494,3 +494,25 @@ def test_a_transcript_quote_is_checked_in_its_segment_as_spoken_with_its_speaker
     assert {c["speaker"] for c in capture.candidates(ws, 1)} == {"gm_hugo"}
     [done, _] = capture.consolidate(ws, job)
     assert done["origin"]["speaker"] == "gm_hugo"
+
+
+def test_a_transcript_states_the_interval_in_the_segment_its_locator_names(
+    ws: Workspace, tmp_path: Path
+) -> None:
+    said = 'Nous sommes le « 1er » ; "demain" sera le 2.'
+    transcript = tmp_path / "session-1.jsonl"
+    transcript.write_text(
+        json.dumps({"speaker": "alice_42", "start": 0, "end": 1, "text": "Bonsoir."})
+        + "\n"
+        + json.dumps({"speaker": "gm_hugo", "start": 2, "end": 4, "text": said})
+        + "\n"
+    )
+    job = capture.queue_wrap(ws, {"session": "1", "transcript": str(transcript)})["id"]
+    jobs.start(ws, job, {"host": "h", "model": "m", "effort": "e"}, manual=True)
+    dates = ("4726-01-01", "4726-01-02")
+
+    for locator in (None, f"{transcript}:1", "nowhere"):
+        with pytest.raises(index.CanonError, match="verbatim"):
+            capture.report_interval(ws, job, *dates, said, locator)
+    capture.report_interval(ws, job, *dates, '"demain" sera', f"{transcript}:2")
+    assert capture.time(ws)["sessions"][1]["end"] == "4726-01-02"

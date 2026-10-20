@@ -41,7 +41,7 @@ When the job has both notes and a transcript, they tell the same session twice: 
 
 ## Steps
 
-1. Read each Source whole. Note the session's fictional interval if one states it, and call `report_session_interval` with its start, end and the words that state it.
+1. Read each Source whole. Note the session's fictional interval if one states it, and call `report_session_interval` with its start, end and the words that state it (from the transcript, with the segment's `locator` too).
 2. Keep only what was said or done in the fiction at the table. Drop out-of-character chatter, recaps of earlier sessions, and speculation nobody established: never submit them.
 3. Find each entity in canon with `search_entities`, and what canon already holds with `search_facts` and `what_knows`.
 4. For each played statement, call `capture_candidate` with:
