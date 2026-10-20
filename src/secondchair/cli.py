@@ -10,7 +10,17 @@ from pathlib import Path
 import yaml
 
 from secondchair import runner, transcribe
-from secondchair.core import calls, canon, delegation, index, jobs, machine, workspace, world
+from secondchair.core import (
+    calls,
+    canon,
+    capture,
+    delegation,
+    index,
+    jobs,
+    machine,
+    workspace,
+    world,
+)
 from secondchair.core.calendar import CalendarError
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
@@ -188,7 +198,8 @@ def _gm_command(args: argparse.Namespace) -> str:
             return f"Session {delegation.current_session(ws)} started: moment live-session."
         if live is None:
             raise DelegationError("No live session is open.")
-        delegation.change_moment(ws, "between-sessions")
+        notes = str(Path(args.notes).expanduser().resolve()) if args.notes else None
+        delegation.change_moment(ws, "between-sessions", notes)
         return (
             f"Session {live} ended: moment between-sessions. "
             'Job "wrap a session" queued (secondchair jobs).'
@@ -209,6 +220,8 @@ def _gm_command(args: argparse.Namespace) -> str:
             raise DelegationError("Confirming a GM decision needs an interactive terminal.")
         entry = canon.confirm(ws, args.id, "cli", auth)
         return f"Confirmed {args.id} as a GM decision (entry {entry['id']})."
+    if args.command == "wrap":
+        return _describe_wrap(capture.wrap(ws, args.session, auth, args.start, args.end))
     if args.command == "promote":
         delegation.promote(ws, args.entry, "cli", auth)
         return f"Promoted hand edit {args.entry} to a GM decision."
@@ -237,6 +250,42 @@ def _describe_call(call: dict) -> str:
     )
     state = "safe default applied" if call["status"] == "defaulted" else "to answer"
     return f"Call {call['id']}  {call['kind']}  {call['responsibility']}  {state}: {what}"
+
+
+def _describe_wrap(summary: dict) -> str:
+    """The wrap's grouped round (CAP-13): questions first, contradictions leading, then what was
+    applied, each undoable by its entries."""
+    lines = []
+
+    def rank(call: dict) -> int:  # contradictions, blocking questions, then proposals
+        message = call["message"] or ""
+        return 0 if message.startswith("contradiction") else 1 if message else 2
+
+    questions = sorted(summary["questions"], key=rank)
+    for call in questions:
+        what = call["message"] or "a fact held for your approval"
+        lines.append(f"Question (entry {call['entry']}): {what}")
+    if questions:
+        lines.append(
+            "Answer each: `secondchair approve <entry>` admits it as written, `secondchair "
+            "reject <entry> --reason contradiction` drops it. Then run the wrap again."
+        )
+    for c in summary["candidates"]:
+        if c["status"] == "held":
+            continue
+        flag = f" [flagged: {c['reason']}]" if c["classification"] != "certain" else ""
+        error = f": {c['error']}" if c["error"] else ""
+        entries = f" (entries {', '.join(map(str, c['entries']))})" if c["entries"] else ""
+        lines.append(f"{c['status']}  {c['statement']}{flag}{error}{entries}")
+    if summary["candidates"] and not questions:
+        lines.append("Undo any applied item with `secondchair log undo <entry> --reason <reason>`.")
+    if summary["settled"]:
+        settled, job = summary["settled"], summary["job"]
+        lines.append(
+            f"Session interval {settled['start']} to {settled['end']}; current date "
+            f"{settled['end']}. World-turn job {job['id']} queued (secondchair jobs)."
+        )
+    return "\n".join(lines)
 
 
 def check(ws: workspace.Workspace) -> int:
@@ -424,6 +473,9 @@ def main(argv: list[str] | None = None) -> int:
         "session", parents=[in_workspace], help="start or end the live session (interactive only)"
     )
     session_cmd.add_argument("action", choices=("start", "end"))
+    session_cmd.add_argument(
+        "--notes", help="at end: your notes for the session, the wrap job's Source"
+    )
     commands.add_parser(
         "break", parents=[in_workspace], help="signal a break and show the calls held for it"
     )
@@ -451,6 +503,15 @@ def main(argv: list[str] | None = None) -> int:
         parents=[in_workspace],
         help="confirm a fact or event relayed from your words as a GM decision (interactive only)",
     ).add_argument("id", help="the fact or event id, f-… or v-…")
+    wrap_cmd = commands.add_parser(
+        "wrap",
+        parents=[in_workspace],
+        help="the wrap's grouped round, then settle the session and advance the date "
+        "(interactive only)",
+    )
+    wrap_cmd.add_argument("session", type=int)
+    wrap_cmd.add_argument("--start", help="the session's first campaign date, over the notes'")
+    wrap_cmd.add_argument("--end", help="the session's last campaign date, over the notes'")
     commands.add_parser(
         "check", parents=[in_workspace], help="rebuild the derived index and report invalid files"
     )

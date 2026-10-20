@@ -110,12 +110,13 @@ def current_moment(ws: Workspace) -> tuple[str, int]:
     return data["moment"], data["seq"]
 
 
-def change_moment(ws: Workspace, moment: str) -> bool:
+def change_moment(ws: Workspace, moment: str, notes: str | None = None) -> bool:
     """Open `moment`; False if it is already the current one. The end of a moment is the last
     deadline of its calls (DEL-30, DEL-32), then its log is frozen (DEL-25). Opening a live
     session gives it the next session id; ending one queues "wrap a session" (DEL-03, DEL-04).
-    Only an authenticated Surface may call this (DEL-03a)."""
-    from secondchair.core import calls, jobs  # they build on this module
+    `notes`, the GM's notes for the session ending, become the wrap job's Source. Only an
+    authenticated Surface may call this (DEL-03a)."""
+    from secondchair.core import calls, capture, jobs  # they build on this module
 
     if moment not in MOMENTS:
         raise DelegationError(f"Unknown moment {moment!r}; expected one of {', '.join(MOMENTS)}.")
@@ -132,8 +133,8 @@ def change_moment(ws: Workspace, moment: str) -> bool:
     if ended is not None:
         jobs.queue(
             ws,
-            playbook="wrap-a-session",
-            inputs={"session": str(ended)},
+            playbook=capture.PLAYBOOK,
+            inputs={"session": str(ended), **({"notes": notes} if notes else {})},
             expected_output="The session's candidate facts consolidated into canon.",
             responsibility="memory",
             tier="standard",
@@ -241,10 +242,13 @@ def act(
     job: int | None = None,
     blocking: bool = False,
     occurrence: str | None = None,
+    hold: str | None = None,
 ) -> ActionResult:
     """Take one delegated action (ARC-04): refused at manual, held at propose as a call on the
     GM (DEL-30), applied above. An action for a started job is bound by the table of the job's
-    moment (ARC-23), logs the job's runner configuration (DEL-24) and blocks as the job does."""
+    moment (ARC-23), logs the job's runner configuration (DEL-24) and blocks as the job does.
+    `hold` holds it at propose whatever the level, the call carrying it as its message (a
+    wrap's contradiction or blocking question, CAP-10)."""
     from secondchair.core import calls
 
     with locked(ws):
@@ -273,6 +277,9 @@ def act(
         if entity is not None and not isinstance(entity, str):
             raise DelegationError(f"{tool.name}: the acting entity must be an entity id")
         level = effective_level(ws, tool.responsibility, table_moment, tool.reversible, entity)
+        lowered = level != cell
+        if hold is not None:
+            level = min(level, "propose", key=LEVELS.index)
         if level == "manual":
             raise DelegationError(
                 f"An entity override sets {tool.responsibility} at manual for {entity}: agents "
@@ -295,7 +302,7 @@ def act(
             "tool": tool.name,
             "responsibility": tool.responsibility,
             "effective_level": level,
-            "override_lowered": level != cell,
+            "override_lowered": lowered,
             "entity": entity,
             "reversible": tool.reversible,
             "agent": agent,
@@ -331,6 +338,7 @@ def act(
                 blocking=blocking,
                 entry=logged["id"],
                 job=job,
+                message=hold,
             )
             logged = read_entry(ws, logged["id"])  # a safe default may have rejected it at once
         return {"entry": logged["id"], "status": logged["status"]}
@@ -743,17 +751,22 @@ def promote(ws: Workspace, entry_id: int, channel: str, authenticated: bool) -> 
 
 
 def check(ws: Workspace) -> list[str]:
-    """One message per invalid delegation table, moment, action log, job, call or occurrence
-    file."""
-    from secondchair.core import calls
+    """One message per invalid delegation table, moment, action log, job, call, occurrence,
+    candidate or time file."""
+    from secondchair.core import calls, capture
 
     errors = read_log(ws)[1]
-    for d in (JOBS_DIR, CALLS_DIR, OCCURRENCES_DIR):
+    for d in (JOBS_DIR, CALLS_DIR, OCCURRENCES_DIR, capture.CAPTURE_DIR):
         for p in sorted((ws.root / d).glob("*.yaml")):
             try:
                 _read_yaml(p)
             except WorkspaceError as e:
                 errors.append(str(e))
+    if (ws.root / capture.TIME_FILE).exists():
+        try:
+            _read_yaml(ws.root / capture.TIME_FILE)
+        except WorkspaceError as e:
+            errors.append(str(e))
     try:
         current_moment(ws)
     except WorkspaceError as e:
