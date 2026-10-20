@@ -11,7 +11,6 @@ Each item is excluded from v4 only; none is excluded by the architecture.
 | Foundry v13 / pf2e 7.x | One Foundry/system pair at a time: v14 + pf2e 8.x | [ADR 0011](../adr/0011-foundry-automates-secondchair-checks.md) |
 | A GUI for non-technical GMs; a hosted SaaS | Surfaces can be layered later; the remote Core is deferred, not excluded | [#1](https://github.com/Hugo-Grellier/SecondChair/issues/1), [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md) |
 | An in-house agent loop; an LLM client in the Core; LangGraph, LiteLLM | Jobs have a contract another executor can run later | [ADR 0001](../adr/0001-no-in-house-orchestrator-llm-free-core.md) |
-| Embeddings and semantic search | The derived index leaves room for a job to compute them | [ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md) |
 | Docker packaging; publishing to a package index (PyPI) | v4 installs from git tags. Docker is the preferred later channel and can be added without changing anything else | [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md), [09](09-packaging.md) PKG-17 |
 | LoreForge integration; SecondChair as the engine of a hosted LoreForge | A fresh effort, kept possible by dual licensing under the CLA and the deferred remote Core | [#1](https://github.com/Hugo-Grellier/SecondChair/issues/1), [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md) |
 | The monetization model | The licences only keep it possible | [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md) |

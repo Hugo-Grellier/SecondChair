@@ -7,7 +7,7 @@ Canon is made of **facts**, not entity sheets. A fact is one statement about one
 - **Entity sheets as in v3**: rejected. Truth, time and knowledge would be attached to sections of prose rather than to statements.
 - **Typed triples only**: rejected. Most of what a campaign records does not fit a closed predicate list.
 - **SQLite as the source of truth**: rejected. Canon would no longer be diffable or editable by hand.
-- **Embeddings for search**: deferred. The Core calls no model (ADR 0001); search is structured plus full text, and the derived index leaves room to add embeddings computed by a job later.
+- **Embeddings for search**: deferred in the original v4 design. The campaign reference library (spec 12) now computes passage embeddings through the GM's local Ollama installation, outside the Core process. This preserves the LLM-free Core decision (ADR 0001) and the canonical source of truth: the index remains derived from workspace notes or registered references.
 
 ## Consequences
 
