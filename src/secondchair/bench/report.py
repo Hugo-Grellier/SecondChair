@@ -76,6 +76,10 @@ def recompute(out: Path) -> dict:
     """Score every stored run of a bench output directory and write `report.json`, `report.md`
     and, when every run passes, the mapping in runner-configuration format (ARC-30)."""
     meta = yaml.safe_load((out / META_FILE).read_text())
+    if meta["scenario"] == "S2":
+        from secondchair.bench import s2  # through the harness, it imports this module
+
+        return s2.recompute(out)
     gold = yaml.safe_load((out / GOLD_FILE).read_text())
     tables: dict[str, dict] = {}
     for table in TABLES:

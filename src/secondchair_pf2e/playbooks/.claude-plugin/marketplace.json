@@ -1,0 +1,13 @@
+{
+  "name": "secondchair-pf2e",
+  "owner": {"name": "Hugo Grellier"},
+  "description": "SecondChair's Pathfinder Second Edition playbooks for Claude Code.",
+  "plugins": [
+    {
+      "name": "secondchair-pf2e",
+      "source": "./",
+      "author": {"name": "Hugo Grellier"},
+      "description": "SecondChair's Pathfinder Second Edition playbooks: the procedures agents follow for PF2e prep, such as calibrating encounters."
+    }
+  ]
+}

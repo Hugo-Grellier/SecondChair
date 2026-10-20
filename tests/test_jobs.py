@@ -203,7 +203,7 @@ def test_every_block_s_playbooks_reach_the_agent_host(
 
     dirs = [f"--plugin-dir={d}" for d in runner.playbook_dirs()]
     assert json.loads(out.read_text())[1:] == dirs
-    assert len(dirs) == 2  # the Core's and the Foundry connector's (ARC-10)
+    assert len(dirs) == 3  # the Core's, the Foundry connector's (ARC-10) and the PF2e extension's
 
 
 def test_with_the_first_entry_broken_the_second_is_used_and_both_are_logged(
@@ -328,6 +328,7 @@ def test_a_job_carries_the_vocabulary_of_the_entities_it_is_about(ws: Workspace)
 def test_every_playbook_is_an_agent_skill_with_a_tier_and_a_responsibility() -> None:
     skills = runner.skills()
     assert sorted(s.name for s in skills) == [
+        "calibrate-encounters",
         "diagnose-frictions",
         "propose-consequences",
         "propose-narrative-direction",
@@ -349,7 +350,7 @@ def test_every_playbook_is_an_agent_skill_with_a_tier_and_a_responsibility() -> 
         marketplace = json.loads((playbooks / ".claude-plugin/marketplace.json").read_text())
         assert marketplace["name"] == marketplace["plugins"][0]["name"] == plugin["name"]
         names.append(plugin["name"])
-    assert names == ["secondchair", "secondchair-foundry"]
+    assert names == ["secondchair", "secondchair-foundry", "secondchair-pf2e"]
 
 
 # Model names live only in the GM's machine configuration (ARC-25): checked in CI.

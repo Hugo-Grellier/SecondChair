@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: RUL-17, RUL-24, ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, TRC-03, TRC-04, TRC-05, TRC-06, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
+Workspace schema version: **1**. Requirements: RUL-17, RUL-24, ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, TRC-03, TRC-04, TRC-05, TRC-06, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, LIC-12, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -32,7 +32,7 @@ my-campaign/
 ├── speakers.yaml      # the speaker table (CAP-02); written by the GM
 ├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
-└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/: each prepared scene's last reconciliation report, cue.json: the active NPC's acting cue); git-ignored, rebuildable
+└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/: each prepared scene's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content); git-ignored, rebuildable
 ```
 
 Later contracts add decisions, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
@@ -551,11 +551,16 @@ The derived index (CAN-10): entities, facts, events and knowledge with their der
       - {host: codex, model: <model>, effort: medium}
   hosts:       # optional: command templates, overriding or adding to the built-in claude and codex
     my-host: [my-agent, --model, "{model}", --effort, "{effort}", "{prompt}"]
+  purchased_content:   # LIC-12: directories or files of purchased content (e.g. a premium Foundry module)
+    - path: ~/foundrydata/Data/modules/pf2e-beginner-box
+      opt_in: false    # true sends its content to models; default false
   ```
 
   Next to it, `foundry-token` (mode 0600) holds the token the Foundry module connects with, created by `secondchair token` ([foundry-bridge.md](foundry-bridge.md)).
 
   `runners` is keyed by tier only (`fast`, `standard`, `deep`); a tier with no entry has no runner, and its jobs wait for the GM to start them from their own agent host session. Each entry names a host, a model and an effort; model names appear only here (ARC-25). A host is a command template whose `{prompt}`, `{model}`, `{effort}`, `{playbooks}` (a block's playbook directory; an argument naming it is repeated for each installed block) and `{job}` are filled in; the built-in `claude` and `codex` templates run Claude Code (`claude -p`, with each block's playbooks as a plugin directory and only the SecondChair tools and file reads allowed) and Codex (`codex exec`) headless, both reaching the Core through the MCP configuration `secondchair host setup` prints. An entry whose command cannot be run or exits with an error is a failed attempt, and the next entry is tried.
+
+`purchased_content` lists the GM's purchased content (LIC-12). Without `opt_in: true`, it is indexed by metadata only: when a job is queued, an input naming such a path, or a directory holding one, is replaced by the path of its **metadata index**, `.secondchair/purchased/<16 hex digits of the SHA-256 of the path>.yaml`, so none of its text reaches the job. The index holds the path's name, `opt_in: false`, a note for the agent and each file's relative `path` and size in `bytes`; nothing of the content. With `opt_in: true` the input is passed as given.
 
 - **Behaviour traces** (TRC-04) are a Source kept by the Core in `$XDG_DATA_HOME/secondchair/traces/<campaign id>/<user id>.jsonl` (default `~/.local/share/secondchair/`), never in the workspace and never sent anywhere ([foundry-bridge.md](foundry-bridge.md), "Behaviour traces").
 

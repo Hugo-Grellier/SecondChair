@@ -27,6 +27,7 @@ foundry = "secondchair_foundry.bridge:routes"
 [project.entry-points."secondchair.playbooks"]
 core = "secondchair.runner:PLAYBOOKS"
 foundry = "secondchair_foundry:PLAYBOOKS"
+pf2e = "secondchair_pf2e:PLAYBOOKS"
 
 [project.entry-points."secondchair.rules_checks"]
 pf2e = "secondchair_pf2e.checks:check"
@@ -34,6 +35,7 @@ pf2e = "secondchair_pf2e.checks:check"
 [project.entry-points."secondchair.tools"]
 core = "secondchair.core.campaign:tools"
 foundry = "secondchair_foundry.tools:tools"
+pf2e = "secondchair_pf2e.calculators:tools"
 
 [dependency-groups]
 dev = [
