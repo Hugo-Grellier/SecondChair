@@ -62,6 +62,7 @@ class Change:
     path: str  # relative to the workspace root
     after: str | None  # the file's new content, None to delete it
     source: str | None = None  # what the action draws on, recorded in the log (DEL-24)
+    entity: str | None = None  # the acting entity's canon id, what overrides key on (DEL-10)
 
 
 class Contradiction(Exception):
@@ -85,6 +86,7 @@ class VttAction:
     target: str  # the document acted on, as the connector names it
     params: dict[str, Any]  # the fields to set
     source: str | None = None  # what the action draws on, recorded in the log (DEL-24)
+    entity: str | None = None  # as for `Change`
 
 
 def load_tools(ws: Workspace) -> list[Tool]:

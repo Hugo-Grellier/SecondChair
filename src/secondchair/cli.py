@@ -155,6 +155,14 @@ def _gm_command(args: argparse.Namespace) -> str:
             f"Session {live} ended: moment between-sessions. "
             'Job "wrap a session" queued (secondchair jobs).'
         )
+    if args.command == "override":
+        o = (args.entity, args.responsibility)
+        if args.override_command == "add":
+            delegation.add_override(ws, *o, args.level, args.moment, "cli", auth)
+            where = args.moment or "every moment"
+            return f"{args.responsibility} for {args.entity} lowered to {args.level} ({where})."
+        delegation.remove_override(ws, *o, args.moment, "cli", auth)
+        return f"Override removed: {args.responsibility} for {args.entity}."
     if args.command == "break":
         pile = calls.take_break(ws)
         return "\n".join(_describe_call(c) for c in pile) or "Nothing held for the break."
@@ -351,6 +359,20 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "break", parents=[in_workspace], help="signal a break and show the calls held for it"
     )
+    override_cmd = commands.add_parser(
+        "override", help="lower the delegation level for one acting entity"
+    )
+    override_sub = override_cmd.add_subparsers(dest="override_command", required=True)
+    for name, help_text in (
+        ("add", "add an entity override; it takes effect at once"),
+        ("remove", "remove an entity override (interactive only)"),
+    ):
+        sub = override_sub.add_parser(name, parents=[in_workspace], help=help_text)
+        sub.add_argument("entity", help="the acting entity's id, e-…")
+        sub.add_argument("responsibility", help=", ".join(delegation.OVERRIDABLE))
+        if name == "add":
+            sub.add_argument("level", choices=delegation.LEVELS)
+        sub.add_argument("--moment", choices=delegation.MOMENTS, help="default: every moment")
     for name, help_text, parents in (
         ("approve", "approve a pending action", [in_workspace]),
         ("reject", "reject a pending action", [in_workspace, reason]),

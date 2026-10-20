@@ -32,6 +32,7 @@ from secondchair.core.workspace import CONFIG_FILE, STATE_DIR, Workspace, Worksp
 LEVELS = ("manual", "propose", "act-then-review", "autonomous")  # DEL-02, loosest last
 MOMENTS = ("prep", "live-session", "between-sessions")  # DEL-03
 REASONS = ("contradiction", "rules", "tone", "other")  # DEL-26
+OVERRIDABLE = ("rules_and_combat", "npcs", "disclosure")  # DEL-11
 
 TABLE_FILE = "delegation.yaml"
 MOMENT_FILE = "moment.yaml"
@@ -141,16 +142,26 @@ def _write_moment(root: Path, moment: str, seq: int, session: int = 0) -> None:
 # Levels
 
 
-def effective_level(ws: Workspace, responsibility: str, moment: str, reversible: bool) -> str:
-    """The table cell for the moment (DEL-12; no entity override yet). An irreversible action is
-    held at propose (DEL-09)."""
+def effective_level(
+    ws: Workspace, responsibility: str, moment: str, reversible: bool, entity: str | None = None
+) -> str:
+    """The table cell for the moment, lowered by the acting entity's overrides (DEL-12). An
+    irreversible action is held at propose (DEL-09)."""
     level = _cell(ws, moment, responsibility).get("level")
     if level not in LEVELS:
         raise WorkspaceError(
             f"{ws.root / TABLE_FILE}: {moment} / {responsibility} needs a level among "
             f"{', '.join(LEVELS)}."
         )
-    return level if reversible else min(level, "propose", key=LEVELS.index)
+    levels = [level] if reversible else [level, "propose"]
+    levels += [
+        o["level"]
+        for o in overrides(ws)
+        if entity is not None
+        and (o["entity"], o["responsibility"]) == (entity, responsibility)
+        and o["moment"] in (None, moment)
+    ]
+    return min(levels, key=LEVELS.index)
 
 
 def _cell(ws: Workspace, moment: str, responsibility: str) -> dict:
@@ -240,8 +251,8 @@ def act(
             table_moment = record["moment"]
             runner_configuration = record["attempts"][-1]["runner_configuration"]
             blocking = record.get("blocking", False)
-        level = effective_level(ws, tool.responsibility, table_moment, tool.reversible)
-        if level == "manual":
+        cell = effective_level(ws, tool.responsibility, table_moment, tool.reversible)
+        if cell == "manual":
             raise DelegationError(
                 f"{tool.responsibility} is at manual in {table_moment}: agents take no action, "
                 "they only answer when asked."
@@ -250,6 +261,15 @@ def act(
             change, refusal = describe(), None
         except Contradiction as c:  # logged: a Core-detected contradiction with canon (MET-01)
             change, refusal = Change(path=c.path, after=None), str(c)
+        entity = getattr(change, "entity", None)
+        if entity is not None and not isinstance(entity, str):
+            raise DelegationError(f"{tool.name}: the acting entity must be an entity id")
+        level = effective_level(ws, tool.responsibility, table_moment, tool.reversible, entity)
+        if level == "manual":
+            raise DelegationError(
+                f"An entity override sets {tool.responsibility} at manual for {entity}: agents "
+                "take no action for it, they only answer when asked."
+            )
         if isinstance(change, VttAction):
             # The VTT reports the state before; at propose it is known only once approved.
             effect = {"op": change.op, "target": change.target, "before": None}
@@ -267,7 +287,8 @@ def act(
             "tool": tool.name,
             "responsibility": tool.responsibility,
             "effective_level": level,
-            "override_lowered": False,  # no entity override yet (DEL-10..17)
+            "override_lowered": level != cell,
+            "entity": entity,
             "reversible": tool.reversible,
             "agent": agent,
             "source": change.source,
@@ -424,6 +445,170 @@ def approve_proposal(ws: Workspace) -> Callable[..., ActionResult]:
     return approve_proposal
 
 
+# Entity overrides (DEL-10..17), stored in the delegation table under `overrides`.
+
+
+def overrides(ws: Workspace) -> list[dict]:
+    """Every entity override: `entity`, `responsibility`, `level`, and `moment` (null for every
+    moment)."""
+    found = _read_yaml(ws.root / TABLE_FILE).get("overrides") or []
+    if not isinstance(found, list) or not all(
+        isinstance(o, dict)
+        and sorted(o) == ["entity", "level", "moment", "responsibility"]
+        and isinstance(o["entity"], str)
+        and o["responsibility"] in OVERRIDABLE
+        and o["level"] in LEVELS
+        and o["moment"] in (None, *MOMENTS)
+        for o in found
+    ):
+        raise WorkspaceError(
+            f"{ws.root / TABLE_FILE}: overrides must be a list of {{entity, responsibility, "
+            f"level, moment}}, the responsibility one of {', '.join(OVERRIDABLE)}."
+        )
+    return found
+
+
+def add_override(
+    ws: Workspace,
+    entity: str,
+    responsibility: str,
+    level: str,
+    moment: str | None,
+    channel: str,
+    authenticated: bool,
+    quote: str | None = None,
+) -> dict:
+    """Tighten one acting entity's level (DEL-11..14): accepted from any Surface, an agent relay
+    quoting the GM included, and in force at once. It never loosens: over an override of the
+    same entity, responsibility and moment, the lower level stays. Pending calls and queued jobs
+    of that entity for that responsibility are withdrawn with their safe default (DEL-16)."""
+    if responsibility not in OVERRIDABLE:
+        raise DelegationError(
+            f"{responsibility} takes no entity override; only {', '.join(OVERRIDABLE)} do."
+        )
+    if level not in LEVELS:
+        raise DelegationError(f"Level {level!r}: expected one of {', '.join(LEVELS)}.")
+    if moment not in (None, *MOMENTS):
+        raise DelegationError(f"Unknown moment {moment!r}; expected one of {', '.join(MOMENTS)}.")
+    if channel == "via agent" and not (quote and quote.strip()):
+        raise DelegationError("An override relayed by an agent must quote the GM's words.")
+    with locked(ws):
+        if entity not in {p.stem for p in (ws.root / CANON_DIR / "entities").glob("*.md")}:
+            raise DelegationError(f"No entity {entity!r} in canon.")
+        found = overrides(ws)
+        key = (entity, responsibility, moment)
+        same = [o for o in found if (o["entity"], o["responsibility"], o["moment"]) == key]
+        override = {"entity": entity, "responsibility": responsibility, "level": level}
+        override["moment"] = moment
+        if same:
+            override = min(same[0], override, key=lambda o: LEVELS.index(o["level"]))
+            found.remove(same[0])
+        _write_overrides(ws, [*found, override])
+        interaction = _interaction(
+            ws, "add_override", None, channel, authenticated, quote, None, override=override
+        )
+        _withdraw(ws, override, interaction["id"])
+        return interaction
+
+
+def remove_override(
+    ws: Workspace,
+    entity: str,
+    responsibility: str,
+    moment: str | None,
+    channel: str,
+    authenticated: bool,
+) -> dict:
+    """Loosen: remove an override, only from an authenticated Surface (DEL-14)."""
+    if not authenticated:
+        raise DelegationError(
+            "Removing an entity override loosens a level: do it from an authenticated Surface "
+            "(the CLI in an interactive terminal)."
+        )
+    with locked(ws):
+        found = overrides(ws)
+        key = (entity, responsibility, moment)
+        same = [o for o in found if (o["entity"], o["responsibility"], o["moment"]) == key]
+        if not same:
+            where = f"in {moment}" if moment else "for every moment"
+            raise DelegationError(f"No {responsibility} override for {entity} {where}.")
+        found.remove(same[0])
+        _write_overrides(ws, found)
+        return _interaction(
+            ws, "remove_override", None, channel, authenticated, None, None, override=same[0]
+        )
+
+
+def merge_overrides(ws: Workspace, survivor: str, merged: str) -> None:
+    """Entities merged at the wrap: `merged`'s overrides follow `survivor`, and where both hold
+    one for the same responsibility and moment, the most restrictive wins (DEL-17)."""
+    with locked(ws):
+        kept: dict[tuple, dict] = {}
+        for found in overrides(ws):
+            o = {**found, "entity": survivor} if found["entity"] == merged else found
+            key = (o["entity"], o["responsibility"], o["moment"])
+            kept[key] = min(kept.get(key, o), o, key=lambda x: LEVELS.index(x["level"]))
+        _write_overrides(ws, list(kept.values()))
+
+
+def override_tool(ws: Workspace) -> Callable[..., dict[str, Any]]:
+    """The agent relay of a GM override (DEL-14), served by the Core next to block tools."""
+
+    def add_entity_override(
+        entity: str, responsibility: str, level: str, gm_words: str, moment: str | None = None
+    ) -> dict[str, Any]:
+        """Lower the delegation level for one acting entity (an NPC who speaks, a creature that
+        strikes) on npcs, rules_and_combat or disclosure, when the GM asked for it in
+        conversation: quote the GM's exact words. `level`: manual, propose, act-then-review or
+        autonomous; it never raises the level. `moment`: prep, live-session or
+        between-sessions to restrict it to one moment, else every moment. Only the GM can
+        remove it, from an authenticated Surface."""
+        with _for_agent():
+            interaction = add_override(
+                ws, entity, responsibility, level, moment, "via agent", False, gm_words
+            )
+        return {"entry": interaction["id"], "override": interaction["override"]}
+
+    return add_entity_override
+
+
+def _write_overrides(ws: Workspace, found: list[dict]) -> None:
+    table = _read_yaml(ws.root / TABLE_FILE)
+    table.pop("overrides", None)
+    if found:
+        table["overrides"] = found
+    _write(ws.root / TABLE_FILE, yaml.safe_dump(table, sort_keys=False, allow_unicode=True))
+
+
+def _withdraw(ws: Workspace, override: dict, interaction: int) -> None:
+    """Withdraw the entity's open calls and queued jobs the override covers with their safe
+    default, logged and not shown at the break (DEL-16). Callers hold the lock."""
+    from secondchair.core import calls
+
+    def covered(entity: str | None, responsibility: str, moment: str) -> bool:
+        return (entity, responsibility) == (override["entity"], override["responsibility"]) and (
+            override["moment"] in (None, moment)
+        )
+
+    jobs = {job["id"]: job for job in calls._jobs(ws)}
+    for job in jobs.values():
+        if job["status"] == "queued" and covered(
+            job.get("entity"), job["responsibility"], job["moment"]
+        ):
+            job["status"] = "withdrawn"
+            _save(ws, job, JOBS_DIR)
+            calls._log_default(ws, None, None, job["id"], interaction)
+    for call in calls._calls(ws):
+        job = jobs.get(call["job"]) if call["job"] is not None else None
+        if call["entry"] is not None:
+            entity = read_entry(ws, call["entry"]).get("entity")
+        else:
+            entity = job.get("entity") if job else None
+        moment = job["moment"] if job else call["moment"]
+        if call["status"] == "open" and covered(entity, call["responsibility"], moment):
+            calls._default(ws, call, interaction)
+
+
 # Hand edits (CAN-11): a canon file changed outside the Core.
 
 CANON_DIR = "canon"
@@ -542,6 +727,7 @@ def check(ws: Workspace) -> list[str]:
     except WorkspaceError as e:
         errors.append(str(e))
     try:
+        overrides(ws)
         for moment in MOMENTS:
             for responsibility in RESPONSIBILITIES:
                 effective_level(ws, responsibility, moment, reversible=True)
@@ -581,11 +767,12 @@ def _check_not_frozen(ws: Workspace, entry: dict) -> None:
 def _interaction(
     ws: Workspace,
     interaction: str,
-    entry_id: int,
+    entry_id: int | None,
     channel: str,
     authenticated: bool,
     quote: str | None,
     reason: str | None,
+    **extra: Any,
 ) -> dict:
     moment, seq = current_moment(ws)
     return _append(
@@ -600,6 +787,7 @@ def _interaction(
             "authenticated": authenticated,
             "quote": quote,
             "reason": reason,
+            **extra,
         },
     )
 

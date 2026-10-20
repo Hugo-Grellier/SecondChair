@@ -20,7 +20,7 @@
     "entry": {"type": ["integer", "null"], "description": "A proposal's pending action log entry."},
     "job": {"type": ["integer", "null"], "description": "The job the call comes from, if any."},
     "message": {"type": ["string", "null"], "description": "An exception's text."},
-    "status": {"enum": ["open", "answered", "defaulted"], "description": "answered when the GM approved or rejected the proposal; defaulted when its deadline passed first: a proposal is rejected, an exception takes no action, logged as a `safe_default` action log entry (DEL-32). A blocking call forced to break is defaulted at once (DEL-31)."},
+    "status": {"enum": ["open", "answered", "defaulted", "withdrawn"], "description": "answered when the GM approved or rejected the proposal; defaulted when its deadline passed first: a proposal is rejected, an exception takes no action, logged as a `safe_default` action log entry (DEL-32). A blocking call forced to break is defaulted at once (DEL-31). withdrawn when an entity override of its acting entity (the proposal's action entry, else its job's entity) landed first: the same safe default, logged with the override, and never shown at the break (DEL-16)."},
     "shown": {"type": "boolean", "description": "Whether a defaulted call was shown again at a break."}
   }
 }

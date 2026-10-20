@@ -150,6 +150,7 @@ def test_a_blocking_call_forced_to_break_takes_its_safe_default_at_once(
         "call": 1,
         "entry": 1,
         "job": None,
+        "override": None,
     }
     assert not list(ws.root.glob("canon/entities/*.md"))
     capsys.readouterr()

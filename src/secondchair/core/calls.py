@@ -163,17 +163,18 @@ def interruptions(ws: Workspace, session: int | None = None) -> dict:
     return {"total": sum(by.values()), "by_responsibility": by}
 
 
-def _default(ws: Workspace, call: dict) -> None:
+def _default(ws: Workspace, call: dict, override: int | None = None) -> None:
     """The safe default (DEL-32): a pending proposal is rejected, never applied, so an
-    irreversible action never takes effect by default; an exception takes no action."""
+    irreversible action never takes effect by default; an exception takes no action. Withdrawn
+    by an entity override (its `add_override` entry), the call is not shown at the break."""
     if call["entry"] is not None:
         entry = read_entry(ws, call["entry"])
         if entry["status"] == "pending":
             entry["status"] = "rejected"
             _save(ws, entry)
-    call["status"] = "defaulted"
+    call["status"] = "defaulted" if override is None else "withdrawn"
     _save(ws, call, CALLS_DIR)
-    _log_default(ws, call["id"], call["entry"], call["job"])
+    _log_default(ws, call["id"], call["entry"], call["job"], override)
 
 
 def _miss(ws: Workspace, job: dict) -> None:
@@ -185,7 +186,9 @@ def _miss(ws: Workspace, job: dict) -> None:
     _log_default(ws, None, None, job["id"])
 
 
-def _log_default(ws: Workspace, call: int | None, entry: int | None, job: int | None) -> None:
+def _log_default(
+    ws: Workspace, call: int | None, entry: int | None, job: int | None, override: int | None = None
+) -> None:
     moment, seq = current_moment(ws)
     _append(
         ws,
@@ -196,6 +199,7 @@ def _log_default(ws: Workspace, call: int | None, entry: int | None, job: int | 
             "call": call,
             "entry": entry,
             "job": job,
+            "override": override,
         },
         LOG_DIR,
     )
