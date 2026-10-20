@@ -87,6 +87,9 @@ class VttAction:
     params: dict[str, Any]  # the fields to set
     source: str | None = None  # what the action draws on, recorded in the log (DEL-24)
     entity: str | None = None  # as for `Change`
+    # A disclosure's facts: the Core checks them, then marks them known by the party once the
+    # action is taken (CAN-16, CAN-17). None for an action that shows the players nothing.
+    cites: list[str] | None = None
 
 
 def load_tools(ws: Workspace) -> list[Tool]:

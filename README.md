@@ -28,6 +28,8 @@ secondchair reject 3 --reason tone         # contradiction, rules, tone or other
 secondchair log undo 2 --reason rules      # undo an action of the current moment
 secondchair override add e-1a2b3c4d npcs manual   # I voice this NPC myself
 secondchair override remove e-1a2b3c4d npcs       # hand it back (interactive terminal only)
+secondchair hold lift disclosure live-session    # let disclosures run at their level, no undo (interactive only)
+secondchair hold restore disclosure live-session # hold them for approval again
 ```
 
 To connect Foundry VTT, run `secondchair token` and install the `secondchair-foundry` module as described in [`foundry/README.md`](foundry/README.md). Your browser may ask once whether the Foundry site may connect to services on your computer: allow it.

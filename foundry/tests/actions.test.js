@@ -16,16 +16,25 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
   /** @type {Record<string, {documentName: string, updates: number, update: (c: object) => Promise<void>} & Record<string, unknown>>} */
   const docs = {};
   for (const [uuid, documentName, fields] of /** @type {const} */ ([
-    ["Scene.s.Token.t", "Token", { x: 100, y: 200 }],
+    ["Scene.s.Token.t", "Token", { x: 100, y: 200, hidden: true }],
     ["Scene.s.Wall.w", "Wall", { ds: 0 }],
+    ["JournalEntry.j", "JournalEntry", { ownership: { default: 0 } }],
   ])) {
     docs[uuid] = {
       documentName,
-      ...fields,
+      ...structuredClone(fields),
       updates: 0,
       async update(changes) {
         await new Promise((resolve) => setTimeout(resolve, 5));
-        Object.assign(this, changes);
+        for (const [path, value] of Object.entries(changes)) {
+          // Foundry expands a dotted key into the nested field it names.
+          const keys = path.split(".");
+          const last = /** @type {string} */ (keys.pop());
+          /** @type {any} */
+          let at = this;
+          for (const k of keys) at = at[k];
+          at[last] = value;
+        }
         this.updates += 1;
       },
     };
@@ -149,6 +158,34 @@ test("a door opens", async () => {
   });
   assert.deepEqual(reply.ok && reply.after, { ds: 1 });
   assert.equal(docs["Scene.s.Wall.w"].ds, 1);
+});
+
+test("a disclosure reveals a token and publishes a journal entry to the players", async () => {
+  const { docs, handle } = world();
+  const token = { op: "reveal_token", target: "Scene.s.Token.t", params: { hidden: false } };
+  const shown = await handle({ id: "r1", expect: null, ...token });
+  assert.deepEqual(shown, {
+    type: "reply",
+    id: "r1",
+    ok: true,
+    before: { hidden: true },
+    after: { hidden: false },
+  });
+  const journal = { op: "publish_journal", target: "JournalEntry.j" };
+  const published = await handle({
+    id: "r2",
+    expect: null,
+    params: { "ownership.default": 2 },
+    ...journal,
+  });
+  assert.deepEqual(published, {
+    type: "reply",
+    id: "r2",
+    ok: true,
+    before: { "ownership.default": 0 },
+    after: { "ownership.default": 2 },
+  });
+  assert.equal(docs["Scene.s.Token.t"].hidden, false);
 });
 
 test("a generic action refuses the wrong document or fields", async () => {

@@ -40,6 +40,24 @@ def set_door(door: str, state: Literal["closed", "open", "locked"]) -> VttAction
     return VttAction(op="set_door", target=door, params={"ds": DOOR_STATES[state]})
 
 
+def reveal_token(token: str, cites: list[str]) -> VttAction:
+    """Reveal a hidden token to the players, a disclosure. `token` is its Foundry UUID
+    (Scene.<id>.Token.<id>); `cites` the ids of the facts the players learn by seeing it, which
+    become known by the party. Irreversible: held for the GM's approval unless the GM lifted the
+    hold."""
+    return VttAction(op="reveal_token", target=token, params={"hidden": False}, cites=cites)
+
+
+def publish_journal(journal: str, cites: list[str]) -> VttAction:
+    """Publish a journal entry to the players (observer for everyone), a disclosure. `journal`
+    is its Foundry UUID (JournalEntry.<id>); `cites` the ids of the facts it tells, which
+    become known by the party. Irreversible: held for the GM's approval unless the GM lifted the
+    hold."""
+    return VttAction(
+        op="publish_journal", target=journal, params={"ownership.default": 2}, cites=cites
+    )
+
+
 def prepare_scene(
     key: str,
     scene: dict[str, Any],
@@ -113,6 +131,10 @@ def tools(ws: Workspace) -> list[Tool]:
             fn=move_token, responsibility="vtt_operations", delegated_action=True, reversible=True
         ),
         Tool(fn=set_door, responsibility="vtt_operations", delegated_action=True, reversible=True),
+        Tool(fn=reveal_token, responsibility="disclosure", delegated_action=True, reversible=False),
+        Tool(
+            fn=publish_journal, responsibility="disclosure", delegated_action=True, reversible=False
+        ),
         Tool(fn=prepare_scene, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=scene_report, responsibility="prep", delegated_action=False, reversible=True),
     ]

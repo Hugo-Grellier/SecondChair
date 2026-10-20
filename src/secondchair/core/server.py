@@ -54,7 +54,11 @@ def build_server(ws: Workspace) -> MCPServer:
             },
         )
     # A GM interaction relayed by an agent: neither a read nor a delegated action (DEL-27).
-    for fn in (delegation.approve_proposal(ws), delegation.override_tool(ws)):
+    for fn in (
+        delegation.approve_proposal(ws),
+        delegation.override_tool(ws),
+        delegation.hold_tool(ws),
+    ):
         server.add_tool(
             fn,
             annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),

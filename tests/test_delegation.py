@@ -74,9 +74,10 @@ def test_a_fresh_table_is_prep_play_prep_with_every_deadline_auto(ws: Workspace)
         "live-session": base["play"],
         "between-sessions": base["prep"],
     }
-    assert table["prep"]["memory"] == {"level": "act-then-review", "deadline": "auto"}
+    assert table["prep"]["memory"] == {"level": "act-then-review", "deadline": "auto", "hold": True}
     assert table["live-session"]["rules_and_combat"]["level"] == "act-then-review"
     assert {c["deadline"] for p in base.values() for c in p.values()} == {"auto"}
+    assert {c["hold"] for p in base.values() for c in p.values()} == {True}  # DEL-09a
     assert all(base["read"][r]["level"] == "manual" for r in RESPONSIBILITIES)
     assert delegation.current_moment(ws) == ("prep", 1)
 

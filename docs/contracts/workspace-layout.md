@@ -95,24 +95,30 @@ Month lengths are 1 to 98 days, at most 99 months.
 
 ## `delegation.yaml`
 
-The delegation table (DEL-05): one column per moment (`prep`, `live-session`, `between-sessions`), one cell per responsibility (the keys of [tool registration](tool-registration.md)), each with a level (`manual`, `propose`, `act-then-review`, `autonomous`) and a deadline mode (`auto`, `now`, `break`). `init` seeds it with the base profiles *prep*, *play* and *prep* (DEL-06, DEL-06a), every deadline mode `auto`. The GM may edit cells by hand; the Core reads the table at every delegated action.
+The delegation table (DEL-05): one column per moment (`prep`, `live-session`, `between-sessions`), one cell per responsibility (the keys of [tool registration](tool-registration.md)), each with a level (`manual`, `propose`, `act-then-review`, `autonomous`) a deadline mode (`auto`, `now`, `break`) and an irreversible hold (below). `init` seeds it with the base profiles *prep*, *play* and *prep* (DEL-06, DEL-06a), every deadline mode `auto` and every hold set. The GM may edit cells by hand; the Core reads the table at every delegated action.
 
 ```yaml
 prep:
-  prep: {level: act-then-review, deadline: auto}
-  memory: {level: act-then-review, deadline: auto}
-  vtt_operations: {level: act-then-review, deadline: auto}
-  rules_and_combat: {level: manual, deadline: auto}
-  living_world: {level: act-then-review, deadline: auto}
-  npcs: {level: propose, deadline: auto}
-  narrative_direction: {level: propose, deadline: auto}
-  disclosure: {level: propose, deadline: auto}
+  prep: {level: act-then-review, deadline: auto, hold: true}
+  memory: {level: act-then-review, deadline: auto, hold: true}
+  vtt_operations: {level: act-then-review, deadline: auto, hold: true}
+  rules_and_combat: {level: manual, deadline: auto, hold: true}
+  living_world: {level: act-then-review, deadline: auto, hold: true}
+  npcs: {level: propose, deadline: auto, hold: true}
+  narrative_direction: {level: propose, deadline: auto, hold: true}
+  disclosure: {level: propose, deadline: auto, hold: true}
 live-session:
-  prep: {level: propose, deadline: auto}
+  prep: {level: propose, deadline: auto, hold: true}
   # … the rest of the play base profile
 between-sessions:
   # … the prep base profile
 ```
+
+### The irreversible hold
+
+Each cell also carries `hold` (DEL-09, DEL-09a), `true` in every base profile and when absent: the cell's irreversible actions (a disclosure, a public line) are held at propose whatever its level. `false` lets them run at the cell's effective level, still bounded by entity overrides and the VTT's ceiling: applied at once, logged, never undoable; a safe default never applies one.
+
+- `secondchair hold lift <responsibility> <moment>`, from an interactive terminal only, lifts it, since it stands for approving every future irreversible action of the cell. `secondchair hold restore <responsibility> <moment>` (any terminal) or an agent's `restore_hold` (quoting the GM) restores it, in force at once. Each is a `lift_hold` or `restore_hold` GM interaction in the action log, carrying the cell as `hold` (DEL-27).
 
 ### Entity overrides
 
@@ -396,6 +402,7 @@ origin: {kind: source, source: bible.md, page: "B14"}
 ```
 
 - Knowers are the party as a whole (`party`; individual PCs are not knowers), an NPC or a faction. A record whose knower is a place is that place's **common knowledge**.
+- A disclosure (a VTT action with `cites`, [tool registration](tool-registration.md)) writes, once applied, one record per cited fact the party does not know yet (CAN-17): knower `party`, mode `knows`, `date` the current date of `time.yaml`, an `observation` origin whose `locator` is the disclosure's action log entry (`action-log/000012.yaml`), ranked played, and `session`, the live session it was disclosed in (null outside one). Each record is written by its own irreversible action entry. `session` is optional on other records.
 - Knowledge is closed-world: a knower holds only its own records, plus those of the factions it is a `member_of` and the places it `lives_in` (one level; a faction never inherits from its members). With a date, only relations valid then and records learned by then count. A fact held several ways takes its strongest mode (knows, then believes, then suspects).
 - A never-true fact is believed or suspected, never known. Records on retconned facts are ignored.
 - Content written for an audience (an NPC line, a disclosure, an entity description) cites the ids of the facts it uses and goes through `check_audience_content` (CAN-16): refused when a cited id is not in canon, when the audience does not hold a cited fact, or when the text carries a canary (`CANARY-<zone>-<n>`) or an entity name (or alias) that appears in no fact the audience holds, the audience's own names excepted. Names match whole-word and case-sensitive; paraphrased leaks are not blocked, the test bench measures them.

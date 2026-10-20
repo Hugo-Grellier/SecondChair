@@ -12,11 +12,17 @@
  * @typedef {{ops: Record<string, (doc: Doc, params: Fields, expect: Fields | null) => Promise<{before: Fields, after: Fields}>>}} Adapter
  */
 
-/** The library's generic actions: one document type, the fields they may set (ARC-07). */
+/** The library's generic actions: one document type, the fields they may set, a dotted path for
+ * a nested one (ARC-07). reveal_token and publish_journal are disclosures (DEL-09). */
 const GENERIC = {
   move_token: { documentName: "Token", fields: ["x", "y"] },
   set_door: { documentName: "Wall", fields: ["ds"] },
+  reveal_token: { documentName: "Token", fields: ["hidden"] },
+  publish_journal: { documentName: "JournalEntry", fields: ["ownership.default"] },
 };
+
+/** @param {Record<string, unknown>} doc @param {string} path */
+const field = (doc, path) => path.split(".").reduce((/** @type {any} */ o, k) => o?.[k], doc);
 
 /** Delegation levels, loosest last (DEL-02). */
 export const LEVELS = ["manual", "propose", "act-then-review", "autonomous"];
@@ -96,7 +102,7 @@ export function createActions({ resolve, store, adapter, ceiling }) {
     if (!keys.length || keys.some((k) => !fields.includes(k))) {
       throw new Error(`${op} sets ${fields.join(", ")} only.`);
     }
-    const pick = () => Object.fromEntries(fields.map((k) => [k, doc[k]]));
+    const pick = () => Object.fromEntries(fields.map((k) => [k, field(doc, k)]));
     const before = pick();
     if (expect && Object.entries(expect).some(([k, v]) => before[k] !== v)) {
       throw new Error(`${target} changed since: nothing was done.`);

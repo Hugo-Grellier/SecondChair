@@ -249,7 +249,7 @@ def _admitted(entries: list[dict]) -> dict[tuple, tuple[int, str | None]]:
     """(target, content) -> the last entry that wrote it, and the rank a hand edit gives it."""
     found = {}
     for entry in entries:
-        if entry.get("after") and (
+        if isinstance(entry.get("after"), str) and (  # a VTT action's `after` is its fields
             entry.get("status") == "applied"
             or entry.get("kind") == "hand_edit"
             or entry.get("interaction") == "confirm"
@@ -342,6 +342,8 @@ def _knowledge(calendar: Calendar, front: dict) -> dict:
     if front.get("mode") not in MODES:
         raise CanonError(f"mode must be one of {', '.join(MODES)}")
     calendar.parse(front["date"], partial=True)
+    if type(front.get("session", 0)) not in (int, type(None)):  # set by a disclosure (CAN-17)
+        raise CanonError("session must be a session id or null")
     if front.get("rank") not in RANKS:
         raise CanonError(f"rank must be one of {', '.join(RANKS)}")
     rank_of(front["origin"], authenticated=True)
