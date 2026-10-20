@@ -10,6 +10,8 @@ import jsonschema
 import pytest
 import yaml
 from mcp import Client
+from test_canon import entity, fact
+from test_knowledge import learn
 
 from secondchair.cli import main
 from secondchair.core import delegation, workspace
@@ -152,3 +154,80 @@ def test_a_gesture_the_desk_does_not_know_is_refused(ws: Workspace) -> None:
     result = desk.take(ws, {"type": "gesture", "id": "g1", "gesture": "undo", "entry": 1})
     jsonschema.validate(result, BRIDGE)
     assert result["ok"] is False
+
+
+# The acting cue (DEL-15, CAN-16)
+
+
+def npc_who_knows(ws: Workspace) -> tuple[str, str, str]:
+    """Tovan Reed, who knows the bell rings on dry nights but not that a relay rings it."""
+    tovan = entity(ws, "Tovan Reed")
+    bell = fact(ws, "The bell rings on dry nights.", entities=[tovan])
+    relay = fact(ws, "A cracked relay rings the bell.", entities=[])
+    learn(ws, tovan, bell)
+    return tovan, bell, relay
+
+
+def cue(ws: Workspace, npc: str, line: str, cites: list[str], **more: Any) -> Any:
+    goal = "Keep the party away from the tower."
+    return call_tool(ws, "show_acting_cue", npc=npc, goal=goal, line=line, cites=cites, **more)
+
+
+def test_the_desk_shows_the_active_npcs_acting_cue(ws: Workspace) -> None:
+    tovan, bell, relay = npc_who_knows(ws)
+    assert state(ws)["cue"] is None
+
+    shown = cue(ws, tovan, "It only rings when the nights are dry.", [bell], does_not_know=[relay])
+    assert not shown.is_error, shown
+
+    found = state(ws)["cue"]
+    assert (found["npc"], found["name"], found["voiced"]) == (tovan, "Tovan Reed", False)
+    assert found["goal"] == "Keep the party away from the tower."
+    assert found["line"] == "It only rings when the nights are dry."
+    assert found["knows"] == [
+        {"id": bell, "statement": "The bell rings on dry nights.", "mode": "knows"}
+    ]
+    assert found["does_not_know"] == [{"id": relay, "statement": "A cracked relay rings the bell."}]
+
+
+def test_a_line_citing_a_fact_the_npc_does_not_know_is_refused(ws: Workspace) -> None:
+    tovan, bell, relay = npc_who_knows(ws)
+    cue(ws, tovan, "It only rings when the nights are dry.", [bell])
+
+    refused = cue(ws, tovan, "A cracked relay rings it.", [relay])
+    assert refused.is_error and "does not know" in refused.content[0].text
+    assert state(ws)["cue"]["line"] == "It only rings when the nights are dry."  # unchanged
+
+    wrong = cue(ws, tovan, "It only rings when the nights are dry.", [bell], does_not_know=[bell])
+    assert wrong.is_error and "knows" in wrong.content[0].text
+
+
+def test_i_voice_this_one_withdraws_its_calls_and_hand_back_removes_it(ws: Workspace) -> None:
+    tovan, bell, _ = npc_who_knows(ws)
+
+    def speak(text: str) -> Change:
+        return Change(path=f"lines/{text}.md", after=text, entity=tovan)
+
+    tool = Tool(fn=speak, responsibility="disclosure", delegated_action=True, reversible=False)
+    gesture(ws, "start_session")
+    pending = delegation.act(ws, tool, "claude-live", lambda: speak("Go home."), blocking=True)
+    assert len(state(ws)["calls"]) == 1
+
+    assert gesture(ws, "voice", entity=tovan)["ok"] is True
+    assert {(o["responsibility"], o["level"], o["moment"]) for o in delegation.overrides(ws)} == {
+        ("npcs", "manual", None),
+        ("disclosure", "manual", None),
+    }
+    assert state(ws)["calls"] == []  # withdrawn with its safe default
+    assert entry(ws, pending["entry"])["status"] == "rejected"
+    voiced = [e for e in log(ws) if e.get("interaction") == "add_override"]
+    assert {(e["channel"], e["authenticated"]) for e in voiced} == {("desk", True)}
+
+    # At manual the cue is still shown, since it is a read.
+    assert not cue(ws, tovan, "It only rings when the nights are dry.", [bell]).is_error
+    assert state(ws)["cue"]["voiced"] is True
+
+    assert gesture(ws, "hand_back", entity=tovan)["ok"] is True
+    assert delegation.overrides(ws) == []
+    assert state(ws)["cue"]["voiced"] is False
+    assert gesture(ws, "hand_back", entity=tovan)["ok"] is False

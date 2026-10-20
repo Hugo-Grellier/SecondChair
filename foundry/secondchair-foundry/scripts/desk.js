@@ -5,7 +5,8 @@
 
 /**
  * @typedef {{id: number, kind: string, responsibility: string, deadline: string, status: string, entry: number | null, message: string | null, detail: string | null, reversible: boolean | null}} DeskCall
- * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[]}} DeskState
+ * @typedef {{npc: string, name: string, goal: string, line: string, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean}} ActingCue
+ * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[]}} Result
  */
 
@@ -125,6 +126,27 @@ const callsHtml = (calls, none) =>
   calls.length ? `<ul>${calls.map(callHtml).join("")}</ul>` : `<p>${none}</p>`;
 
 /**
+ * The active NPC's acting cue (DEL-15): shown at every level, manual included, since it is a read.
+ * @param {ActingCue | null} cue
+ */
+function cueHtml(cue) {
+  if (!cue) return "<p>No acting cue.</p>";
+  /** @param {{statement: string, mode?: string}[]} facts */
+  const list = (facts) =>
+    facts.length
+      ? `<ul>${facts.map((f) => `<li>${esc(f.statement)}${f.mode && f.mode !== "knows" ? ` <em>(${esc(f.mode)})</em>` : ""}</li>`).join("")}</ul>`
+      : "<p>None.</p>";
+  const [gesture, label] = cue.voiced ? ["hand_back", "Hand back"] : ["voice", "I voice this one"];
+  return `<p><strong>${esc(cue.name)}</strong> · ${esc(cue.goal)}</p>
+<p><em>“${esc(cue.line)}”</em></p>
+<p>Knows:</p>
+${list(cue.knows)}
+<p>Does not know:</p>
+${list(cue.does_not_know)}
+<p><button type="button" data-action="gesture" data-gesture="${gesture}" data-entity="${esc(cue.npc)}">${label}</button></p>`;
+}
+
+/**
  * The Desk's content: nothing at all for a user who is not a GM.
  * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown}} args
  */
@@ -148,6 +170,8 @@ export function deskHtml({ isGM, state, pile, ceiling }) {
 <p>${session} <button type="button" data-action="gesture" data-gesture="break">Break</button></p>
 <h3>Due now</h3>
 ${callsHtml(state.calls, "Nothing due now.")}
+<h3>Acting cue</h3>
+${cueHtml(state.cue)}
 ${
   pile
     ? `<h3>Held for the break</h3>

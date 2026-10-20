@@ -128,11 +128,12 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
     actions: {
       /** @param {Event} _event @param {HTMLElement} target */
       gesture: async (_event, target) => {
-        const { gesture, entry, doc } = target.dataset;
+        const { gesture, entry, doc, entity } = target.dataset;
         /** @type {Record<string, unknown>} */
         const fields = {};
         if (entry) fields.entry = Number(entry);
         if (doc) fields.doc = doc;
+        if (entity) fields.entity = entity;
         if (gesture === "reject") {
           const select = target.parentElement?.querySelector("select");
           fields.reason = select?.value;

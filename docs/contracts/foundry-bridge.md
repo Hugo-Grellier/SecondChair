@@ -78,12 +78,12 @@ The module enforces its own **ceiling**, whatever the Core asks: one maximum del
 
 ### The Director's Desk (ARC-12, ARC-13, ARC-14)
 
-The **Director's Desk** is a minimal window of `secondchair-foundry`, with no tabs, shown only in the GM client connected to the Core (players' clients never open the bridge, and the module renders nothing and sends no gesture for a user who is not a GM). It opens when the module connects and whenever a call is due now; **Shift+D** (a GM-only keybinding) opens it again. It shows the current moment, the world's ceiling (read-only: it is changed only in the module settings), the calls due now, the break pile once the GM signals a break, and the facts and events recorded from the GM's words that await confirmation at the GM-decision rank.
+The **Director's Desk** is a minimal window of `secondchair-foundry`, with no tabs, shown only in the GM client connected to the Core (players' clients never open the bridge, and the module renders nothing and sends no gesture for a user who is not a GM). It opens when the module connects and whenever a call is due now; **Shift+D** (a GM-only keybinding) opens it again. It shows the current moment, the world's ceiling (read-only: it is changed only in the module settings), the calls due now, the break pile once the GM signals a break, the active NPC's **acting cue** (DEL-15: its goal, the line an agent last showed with `show_acting_cue`, what it knows and does not know, with **I voice this one** or, once the GM voices it, **Hand back**; shown at every level, manual included, since it is a read), and the facts and events recorded from the GM's words that await confirmation at the GM-decision rank.
 
-It holds no state (ARC-11): the Core sends the module a **desk** message after `welcome`, whenever the moment, the calls due now or the action log change (it looks every second), and after each gesture. Each button sends a **gesture**, which the Core takes and answers with a **result**:
+It holds no state (ARC-11): the Core sends the module a **desk** message after `welcome`, whenever the moment, the calls due now, the acting cue or the action log change (it looks every second), and after each gesture. Each button sends a **gesture**, which the Core takes and answers with a **result**:
 
 ```json
-{"type": "desk", "moment": "live-session", "session": 3, "calls": [{"id": 4, "kind": "proposal", "responsibility": "disclosure", "deadline": "now", "status": "open", "entry": 12, "message": null, "detail": "speak by claude-live on lines/1.md: The bell rings.", "reversible": false}], "decisions": [{"id": "f-1a2b3c4d", "text": "The bell tower fell.", "words": "The bell tower fell in 4710."}]}
+{"type": "desk", "moment": "live-session", "session": 3, "calls": [{"id": 4, "kind": "proposal", "responsibility": "disclosure", "deadline": "now", "status": "open", "entry": 12, "message": null, "detail": "speak by claude-live on lines/1.md: The bell rings.", "reversible": false}], "decisions": [{"id": "f-1a2b3c4d", "text": "The bell tower fell.", "words": "The bell tower fell in 4710."}], "cue": {"npc": "e-1a2b3c4d", "name": "Tovan Reed", "goal": "Keep the party away from the tower.", "line": "It only rings when the nights are dry.", "knows": [{"id": "f-5e6f7a8b", "statement": "The bell rings on dry nights.", "mode": "knows"}], "does_not_know": [{"id": "f-9c0d1e2f", "statement": "A cracked relay rings the bell."}], "voiced": false}}
 {"type": "gesture", "id": "g1", "gesture": "reject", "entry": 12, "reason": "tone"}
 {"type": "result", "id": "g1", "ok": true}
 {"type": "result", "id": "g2", "ok": true, "pile": […]}
@@ -98,6 +98,8 @@ It holds no state (ARC-11): the Core sends the module a **desk** message after `
 | `break` | | signals a break; the result carries the break pile (DEL-30, DEL-32) |
 | `start_session` | | opens live-session with the next session id, refused while one is open (DEL-03, DEL-03b) |
 | `end_session` | | ends it: between-sessions, and "wrap a session" is queued (DEL-03, DEL-04) |
+| `voice` | `entity` | "I voice this one": entity overrides at manual, every moment, on npcs and disclosure for that NPC; its pending calls and queued jobs on them are withdrawn with their safe default (DEL-14, DEL-15, DEL-16) |
+| `hand_back` | `entity` | "Hand back": removes those overrides, refused when the GM does not voice that NPC (DEL-14, DEL-15) |
 
 The Desk is an **authenticated Surface** (ARC-13): its gestures reach the Core only over the bridge the token authenticated, from the GM client. The Core logs them as GM interactions with channel `desk` and `authenticated: true` (DEL-27). A gesture on a VTT action is taken in a worker thread, so the Core can send the GM client its request while the gesture waits.
 

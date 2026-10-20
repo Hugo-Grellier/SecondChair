@@ -16,7 +16,7 @@ import yaml
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from secondchair.core import PROTOCOL_VERSION, delegation, observations, traces, vtt
+from secondchair.core import PROTOCOL_VERSION, delegation, knowledge, observations, traces, vtt
 from secondchair.core.index import CanonError
 from secondchair.core.machine import foundry_token
 from secondchair.core.vtt import CeilingRefusal, VttError
@@ -213,6 +213,7 @@ class Bridge:
                     lambda: (
                         delegation.current_moment(self.ws),
                         desk.due_now(self.ws),
+                        knowledge.active_cue(self.ws),
                         len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
                     )
                 )
