@@ -50,7 +50,7 @@ declare const game: {
     activeGM: {
       id: string;
       /** Asks this user's client only, through a handler in `CONFIG.queries` (Foundry 13+). */
-      query(name: string, data: object): Promise<unknown>;
+      query(name: string, data: object, options?: { timeout?: number }): Promise<unknown>;
     } | null;
     get(
       id: string,

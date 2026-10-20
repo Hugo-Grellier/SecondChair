@@ -553,7 +553,7 @@ function traces() {
               records,
             }),
           )
-        : (game.users.activeGM?.query(TRACES, { records }) ?? Promise.reject()),
+        : (game.users.activeGM?.query(TRACES, { records }, { timeout: 5000 }) ?? Promise.reject()),
   });
   const rec = createRecorder({ consented, flush: (records) => outbox.push(game.user.id, records) });
   recorder = rec;
