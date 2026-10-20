@@ -176,7 +176,13 @@ def _gm_command(args: argparse.Namespace) -> str:
         if not auth:  # DEL-03a
             raise DelegationError("Starting or ending a session needs an interactive terminal.")
         if args.action == "start":
+            unwrapped = _unwrapped(ws)  # read before: the new session is not played yet
             started = f"Session {delegation.start_session(ws)} started: moment live-session."
+            if unwrapped:
+                started += (
+                    f" Warning: session {unwrapped} is not wrapped yet; what was played there "
+                    "is not in canon (secondchair status)."
+                )
             return _session_started(ws, started)
         notes = str(Path(args.notes).expanduser().resolve()) if args.notes else None
         live = delegation.end_session(ws, notes)
@@ -258,6 +264,58 @@ def _gm_command(args: argparse.Namespace) -> str:
 
 def _entries(ids: list[int]) -> str:
     return f"entry {ids[0]}" if len(ids) == 1 else f"entries {', '.join(map(str, ids))}"
+
+
+def _unwrapped(ws: workspace.Workspace) -> int | None:
+    """The last played session when it is not wrapped yet, else None."""
+    last = delegation.last_session(ws)
+    if last and not capture.time(ws)["sessions"].get(last, {}).get("wrapped"):
+        return last
+    return None
+
+
+def status(ws: workspace.Workspace) -> str:
+    """Where the campaign stands and what the GM does next, in a few lines."""
+    moment, _ = delegation.current_moment(ws)
+    live = delegation.current_session(ws)
+    entries, _ = delegation.read_log(ws)
+    held = [e["id"] for e in entries if e.get("status") == "pending"]
+    open_calls = [c for c in calls.read_calls(ws) if c.get("status") == "open"]
+    pending_jobs = jobs.pending(ws)
+    entities, facts, events = index.counts(ws)
+    played = delegation.last_session(ws)
+    lines = [
+        f"Moment: {moment}" + (f" (session {live} is live)" if live else ""),
+        f"Campaign date: {capture.time(ws)['current_date'] or 'not set'}",
+        f"Canon: {entities} entities, {facts} facts, {events} events",
+        f"Sessions played: {played}",
+    ]
+    nexts = []
+    if (unwrapped := _unwrapped(ws)) and not live:
+        lines.append(f"Session {unwrapped} is not wrapped: what was played is not in canon yet.")
+        nexts.append(f"secondchair wrap {unwrapped}  (after its wrap job)")
+    for job in pending_jobs:
+        lines.append(f"Job {job['id']} {job['status']}: {job['playbook']} (tier {job['tier']})")
+        if job["status"] == "queued":
+            nexts.append(
+                f'ask your agent: "start SecondChair job {job["id"]}", or secondchair jobs run '
+                f"{job['id']} with a runner"
+            )
+    if held:
+        lines.append(f"Awaiting your approval: {_entries(held)}")
+        nexts.append(f"secondchair approve {' '.join(map(str, held))}  (or reject <entry>)")
+    if open_calls:
+        lines.append(f"Open calls on you: {len(open_calls)} (secondchair break shows them)")
+    handoff = ws.root / "prep" / f"session-{played + 1}" / "handoff.md"
+    if not live:
+        if handoff.is_file():
+            lines.append(f"Next session's handoff: {handoff.relative_to(ws.root)}")
+        else:
+            nexts.append(
+                f'ask your agent: "prepare session {played + 1}" (prepare-a-session playbook)'
+            )
+    lines += [f"Next: {n}" for n in nexts] or ["Next: nothing waits on you."]
+    return "\n".join(lines)
 
 
 def _describe_call(call: dict) -> str:
@@ -610,6 +668,9 @@ def main(argv: list[str] | None = None) -> int:
     wrap_cmd.add_argument("--start", help="the session's first campaign date, over the notes'")
     wrap_cmd.add_argument("--end", help="the session's last campaign date, over the notes'")
     commands.add_parser(
+        "status", parents=[in_workspace], help="where the campaign stands and what to do next"
+    )
+    commands.add_parser(
         "check", parents=[in_workspace], help="rebuild the derived index and report invalid files"
     )
     commands.add_parser(
@@ -761,6 +822,8 @@ def main(argv: list[str] | None = None) -> int:
                     f"Upgraded {args.workspace} from schema version {before} to {after} in place; "
                     "review the diff (git diff) and commit it."
                 )
+        elif args.command == "status":
+            print(status(workspace.load(args.workspace)))
         elif args.command == "check":
             return check(workspace.load(args.workspace))
         elif args.command == "serve":
