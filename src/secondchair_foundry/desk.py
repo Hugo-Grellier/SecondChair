@@ -7,13 +7,14 @@ to the GM whose client holds the bridge, which the token authenticates. It holds
 
 import json
 
-from secondchair.core import calls, canon, delegation, index
+from secondchair.core import calls, canon, delegation, index, knowledge
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.workspace import Workspace, WorkspaceError
 
 CHANNEL = "desk"
 DETAIL = 400  # characters of a proposal's content shown on the Desk
+VOICED = ("npcs", "disclosure")  # "I voice this one" sets these at manual (DEL-15)
 
 
 def due_now(ws: Workspace) -> list[dict]:
@@ -45,6 +46,22 @@ def state(ws: Workspace) -> dict:
         "session": delegation.current_session(ws),
         "calls": due_now(ws),
         "decisions": decisions(ws),
+        "cue": cue(ws),
+    }
+
+
+def cue(ws: Workspace) -> dict | None:
+    """The active NPC's acting cue, and whether the GM voices that NPC (DEL-15)."""
+    found = knowledge.active_cue(ws)
+    return found and found | {"voiced": set(VOICED) <= _voiced(ws, found["npc"])}
+
+
+def _voiced(ws: Workspace, npc: str) -> set[str]:
+    """The responsibilities "I voice this one" set at manual for `npc` that are still so."""
+    return {
+        o["responsibility"]
+        for o in delegation.overrides(ws)
+        if (o["entity"], o["level"], o["moment"]) == (npc, "manual", None)
     }
 
 
@@ -68,6 +85,19 @@ def take(ws: Workspace, message: dict) -> dict:
             delegation.start_session(ws)
         elif name == "end_session":
             delegation.end_session(ws)
+        elif name == "voice":  # tightening, in force at once; withdraws its calls (DEL-14, 16)
+            for responsibility in VOICED:
+                delegation.add_override(
+                    ws, str(message.get("entity")), responsibility, "manual", None, CHANNEL, True
+                )
+        elif name == "hand_back":  # loosening, from this authenticated Surface (DEL-14)
+            npc = str(message.get("entity"))
+            # As the Desk shows it: voiced only with both at manual, so a lone override set
+            # elsewhere is never removed from here.
+            if set(VOICED) - _voiced(ws, npc):
+                raise DelegationError(f"The GM does not voice {npc}.")
+            for responsibility in VOICED:
+                delegation.remove_override(ws, npc, responsibility, None, CHANNEL, True)
         else:
             raise DelegationError(f"Unknown Desk gesture {name!r}.")
     except (DelegationError, CanonError, WorkspaceError) as e:

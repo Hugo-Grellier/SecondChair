@@ -7,6 +7,7 @@ for it, plus what it inherits from the factions it is a member of and the places
 and goes through `guard`.
 """
 
+import json
 import re
 import secrets
 from typing import Any
@@ -14,8 +15,9 @@ from typing import Any
 from secondchair.core import index, observations
 from secondchair.core.index import KNOWLEDGE_DIR, MODES, PARTY, CanonError
 from secondchair.core.tools import Change, Tool
-from secondchair.core.workspace import Workspace
+from secondchair.core.workspace import STATE_DIR, Workspace
 
+CUE_FILE = f"{STATE_DIR}/cue.json"  # the active acting cue, derived state (DEL-15)
 # BEN-07's canary format; a canary is an inert marker no audience may ever receive.
 CANARY = re.compile(r"CANARY-[A-Za-z0-9]+-\d+")
 INHERITED = ("member_of", "lives_in")  # a faction's knowledge, a place's common knowledge
@@ -86,6 +88,61 @@ def guard(
     if reasons:
         raise AudienceRefused(f"Content for {audience} refused: {'; '.join(reasons)}.")
     return {c: holds[c]["mode"] for c in cites}
+
+
+def show_cue(
+    ws: Workspace,
+    npc: str,
+    goal: str,
+    line: str,
+    cites: list[str],
+    knows: list[str] | None = None,
+    does_not_know: list[str] | None = None,
+) -> dict[str, Any]:
+    """Make `npc`'s acting cue the active one the Director's Desk shows (DEL-15, ARC-14): its
+    line goes through `guard` (CAN-16), every fact it knows must be held, every fact it does not
+    know must not be. A read: it is shown whatever the NPC's level, manual included."""
+    names = {e["id"]: e["names"] for e in index.search_entities(ws)}
+    if npc not in names:
+        raise CanonError(f"No NPC {npc!r} in canon.")
+    modes = guard(ws, npc, line, cites)
+    holds = known(ws, npc)
+    facts = {f["id"]: f for f in index.search_facts(ws)}
+    extra = [k for k in knows or [] if k not in modes]
+    if unknown := [f for f in [*extra, *(does_not_know or [])] if f not in facts]:
+        raise CanonError(f"Unknown fact ids {unknown}.")
+    if unheld := [k for k in extra if k not in holds]:
+        raise CanonError(f"{npc} does not know {unheld}.")
+    if held := [f for f in does_not_know or [] if f in holds]:
+        raise CanonError(f"{npc} knows {held}: it cannot be among what it does not know.")
+    cue = {
+        "npc": npc,
+        "name": (names[npc] or [npc])[0],
+        "goal": goal,
+        "line": line,
+        "knows": [
+            {"id": f, "statement": holds[f]["statement"], "mode": holds[f]["mode"]}
+            for f in dict.fromkeys([*cites, *extra])
+        ],
+        "does_not_know": [
+            {"id": f, "statement": facts[f]["statement"]}
+            for f in dict.fromkeys(does_not_know or [])
+        ],
+    }
+    # ponytail: one active cue in derived state, replaced by the next and kept until then (a
+    # stale NPC id included); a cue per NPC, cleared at the end of a moment, if needed.
+    written = ws.root / f"{CUE_FILE}.{secrets.token_hex(4)}"  # never read half written
+    written.write_text(json.dumps(cue, ensure_ascii=False))
+    written.replace(ws.root / CUE_FILE)
+    return cue
+
+
+def active_cue(ws: Workspace) -> dict[str, Any] | None:
+    """The acting cue last shown, if any; none when its derived file is unreadable."""
+    try:
+        return json.loads((ws.root / CUE_FILE).read_text())
+    except OSError, ValueError:
+        return None
 
 
 def _check_seen(ws: Workspace, knower: str, origin: dict[str, str]) -> None:
@@ -178,7 +235,25 @@ def tools(ws: Workspace) -> list[Tool]:
         the mode each cited fact is held in, so a belief is never voiced as established truth."""
         return guard(ws, audience, text, cites, at)
 
+    def show_acting_cue(
+        npc: str,
+        goal: str,
+        line: str,
+        cites: list[str],
+        knows: list[str] | None = None,
+        does_not_know: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Show the GM, on the Director's Desk, what they need to voice the NPC `npc` (its
+        entity id) right now: its `goal`, a `line` it could say, written in the campaign
+        language and citing in `cites` the ids of the facts it uses, the ids of further facts it
+        `knows` and of facts it `does_not_know` that the GM must not let slip. Refused when the
+        line fails the audience check (as for check_audience_content), a fact it knows is not
+        held by the NPC, or a fact it does not know is. It replaces the active cue and is shown
+        whatever the NPC's delegation level, since it is a read."""
+        return show_cue(ws, npc, goal, line, cites, knows, does_not_know)
+
     return [
+        Tool(fn=show_acting_cue, responsibility="npcs", delegated_action=False, reversible=True),
         Tool(fn=record_knowledge, responsibility="memory", delegated_action=True, reversible=True),
         Tool(fn=what_knows, responsibility="memory", delegated_action=False, reversible=True),
         Tool(

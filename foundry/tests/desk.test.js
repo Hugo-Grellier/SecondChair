@@ -25,6 +25,15 @@ const STATE = {
     },
   ],
   decisions: [{ id: "f-1", text: "The tower fell.", words: "The bell tower fell in 4710." }],
+  cue: {
+    npc: "e-1",
+    name: "Tovan Reed",
+    goal: "Keep the party away from the tower.",
+    line: "It only rings when the <i>nights</i> are dry.",
+    knows: [{ id: "f-2", statement: "The bell rings on dry nights.", mode: "knows" }],
+    does_not_know: [{ id: "f-3", statement: "A cracked relay rings the bell." }],
+    voiced: false,
+  },
 };
 
 /** A desk wired to a fake Core, which answers each gesture as `answer` says. */
@@ -109,6 +118,33 @@ test("start and end session follow the moment; a GM decision is confirmed in one
     ceiling: "propose",
   });
   assert.match(prep, /data-gesture="start_session"/);
+});
+
+test("the active NPC's acting cue offers I voice this one, then Hand back", () => {
+  const html = deskHtml({ isGM: true, state: STATE, pile: null, ceiling: "propose" });
+  for (const shown of ["Tovan Reed", "Keep the party away", "dry nights", "cracked relay"])
+    assert.match(html, new RegExp(shown));
+  assert.match(html, /&lt;i&gt;nights/, "the line is escaped");
+  assert.match(html, /data-gesture="voice" data-entity="e-1"/);
+  assert.doesNotMatch(html, /hand_back/);
+
+  // At manual the cue is still shown, since it is a read.
+  const cue = /** @type {NonNullable<DeskState["cue"]>} */ (STATE.cue);
+  const voiced = { ...STATE, cue: { ...cue, voiced: true } };
+  const manual = deskHtml({ isGM: true, state: voiced, pile: null, ceiling: "propose" });
+  assert.ok(valid(voiced), JSON.stringify(valid.errors));
+  assert.match(manual, /dry nights/);
+  assert.match(manual, /data-gesture="hand_back" data-entity="e-1"/);
+  assert.doesNotMatch(manual, /data-gesture="voice"/);
+
+  const none = deskHtml({ isGM: true, state: { ...STATE, cue: null }, pile: null, ceiling: "x" });
+  assert.match(none, /No acting cue/);
+});
+
+test("I voice this one relays the NPC it is for", async () => {
+  const { d, sent } = desk();
+  await d.gesture("voice", { entity: "e-1" });
+  assert.deepEqual(sent, [{ type: "gesture", id: "g1", gesture: "voice", entity: "e-1" }]);
 });
 
 test("the ceiling is shown read-only", () => {

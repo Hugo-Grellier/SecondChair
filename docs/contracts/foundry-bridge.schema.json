@@ -553,6 +553,94 @@
             ],
             "additionalProperties": false
           }
+        },
+        "cue": {
+          "description": "The active NPC's acting cue (DEL-15), null until an agent shows one. Shown at every level, manual included.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "npc": {
+                  "type": "string",
+                  "description": "The NPC's entity id."
+                },
+                "name": {
+                  "type": "string"
+                },
+                "goal": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "string",
+                  "description": "A line in the campaign language, its cited facts checked by the Core (CAN-16)."
+                },
+                "knows": {
+                  "type": "array",
+                  "description": "The facts the line cites, then further facts the NPC holds.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "statement": {
+                        "type": "string"
+                      },
+                      "mode": {
+                        "enum": [
+                          "knows",
+                          "believes",
+                          "suspects"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "statement",
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "does_not_know": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "statement": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "statement"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "voiced": {
+                  "type": "boolean",
+                  "description": "The GM voices this NPC: npcs and disclosure overrides at manual for it, every moment."
+                }
+              },
+              "required": [
+                "npc",
+                "name",
+                "goal",
+                "line",
+                "knows",
+                "does_not_know",
+                "voiced"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [
@@ -560,7 +648,8 @@
         "moment",
         "session",
         "calls",
-        "decisions"
+        "decisions",
+        "cue"
       ],
       "additionalProperties": false
     },
@@ -584,8 +673,15 @@
             "confirm",
             "break",
             "start_session",
-            "end_session"
+            "end_session",
+            "voice",
+            "hand_back"
           ]
+        },
+        "entity": {
+          "type": "string",
+          "minLength": 1,
+          "description": "voice and hand_back: the NPC's entity id."
         },
         "entry": {
           "type": "integer",
