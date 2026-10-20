@@ -1,7 +1,7 @@
 ---
 name: propose-consequences
 description: Propose the derived consequences of the living world's latest offscreen events (NPCs moving along their agendas, knowledge spreading to NPCs and factions), each citing the facts it uses, through SecondChair. Use when running a SecondChair job whose playbook is propose-consequences.
-license: AGPL-3.0-only
+license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve).
 metadata:
   secondchair-responsibility: living_world

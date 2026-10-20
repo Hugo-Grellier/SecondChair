@@ -3,8 +3,8 @@ name = "secondchair"
 version = "0.1.0"
 description = "Human-directed, AI-operated campaign director for tabletop GMs"
 readme = "README.md"
-license = "AGPL-3.0-only"
-license-files = ["LICENSE"]
+license = "AGPL-3.0-only AND Apache-2.0"
+license-files = ["LICENSE", "src/*/playbooks/LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
     "mcp>=2.3.0",

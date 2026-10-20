@@ -6,7 +6,7 @@ SecondChair is one repository holding artefacts under different licences ([ADR 0
 |---|---|---|
 | Core, PF2e System extension, CLI, test-bench harness | AGPL-3.0 | [`LICENSE`](LICENSE) |
 | Foundry modules `secondchair-foundry`, `secondchair-foundry-pf2e` | Apache-2.0 | `LICENSE` in each module's folder |
-| Playbooks | Apache-2.0 | `LICENSE` in the playbooks folder |
+| Playbooks | Apache-2.0 | `LICENSE` in each package's `playbooks` folder |
 | Sample campaign (material and its gold set) | CC BY 4.0 | [`sample-campaign/LICENSE`](sample-campaign/LICENSE) |
 
 - Anything not listed above, including the documentation, is under the root [`LICENSE`](LICENSE) (AGPL-3.0).
