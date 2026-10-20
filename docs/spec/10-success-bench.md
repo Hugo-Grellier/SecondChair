@@ -1,6 +1,6 @@
 # 10 — Success criteria and test bench
 
-Decisions: [ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md), [ADR 0012](../adr/0012-behaviour-traces-capture-raw-input-with-consent.md); tickets [#9](https://github.com/Hugo-Grellier/SecondChair/issues/9) (amended by [#11](https://github.com/Hugo-Grellier/SecondChair/issues/11)), [#12](https://github.com/Hugo-Grellier/SecondChair/issues/12), [#17](https://github.com/Hugo-Grellier/SecondChair/issues/17), [#22](https://github.com/Hugo-Grellier/SecondChair/issues/22).
+Decisions: [ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md), [ADR 0012](../adr/0012-behaviour-traces-capture-raw-input-with-consent.md); tickets [#9](https://github.com/Hugo-Grellier/SecondChair/issues/9) (amended by [#11](https://github.com/Hugo-Grellier/SecondChair/issues/11)), [#12](https://github.com/Hugo-Grellier/SecondChair/issues/12), [#17](https://github.com/Hugo-Grellier/SecondChair/issues/17), [#22](https://github.com/Hugo-Grellier/SecondChair/issues/22), [#34](https://github.com/Hugo-Grellier/SecondChair/issues/34).
 
 ## What "automatically measurable" means
 
@@ -42,13 +42,13 @@ Decisions: [ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md), [ADR 0012]
 - **BEN-03** Bench baseline: the number of operations the GM would do by hand (each delegated action in the scenario counts as one). Duration baseline: the first dogfooded Beginner Box sessions with SecondChair at read-only. In S4 the recorded session supplies the baseline GM effort.
 - **BEN-04** Non-determinism: the regression run uses one reference runner configuration with N = 3, reported as median and min–max. Invariants MUST hold on **every** run. The full host × model × effort matrix runs on demand, per scenario, to choose configurations, and the bench writes the cheapest passing mapping ([02](02-architecture.md), ARC-30).
 - **BEN-05** Foundry on the bench: a local instance with a bench world restored from a snapshot on every run, never the players' world. The Foundry licence, the PF2e system and the Beginner Box module stay user-supplied. (A containerised Foundry is bench infrastructure only; SecondChair itself ships no Docker image, [09](09-packaging.md).)
-- **BEN-06** The harness, scenario definitions and metrics are public. Private Sources and the gold sets that contain them live in `secondchair-bench-private`, referenced by a configured path. Only S0 runs in public CI.
+- **BEN-06** The harness, scenario definitions and metrics are public. Private Sources and the gold sets that contain them live in `secondchair-bench-private`, referenced by a configured path. Only S0 runs in public CI, and CI holds no model credentials, neither API keys nor a subscription token (GM decision, 2026-10-20, [#34](https://github.com/Hugo-Grellier/SecondChair/issues/34)): CI runs the S0 harness end to end against a scripted fake runner (report generation, canary failure, recomputation from stored action logs, no LLM judge). The real S0 run (delegated and baseline, N = 3, reference runner configuration) is started locally by the GM through the bench CLI with the GM's own agent host; its report and action logs are kept so the report can be recomputed without re-running agents.
 
 ### Scenarios
 
 | | Scenario | Sources | Moment | Measures | Where |
 |---|---|---|---|---|---|
-| **S0** | Sample rebuild | The sample campaign (bible, 2–3 text session notes) | Prep, between sessions (wrap over the notes) | Probes, canaries, living-world probes, GM effort, the declarative calendar | Public CI; public gold set next to the sample |
+| **S0** | Sample rebuild | The sample campaign (bible, 2–3 text session notes) | Prep, between sessions (wrap over the notes) | Probes, canaries, living-world probes, GM effort, the declarative calendar | Public CI on a scripted fake runner, real runs local (BEN-06); public gold set next to the sample |
 | **S1** | Westerhold rebuild | Westerhold v3 bible (private Source) | Prep | Probes, canaries, GM effort | Private |
 | **S2** | Beginner Box prep | Fresh import of the Beginner Box module in a bench world | Prep | Prep GM effort, failed actions, acceptance rate | Private |
 | **S3** | Craig wrap | The two Craig recordings (2026-09-29, ~3 h 20; 2026-10-13, ~3 h 05; 5 speakers, one track each) and the `pf2e-beginner-box` world's chat log | Between sessions | Capture coverage, post-session GM effort, cheapest capture mapping, rules checks replayed from traces | Private |

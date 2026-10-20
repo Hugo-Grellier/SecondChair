@@ -318,6 +318,26 @@ def check(ws: workspace.Workspace) -> int:
     return 1 if errors else 0
 
 
+def _runner_config(value: str) -> dict[str, str]:
+    """A runner configuration `host/model/effort`."""
+    parts = value.split("/")
+    if len(parts) != 3 or not all(parts):
+        raise argparse.ArgumentTypeError(f"{value!r}: expected host/model/effort")
+    return dict(zip(jobs.CONFIG_KEYS, parts, strict=True))
+
+
+def _bench_command(args: argparse.Namespace) -> int:
+    from secondchair.bench import harness, report  # the bench is not the Core's
+
+    if args.bench_command == "s0":
+        hosts = configured_runners()[1]
+        found = harness.run_s0(args.sample, args.out, args.runner, hosts, args.runs)
+    else:
+        found = report.recompute(args.out)
+    print(f"S0 {'passed' if found['passed'] else 'FAILED'}; report: {args.out / 'report.md'}")
+    return 0 if found["passed"] else 1
+
+
 def _input(value: str) -> tuple[str, str]:
     """A job input `name=value`; a value naming an existing file becomes its absolute path, so
     the agent finds it wherever it runs."""
@@ -642,6 +662,29 @@ def main(argv: list[str] | None = None) -> int:
         cmd = world_sub.add_parser(name, parents=[in_workspace], help=f"{name} a front")
         cmd.add_argument("front")
         cmd.add_argument("date")
+    bench_cmd = commands.add_parser("bench", help="the test bench")
+    bench_sub = bench_cmd.add_subparsers(dest="bench_command", required=True)
+    s0_cmd = bench_sub.add_parser(
+        "s0",
+        help="run scenario S0 at the delegated table and at the baseline, then report; exits 1 "
+        "when an invariant fails",
+    )
+    s0_cmd.add_argument("out", type=Path, help="a new directory for the runs and the report")
+    s0_cmd.add_argument(
+        "--sample", type=Path, default=Path("sample-campaign"), help="the sample campaign"
+    )
+    s0_cmd.add_argument(
+        "--runner",
+        type=_runner_config,
+        required=True,
+        help="the reference runner configuration, host/model/effort; host `fake` is the "
+        "scripted fake runner (model scripted, leaky or idle)",
+    )
+    s0_cmd.add_argument("-n", "--runs", type=int, default=3, help="runs per table (default 3)")
+    bench_report = bench_sub.add_parser(
+        "report", help="recompute a bench report from its stored action logs"
+    )
+    bench_report.add_argument("out", type=Path, help="the bench output directory")
     args = parser.parse_args(argv)
 
     try:
@@ -673,6 +716,8 @@ def main(argv: list[str] | None = None) -> int:
             return _jobs_command(args)
         elif args.command == "transcribe":
             _transcribe_command(args)
+        elif args.command == "bench":
+            return _bench_command(args)
         elif args.command == "world":
             print(_world_command(args))
         else:
