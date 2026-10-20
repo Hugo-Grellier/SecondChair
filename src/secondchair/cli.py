@@ -307,7 +307,7 @@ def status(ws: workspace.Workspace) -> str:
     if open_calls:
         lines.append(f"Open calls on you: {len(open_calls)} (secondchair break shows them)")
     handoff = ws.root / "prep" / f"session-{played + 1}" / "handoff.md"
-    if not live:
+    if not live and not unwrapped:  # prepare from what was played, once it is canon
         if handoff.is_file():
             lines.append(f"Next session's handoff: {handoff.relative_to(ws.root)}")
         else:

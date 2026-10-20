@@ -33,6 +33,7 @@ def test_an_unwrapped_session_shows_its_wrap_job_and_warns_at_the_next_start(
     text = status(ws)
     assert "Session 1 is not wrapped" in text
     assert 'start SecondChair job 1"' in text
+    assert "prepare session 2" not in text  # the wrap comes first
 
     capsys.readouterr()
     assert gm("session", "start", root=ws.root) == 0
