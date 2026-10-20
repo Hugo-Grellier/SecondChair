@@ -1,6 +1,6 @@
 # Contract: tool registration and the Core's MCP endpoint
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-10, DEL-14, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-29, PKG-05, PKG-06, PKG-19, ARC-10, DEL-23, RUL-03, RUL-04, RUL-05, RUL-06, RUL-07, RUL-08, RUL-09, RUL-12, DEL-22.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-10, DEL-14, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-23a, ARC-29, PKG-05, PKG-06, PKG-19, ARC-10, DEL-23, RUL-03, RUL-04, RUL-05, RUL-06, RUL-07, RUL-08, RUL-09, RUL-12, DEL-22.
 
 ## The MCP endpoint
 
@@ -144,7 +144,7 @@ Approving or undoing a VTT action needs the GM client, which only the `serve` pr
 
 ## Jobs
 
-An agent running a job ([`job.schema.json`](job.schema.json)) passes `job` to every delegated action. The job must be started; the action is then bound by the delegation table of the job's moment (a manual cell refuses it), and its log entry records the job and the runner configuration it was started with. Three tools, served by the Core outside block registration with `_meta: {"secondchair/job": true}`, let a session take, answer and close a job:
+An agent running a job ([`job.schema.json`](job.schema.json)) passes `job` to every delegated action. The job must be started; the action is then bound by the delegation table of the job's moment (a manual cell refuses it), and its log entry records the job and the runner configuration it was started with. Omitting `job` does not leave the job (ARC-23a): a session-keeping client (handshake protocols) is bound to the job it starts with `start_job`, or first acts for, until the job ends, so its delegated actions are for that job with or without `job` and refused for another job, and `start_job` is refused while it runs one; a sessionless client (2026-07-28) gets every delegated action without `job` refused while a `living_world` or `narrative_direction` job is started. Three tools, served by the Core outside block registration with `_meta: {"secondchair/job": true}`, let a session take, answer and close a job:
 
 | Tool | Does |
 |---|---|
