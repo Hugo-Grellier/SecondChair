@@ -638,6 +638,24 @@ def decide(
         return _find(ws, key)
 
 
+def proposal_answered(ws: Workspace, entry: dict) -> None:
+    """Follow the GM's answer to a narrative occurrence's proposal (LW-19): an approved entry
+    of its `propose-narrative-direction` job applies it; undoing the last one returns it to the
+    queue (LW-12). A rejected proposal leaves it queued. Other occurrences are untouched."""
+    record = _find(ws, entry["occurrence"])
+    if record["class"] != "narrative":
+        return
+    if entry["status"] == "applied" and record["status"] in ("queued", "applied"):
+        record |= {"status": "applied", "entries": [*record["entries"], entry["id"]]}
+    elif entry["status"] == "undone" and entry["id"] in record["entries"]:
+        record["entries"].remove(entry["id"])
+        if not record["entries"]:
+            record["status"] = "queued"
+    else:
+        return
+    _save(ws, record, OCCURRENCES_DIR)
+
+
 def undo(ws: Workspace, key: str, reason: str, channel: str, authenticated: bool) -> list[str]:
     """Undo an applied occurrence with its cascade (the steps it crossed, and the later effects
     on the same entity, built on it) and return their keys to the queue (LW-12). Only while its

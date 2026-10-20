@@ -33,6 +33,7 @@ The class, not the agent, decides which responsibility governs an effect.
 - **LW-10** An `unless` must be settled by citing fact ids; otherwise it becomes a call on the GM due at the next break. Safe default: the tick does not happen and stays queued.
 - **LW-11** Only the front's carrier and the named participants know an offscreen event. Anyone else learns it through a derived consequence that cites its facts.
 - **LW-12** Undoing an effect undoes its cascade (threshold steps, consequences citing it) and returns the keys to the queue. Once the moment is frozen, only a correction or a retcon changes it.
+- **LW-19** A new-narrative occurrence is linked to its narrative-direction job: every action of the job carries the occurrence. When the GM approves the proposal, the occurrence becomes applied; when the GM rejects it, the occurrence stays queued. Undoing the applied outcome returns the occurrence to the queue (LW-12). GM decision on [#111](https://github.com/Hugo-Grellier/SecondChair/issues/111), 2026-10-20.
 
 ### v3 contracts carried as Core unit tests
 
