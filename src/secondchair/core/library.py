@@ -153,7 +153,7 @@ def _embedding_model() -> str:
 def _ollama_url() -> str:
     path, config = machine.config()
     url = config.get("ollama_url", DEFAULT_OLLAMA_URL)
-    if not isinstance(url, str) or not re.fullmatch(r"https?://[^\s/]+/?", url):
+    if not isinstance(url, str) or not re.fullmatch(r"https?://[^\s/@]+/?", url):
         raise WorkspaceError(f"{path}: ollama_url must look like http://host:11434.")
     return url.rstrip("/")
 

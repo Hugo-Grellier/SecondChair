@@ -3,11 +3,13 @@ import re
 import shutil
 import subprocess
 import zlib
+from pathlib import Path
 
 import pytest
 
 from secondchair.cli import main
-from secondchair.core import campaign, index, jobs, library, workspace
+from secondchair.core import campaign, index, jobs, library, machine, workspace
+from secondchair.core.workspace import WorkspaceError
 
 
 @pytest.fixture(autouse=True)
@@ -372,3 +374,11 @@ def test_exact_names_match_lexically_and_index_is_shared_across_campaigns(
     library.build_index(other, other_sid)
     assert len(calls) == indexed  # same content, same model: nothing re-embedded
     assert library.search(other, "dahak")["matches"][0]["source"] == other_sid
+
+
+def test_an_ollama_url_with_credentials_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        machine, "config", lambda: (Path("config.yaml"), {"ollama_url": "http://u:p@h:1"})
+    )
+    with pytest.raises(WorkspaceError, match="ollama_url"):
+        library._ollama_url()
