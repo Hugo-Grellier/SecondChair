@@ -1,7 +1,8 @@
 import hashlib
-import json
 import re
 import shutil
+import subprocess
+import zlib
 
 import pytest
 
@@ -77,7 +78,7 @@ def test_registration_permissions_and_revocation_are_independent(ws, tmp_path):
     assert "path" not in tools["list_campaign_sources"]()[0]
     library.permit(ws, sid, False, None, True)
     assert library.search(ws, "secret")["matches"] == []
-    assert library._cache(ws, sid).exists()
+    assert library._indexed(ws, sid)
     assert str(path) not in (ws.root / library.REFERENCE_FILE).read_text()
     assert not list(ws.root.rglob("*.txt"))
 
@@ -86,14 +87,14 @@ def test_changed_source_requires_explicit_authenticated_replacement(ws, tmp_path
     sid, path = source(ws, tmp_path)
     library.permit(ws, sid, True, True, True)
     library.build_index(ws, sid)
-    cache = library._cache(ws, sid).read_bytes()
+    cache = library._indexed(ws, sid)
     path.write_text("Un nouveau secret.")
     assert library.listing(ws)[0]["status"] == "changed"
     assert library.search(ws, "secret")["matches"] == []
     for replace, auth in ((False, True), (True, False), (False, False)):
         with pytest.raises(workspace.WorkspaceError, match="changed"):
             library.build_index(ws, sid, replace, auth)
-        assert library._cache(ws, sid).read_bytes() == cache
+        assert library._indexed(ws, sid) == cache
     library.build_index(ws, sid, True, True)
     assert library.search(ws, "nouveau")["matches"]
     path.unlink()
@@ -150,7 +151,7 @@ def test_raw_registered_source_cannot_be_passed_as_job_input(ws, tmp_path):
             )
 
 
-def make_pdf(path):
+def make_pdf(path, texts=("Harbor archaeology", "Absalom ancient treasure"), size=12):
     """Two real text pages with an xref table, without a PDF-generation dependency."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -161,8 +162,8 @@ def make_pdf(path):
             f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] "
             f"/Resources << /Font << /F1 7 0 R >> >> /Contents {content} 0 R >>".encode()
         )
-    for text in ("Harbor archaeology", "Absalom ancient treasure"):
-        stream = f"BT /F1 12 Tf 50 750 Td ({text}) Tj ET".encode()
+    for text in texts:
+        stream = f"BT /F1 {size} Tf 50 700 Td ({text}) Tj ET".encode()
         objects.append(f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream")
     objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
     data = b"%PDF-1.4\n"
@@ -187,7 +188,8 @@ def test_real_pdf_full_document_retrieval_with_page_citation(ws, tmp_path):
     [hit] = library.search(ws, "Absalom treasure")["matches"]
     assert hit["filename"] == "setting.pdf" and hit["location"] == "page 2"
     assert hit["source"] == sid
-    assert json.loads(library._cache(ws, sid).read_text())["passages"][0]["location"] == "page 1"
+    [hit] = library.search(ws, "Harbor archaeology")["matches"]
+    assert hit["location"] == "page 1"
 
 
 def test_purchased_content_denial_also_blocks_reference_model_excerpts(ws, tmp_path):
@@ -223,7 +225,7 @@ def test_failed_refresh_keeps_previous_index(ws, tmp_path, monkeypatch):
     sid, path = source(ws, tmp_path)
     library.permit(ws, sid, True, True, True)
     library.build_index(ws, sid)
-    original = library._cache(ws, sid).read_bytes()
+    original = library._indexed(ws, sid)
     path.write_text("changed")
 
     def extraction_failed(path):
@@ -232,7 +234,7 @@ def test_failed_refresh_keeps_previous_index(ws, tmp_path, monkeypatch):
     monkeypatch.setattr(library, "_passages", extraction_failed)
     with pytest.raises(workspace.WorkspaceError, match="No extractable text"):
         library.build_index(ws, sid, True, True)
-    assert library._cache(ws, sid).read_bytes() == original
+    assert library._indexed(ws, sid) == original
 
 
 def test_search_ignores_empty_working_notes(ws):
@@ -276,58 +278,46 @@ def test_semantic_query_finds_paraphrased_passage_and_ranks_it(ws, tmp_path):
         library.permit(ws, sid, True, True, True)
         library.build_index(ws, sid)
     result = library.search(ws, "A sleuth investigates a killer.")
-    assert result["method"] == "semantic"
+    assert result["method"] == "hybrid"
     assert [hit["filename"] for hit in result["matches"]] == ["mystery.txt"]
-    assert result["matches"][0]["score"] > 0.2
+    assert result["matches"][0]["score"] > 0
 
 
-def make_scanned_pdf(path):
-    """Render a small bitmap alphabet to a scanned PDF without imaging packages."""
-    glyphs = {
-        "D": ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
-        "R": ("11110", "10001", "10001", "11110", "10100", "10010", "10001"),
-        "A": ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
-        "G": ("01110", "10001", "10000", "10111", "10001", "10001", "01110"),
-        "O": ("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
-        "N": ("10001", "11001", "11001", "10101", "10011", "10011", "10001"),
-        "H": ("10001", "10001", "10001", "11111", "10001", "10001", "10001"),
-        "B": ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
-        "U": ("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
-        " ": ("000",) * 7,
-    }
-    scale, width, height = 12, 1000, 400
-    pixels = bytearray([255]) * (width * height)
-    text = "DRAGON HARBOR"
-    cursor = 50
-    for char in text:
-        for y, row in enumerate(glyphs[char]):
-            for x, bit in enumerate(row):
-                if bit == "1":
-                    for dy in range(scale):
-                        start = (70 + y * scale + dy) * width + cursor + x * scale
-                        pixels[start : start + scale] = b"\x00" * scale
-        cursor += (6 if char != " " else 4) * scale
-    scanlines = b"".join(b"\0" + pixels[y * width : (y + 1) * width] for y in range(height))
-    compressed = __import__("zlib").compress(scanlines)
+def make_scanned_pdf(path, tmp_path):
+    """Rasterize a text PDF with Poppler and wrap the grey bitmap as an image-only PDF."""
+    text = tmp_path / "text.pdf"
+    make_pdf(text, ("DRAGON HARBOR", "unused"), size=48)
+    subprocess.run(
+        [
+            "pdftoppm",
+            "-f",
+            "1",
+            "-l",
+            "1",
+            "-r",
+            "100",
+            "-gray",
+            "-singlefile",
+            text,
+            tmp_path / "page",
+        ],
+        check=True,
+    )
+    raw = (tmp_path / "page.pgm").read_bytes()
+    _, width, height, _, pixels = raw.split(maxsplit=4)
+    compressed = zlib.compress(pixels)
     image = (
-        b"<< /Type /XObject /Subtype /Image /Width "
-        + str(width).encode()
-        + b" /Height "
-        + str(height).encode()
-        + b" /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode "
-        b"/DecodeParms << /Predictor 15 /Colors 1 /BitsPerComponent 8 /Columns "
-        + str(width).encode()
-        + b" >> /Length "
-        + str(len(compressed)).encode()
-        + b" >>\nstream\n"
+        f"<< /Type /XObject /Subtype /Image /Width {int(width)} /Height {int(height)} "
+        f"/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode "
+        f"/Length {len(compressed)} >>\nstream\n".encode()
         + compressed
         + b"\nendstream"
     )
-    content = b"q 612 0 0 792 0 0 cm /Im0 Do Q"
+    content = b"q 600 0 0 800 0 0 cm /Im0 Do Q"
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources "
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources "
         b"<< /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>",
         b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"\nendstream",
         image,
@@ -349,7 +339,7 @@ def make_scanned_pdf(path):
 )
 def test_scanned_pdf_is_ocr_indexed_with_a_page_citation(ws, tmp_path):
     pdf = tmp_path / "scanned.pdf"
-    make_scanned_pdf(pdf)
+    make_scanned_pdf(pdf, tmp_path)
     [sid] = library.register(ws, pdf)
     library.permit(ws, sid, True, True, True)
     library.build_index(ws, sid)
@@ -357,3 +347,28 @@ def test_scanned_pdf_is_ocr_indexed_with_a_page_citation(ws, tmp_path):
     assert result["matches"][0]["filename"] == "scanned.pdf"
     assert result["matches"][0]["location"] == "page 1"
     assert "DRAGON" in result["matches"][0]["text"]
+
+
+def test_exact_names_match_lexically_and_index_is_shared_across_campaigns(
+    ws, tmp_path, monkeypatch
+):
+    sid, path = source(ws, tmp_path, "Le culte de Dahak hante les ruines azlantes.")
+    calls = []
+
+    def unrelated(texts, model):
+        """Semantic similarity finds nothing; only the BM25 leg can match."""
+        calls.append(len(texts))
+        return [[1.0, 0.0] if text != "Dahak" else [0.0, 1.0] for text in texts]
+
+    monkeypatch.setattr(library, "_embed", unrelated)
+    library.permit(ws, sid, True, True, True)
+    library.build_index(ws, sid)
+    [hit] = library.search(ws, "Dahak")["matches"]
+    assert hit["source"] == sid and "Dahak" in hit["text"]
+    other = workspace.init(tmp_path / "other", "fr", "absalom")
+    [other_sid] = library.register(other, path)
+    library.permit(other, other_sid, True, True, True)
+    indexed = len(calls)
+    library.build_index(other, other_sid)
+    assert len(calls) == indexed  # same content, same model: nothing re-embedded
+    assert library.search(other, "dahak")["matches"][0]["source"] == other_sid

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 CORE = Path(__file__).parent.parent / "src" / "secondchair" / "core"
-CORE_THIRD_PARTY = {"mcp", "starlette", "uvicorn", "yaml"}
+CORE_THIRD_PARTY = {"mcp", "numpy", "starlette", "uvicorn", "yaml"}
 
 
 def foreign_imports(source: str) -> list[str]:

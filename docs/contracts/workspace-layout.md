@@ -613,34 +613,44 @@ secondchair sources permit r-<id> --model deny
 ```
 
 The per-workspace local paths and permissions are stored in machine configuration,
-`$XDG_CONFIG_HOME/secondchair/library/<workspace-path-hash>.json`; extracted text
-and SHA-256 fingerprints in machine data,
-`$XDG_DATA_HOME/secondchair/library/<workspace-path-hash>/<source-id>.json`.
-Neither travels in campaign Git history. On another machine or after moving a
-workspace, re-register sources and grant permissions again. Revocation stops
-retrieval immediately but retains the local cache; removing it forces reindexing.
+`$XDG_CONFIG_HOME/secondchair/library/<workspace-path-hash>.json`. Extracted text,
+embeddings and the version each workspace indexed live in one machine-wide SQLite
+index, `$XDG_DATA_HOME/secondchair/library/index.sqlite3`, keyed by content SHA-256
+and embedding model: a rulebook registered in several campaigns is extracted and
+embedded once. Neither travels in campaign Git history. On another machine or after
+moving a workspace, re-register sources and grant permissions again. Revocation stops
+retrieval immediately but retains the index. Superseded content versions stay in the
+index until it is deleted.
 Deleting `.secondchair/` does not discard the reference registry or cache.
 
-PDF indexing uses Poppler's `pdftotext` on PATH. Pages without selectable text
+PDF indexing uses Poppler's `pdftotext` on PATH in reading-order mode (not
+`-layout`, which interleaves the columns of a multi-column page). Pages without selectable text
 are rasterized with `pdftoppm` and read by Tesseract; configure optional
 `ocr_languages` in machine `config.yaml` (default `eng+fra`). Scanned PDFs need
 Tesseract with those language packs installed. OCR runs locally in a temporary
-directory; the indexed result retains the original PDF page number. Markdown and
-text use line locations.
+directory; the indexed result retains the original PDF page number. Extracted text is packed
+into passages of about 1,500 characters within a page. Markdown and text use line
+locations.
 
-Search uses normalized passage embeddings from the dedicated, multilingual
-Ollama model `qwen3-embedding:0.6b`. Install Ollama, pull the model with
-`ollama pull qwen3-embedding:0.6b`, and keep the service at
-`127.0.0.1:11434` available while indexing and searching. `semantic_model` in
-machine `config.yaml` can select another installed Ollama embedding model. All
-source text used for embeddings is sent only to that local service, never to a
-remote endpoint. Embeddings are stored in machine data, not campaign Git history.
-A query and authorized passages are compared by cosine similarity. The result
-includes its method and filename with physical page or line citations. Model
-changes are detected separately from source changes; indexing with the selected
-model rebuilds those vectors. Each source excerpt is bounded to 1,800 characters,
-with 10 matches by default (50 maximum). A local library with more passages is
-scanned linearly for cosine similarity, so query cost grows with indexed text.
+Search is hybrid. A SQLite FTS5 index (BM25, accent-insensitive) requires every query
+term, for exact names of spells, gods and places; normalized passage embeddings from
+the multilingual Ollama model `qwen3-embedding:0.6b` find paraphrases (cosine ≥ 0.2).
+The top 30 of each are fused by reciprocal rank, and `score` is that fused rank
+score. Install Ollama, pull the model with `ollama pull qwen3-embedding:0.6b`, and
+keep the service available while indexing and searching. Machine `config.yaml` can
+set `semantic_model` (another installed Ollama embedding model) and `ollama_url`
+(default `http://127.0.0.1:11434`; point it at another machine the GM operates to
+index on its GPU). Source text used for embeddings is sent only to that server
+(ADR 0001 amendment). The result includes its method and filename with physical
+page or line citations. Model changes are detected separately from source changes;
+indexing with the selected model rebuilds those vectors. Each source excerpt is
+bounded to 1,800 characters, with 10 matches by default (50 maximum). Freshness
+trusts an unchanged file size and modification time and hashes only otherwise.
+Vectors are truncated to 256 dimensions (Qwen3-Embedding is trained for it).
+Every authorized vector is compared linearly per query: about 1 s at 300,000
+passages, so ~2–3 s for a whole PF2e library (~800,000 passages). Indexing is
+the slow part: about 11 minutes for a 138-page Lost Omens book on a laptop CPU;
+point `ollama_url` at a GPU machine for a whole library.
 
 The MCP reads `list_campaign_sources` and `search_campaign_library` expose only
 metadata and authorized excerpts. Source matches require both indexing and model

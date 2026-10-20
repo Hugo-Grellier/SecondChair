@@ -1,23 +1,24 @@
 """Reference library: local text indexes, explicit permissions, model-safe cited retrieval.
 
-Source paths and permissions are machine configuration; excerpts stay in machine data.
-The workspace carries portable metadata only. Embeddings run through the GM's
-local Ollama server.
+Source paths and permissions are machine configuration; excerpts stay in a machine-wide
+index shared by every campaign. The workspace carries portable metadata only. Embeddings
+run through the GM's own Ollama server (ADR 0001 amendment).
 """
 
-import base64
 import hashlib
 import json
 import math
 import re
-import struct
+import sqlite3
 import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import yaml
 
 from secondchair.core import machine
@@ -28,7 +29,10 @@ from secondchair.core.workspace import Workspace, WorkspaceError
 REFERENCE_FILE = "library.yaml"
 EXTENSIONS = {".pdf", ".md", ".txt"}
 DEFAULT_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
-OLLAMA_EMBED_URL = "http://127.0.0.1:11434/api/embed"
+DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
+# Qwen3-Embedding is trained for truncated (Matryoshka) vectors: 256 dimensions keep a
+# whole PF2e library (~800k passages) near 2 s per linear query instead of 9 s at 1024.
+EMBEDDING_DIMENSIONS = 256
 
 
 def _key(ws: Workspace) -> str:
@@ -37,10 +41,6 @@ def _key(ws: Workspace) -> str:
 
 def _settings(ws: Workspace) -> Path:
     return machine.config_dir() / "library" / f"{_key(ws)}.json"
-
-
-def _cache(ws: Workspace, source_id: str) -> Path:
-    return machine.data_dir() / "library" / _key(ws) / f"{source_id}.json"
 
 
 def _read(path: Path) -> dict:
@@ -137,6 +137,11 @@ def _digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def _stat(path: Path) -> list[int]:
+    found = path.stat()
+    return [found.st_size, found.st_mtime_ns]
+
+
 def _embedding_model() -> str:
     path, config = machine.config()
     model = config.get("semantic_model", DEFAULT_EMBEDDING_MODEL)
@@ -145,13 +150,28 @@ def _embedding_model() -> str:
     return model.strip()
 
 
+def _ollama_url() -> str:
+    path, config = machine.config()
+    url = config.get("ollama_url", DEFAULT_OLLAMA_URL)
+    if not isinstance(url, str) or not re.fullmatch(r"https?://[^\s/]+/?", url):
+        raise WorkspaceError(f"{path}: ollama_url must look like http://host:11434.")
+    return url.rstrip("/")
+
+
 def _embed(texts: list[str], model: str) -> list[list[float]]:
-    """Create embeddings on the GM's loopback Ollama server; source text never leaves it."""
+    """Create embeddings on the GM's own Ollama server (ADR 0001 amendment)."""
+    url = _ollama_url()
     embeddings = []
     for start in range(0, len(texts), 32):
         request = urllib.request.Request(
-            OLLAMA_EMBED_URL,
-            data=json.dumps({"model": model, "input": texts[start : start + 32]}).encode(),
+            url + "/api/embed",
+            data=json.dumps(
+                {
+                    "model": model,
+                    "input": texts[start : start + 32],
+                    "dimensions": EMBEDDING_DIMENSIONS,
+                }
+            ).encode(),
             headers={"Content-Type": "application/json"},
         )
         try:
@@ -163,9 +183,7 @@ def _embed(texts: list[str], model: str) -> list[list[float]]:
                 f"Install it with `ollama pull {model}`."
             ) from e
         except (urllib.error.URLError, TimeoutError) as e:
-            raise WorkspaceError(
-                "Semantic search needs local Ollama running at 127.0.0.1:11434."
-            ) from e
+            raise WorkspaceError(f"Semantic search needs Ollama running at {url}.") from e
         except (KeyError, ValueError, TypeError) as e:
             raise WorkspaceError("Ollama returned an invalid embedding response.") from e
         if not isinstance(found, list) or len(found) != min(32, len(texts) - start):
@@ -186,23 +204,77 @@ def _embed(texts: list[str], model: str) -> list[list[float]]:
     return embeddings
 
 
-def _pack_vectors(vectors: list[list[float]]) -> tuple[str, int]:
-    dimensions = len(vectors[0])
-    if any(len(vector) != dimensions for vector in vectors):
-        raise WorkspaceError("Ollama returned embeddings with inconsistent dimensions.")
-    packed = struct.pack(
-        f"<{len(vectors) * dimensions}f", *(v for vector in vectors for v in vector)
+def _db() -> sqlite3.Connection:
+    """Machine-wide index shared by every campaign: passages are keyed by content digest and
+    model, so a rulebook registered in several workspaces is extracted and embedded once."""
+    path = machine.data_dir() / "library" / "index.sqlite3"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(path, timeout=60, isolation_level=None)
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS passages (
+            id INTEGER PRIMARY KEY, digest TEXT, model TEXT, location TEXT, text TEXT,
+            vector BLOB);
+        CREATE INDEX IF NOT EXISTS passages_key ON passages (digest, model);
+        CREATE VIRTUAL TABLE IF NOT EXISTS passages_fts USING fts5 (
+            text, content='passages', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+        CREATE TABLE IF NOT EXISTS indexed (
+            workspace TEXT, source TEXT, digest TEXT, model TEXT, stat TEXT,
+            PRIMARY KEY (workspace, source));
+        """
     )
-    return base64.b64encode(packed).decode("ascii"), dimensions
+    return db
 
 
-def _unpack_vectors(encoded: str, count: int, dimensions: int) -> list[tuple[float, ...]]:
-    try:
-        packed = base64.b64decode(encoded, validate=True)
-        values = struct.unpack(f"<{count * dimensions}f", packed)
-        return [tuple(values[i * dimensions : (i + 1) * dimensions]) for i in range(count)]
-    except (ValueError, struct.error) as e:
-        raise WorkspaceError("The semantic index is corrupt; reindex the source.") from e
+def _indexed(ws: Workspace, source_id: str) -> dict | None:
+    """The version of a source this workspace last indexed, or None."""
+    with closing(_db()) as db:
+        row = db.execute(
+            "SELECT digest, model, stat FROM indexed WHERE workspace = ? AND source = ?",
+            (_key(ws), source_id),
+        ).fetchone()
+    return row and {"sha256": row[0], "model": row[1], "stat": json.loads(row[2])}
+
+
+def _store(digest: str, model: str, extract) -> None:
+    """Extract and embed one content version unless any workspace already stored it."""
+    with closing(_db()) as db:
+        if db.execute(
+            "SELECT 1 FROM passages WHERE digest = ? AND model = ? LIMIT 1", (digest, model)
+        ).fetchone():
+            return
+    passages = extract()
+    if not passages:
+        return
+    vectors = _embed([passage["text"] for passage in passages], model)
+    if len({len(vector) for vector in vectors}) != 1:
+        raise WorkspaceError("Ollama returned embeddings with inconsistent dimensions.")
+    with closing(_db()) as db:
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            if not db.execute(
+                "SELECT 1 FROM passages WHERE digest = ? AND model = ? LIMIT 1", (digest, model)
+            ).fetchone():
+                for passage, vector in zip(passages, vectors, strict=True):
+                    rowid = db.execute(
+                        "INSERT INTO passages (digest, model, location, text, vector) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (
+                            digest,
+                            model,
+                            passage["location"],
+                            passage["text"],
+                            np.asarray(vector, dtype="<f4").tobytes(),
+                        ),
+                    ).lastrowid
+                    db.execute(
+                        "INSERT INTO passages_fts (rowid, text) VALUES (?, ?)",
+                        (rowid, passage["text"]),
+                    )
+            db.execute("COMMIT")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
 
 
 def listing(ws: Workspace) -> list[dict[str, Any]]:
@@ -214,15 +286,18 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
         entry = settings.get(source_id)
         status = "unavailable"
         if entry and Path(entry["path"]).is_file():
-            cache = _read(_cache(ws, source_id))
+            path = Path(entry["path"])
+            done = _indexed(ws, source_id)
+            # Hashing every rulebook on each search is too slow; trust an unchanged size+mtime.
+            same = done and (done["stat"] == _stat(path) or done["sha256"] == _digest(path))
             status = (
                 "unindexed"
-                if not cache
-                else "ready"
-                if cache["sha256"] == _digest(Path(entry["path"])) and cache.get("model") == model
-                else "model-changed"
-                if cache["sha256"] == _digest(Path(entry["path"]))
+                if not done
                 else "changed"
+                if not same
+                else "ready"
+                if done["model"] == model
+                else "model-changed"
             )
         result.append(
             {
@@ -240,7 +315,7 @@ def _passages(path: Path) -> list[dict]:
     if path.suffix.lower() == ".pdf":
         try:
             proc = subprocess.run(
-                ["pdftotext", "-layout", "-enc", "UTF-8", str(path), "-"],
+                ["pdftotext", "-enc", "UTF-8", str(path), "-"],
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -281,14 +356,21 @@ def _passages(path: Path) -> list[dict]:
             raise WorkspaceError(f"Source is not UTF-8 text: {path.name}.") from e
     passages = []
     for page, text in enumerate(pages, 1):
-        lines = text.splitlines()
-        for start in range(0, len(lines), 12):
-            excerpt = "\n".join(lines[start : start + 12]).strip()
-            if excerpt:
-                location = f"page {page}" if path.suffix.lower() == ".pdf" else f"line {start + 1}"
-                # Bound model excerpts even when extracted text has very long lines.
-                for offset in range(0, len(excerpt), 1800):
-                    passages.append({"location": location, "text": excerpt[offset : offset + 1800]})
+        # Pack whole lines into ~1,500-character passages: fixed line counts leave page
+        # numbers and headers as tiny passages that outrank real text on short queries.
+        chunks: list[tuple[int, list[str]]] = []
+        for number, line in enumerate(text.splitlines(), 1):
+            if not chunks or sum(len(kept) + 1 for kept in chunks[-1][1]) + len(line) > 1500:
+                chunks.append((number, []))
+            chunks[-1][1].append(line)
+        if len(chunks) > 1 and len("".join(chunks[-1][1]).strip()) < 200:
+            chunks[-2][1].extend(chunks.pop()[1])
+        for start, lines in chunks:
+            excerpt = "\n".join(lines).strip()
+            location = f"page {page}" if path.suffix.lower() == ".pdf" else f"line {start}"
+            # Bound model excerpts even when extracted text has very long lines.
+            for offset in range(0, len(excerpt), 1800):
+                passages.append({"location": location, "text": excerpt[offset : offset + 1800]})
     return passages
 
 
@@ -343,100 +425,62 @@ def build_index(
         if not entry["index"]:
             raise WorkspaceError("Local indexing permission has not been granted.")
         path = Path(entry["path"])
-        before = _digest(path)
-        cache_path = _cache(ws, source_id)
-        cache = _read(cache_path)
+        stat, before = _stat(path), _digest(path)
+        done = _indexed(ws, source_id)
         model = _embedding_model()
-        if cache:
-            if cache["sha256"] == before and cache.get("model") == model:
+        if done:
+            if done["sha256"] == before and done["model"] == model:
                 return
-            if cache["sha256"] != before and not (replace_changed and authenticated):
+            if done["sha256"] != before and not (replace_changed and authenticated):
                 raise WorkspaceError(
                     f"Source {source_id} changed; its existing index was preserved. The GM must "
                     "confirm replacement with sources index --replace-changed interactively."
                 )
-        passages = _passages(path)
-        if not passages:
-            raise WorkspaceError(f"No extractable text found in {path.name}, including OCR.")
+
+        def extract() -> list[dict]:
+            passages = _passages(path)
+            if not passages:
+                raise WorkspaceError(f"No extractable text found in {path.name}, including OCR.")
+            if _digest(path) != before:
+                raise WorkspaceError("Source changed during indexing; existing index preserved.")
+            return passages
+
+        # ponytail: superseded content versions stay in the shared index; add a GC if disk matters.
+        _store(before, model, extract)
         if _digest(path) != before:
             raise WorkspaceError("Source changed during indexing; existing index preserved.")
-        vectors = _embed([passage["text"] for passage in passages], model)
-        encoded, dimensions = _pack_vectors(vectors)
-        if _digest(path) != before:
-            raise WorkspaceError("Source changed during indexing; existing index preserved.")
-        _write(
-            cache_path,
-            {
-                "sha256": before,
-                "model": model,
-                "passages": passages,
-                "vectors": encoded,
-                "dimensions": dimensions,
-            },
-        )
+        with closing(_db()) as db:
+            db.execute(
+                "INSERT OR REPLACE INTO indexed VALUES (?, ?, ?, ?, ?)",
+                (_key(ws), source_id, before, model, json.dumps(stat)),
+            )
+
+
+RRF_K = 60  # reciprocal rank fusion constant
+# Qwen3-Embedding expects an instruction on queries, not on indexed passages.
+QUERY_INSTRUCTION = (
+    "Instruct: Given a question about a tabletop RPG book, retrieve passages that answer it\n"
+    "Query: "
+)
+CANDIDATES = 30  # per retrieval method, before fusion
 
 
 def search(ws: Workspace, query: str, *, local: bool = False, limit: int = 10) -> dict:
-    """Semantic retrieval; source model permission is mandatory unless the caller is the GM CLI."""
+    """Hybrid retrieval: exact-term BM25 (names of spells, gods, places) fused with semantic
+    similarity. Source model permission is mandatory unless the caller is the GM CLI."""
     if not query.strip() or not 1 <= limit <= 50:
         raise WorkspaceError("Search needs a query and a limit between 1 and 50.")
-    hits: list[dict] = []
     model = _embedding_model()
-    query_vector = _embed([query], model)[0]
-
-    def collect(
-        passages: list[dict],
-        vectors: list[tuple[float, ...]],
-        filename: str,
-        kind: str,
-        source_id: str | None,
-    ) -> None:
-        for passage, vector in zip(passages, vectors, strict=True):
-            if len(query_vector) != len(vector):
-                raise WorkspaceError("The semantic model changed dimensions; reindex this source.")
-            score = sum(left * right for left, right in zip(query_vector, vector, strict=True))
-            hits.append(
-                {**passage, "filename": filename, "kind": kind, "source": source_id, "score": score}
-            )
-
-    # Cache campaign Markdown embeddings locally; registered sources remain separately permissioned.
-    local_passages: list[dict] = []
-    fingerprint = hashlib.sha256()
+    # Content digest -> where it is cited from. Campaign Markdown is stored like any source.
+    origins: dict[str, list[dict]] = {}
     for directory in ("canon", "notes", "sessions"):
         for path in sorted((ws.root / directory).rglob("*.md")):
             if not path.is_symlink() and path.resolve().is_relative_to(ws.root.resolve()):
-                filename = str(path.relative_to(ws.root))
                 digest = _digest(path)
-                fingerprint.update(f"{filename}\0{digest}\0".encode())
-                local_passages.extend(
-                    {**passage, "filename": filename, "kind": directory}
-                    for passage in _passages(path)
+                _store(digest, model, lambda path=path: _passages(path))
+                origins.setdefault(digest, []).append(
+                    {"filename": str(path.relative_to(ws.root)), "kind": directory, "source": None}
                 )
-    local_hash = fingerprint.hexdigest()
-    local_path = _cache(ws, "workspace")
-    local_index = _read(local_path)
-    if local_index.get("fingerprint") != local_hash or local_index.get("model") != model:
-        vectors = _embed([passage["text"] for passage in local_passages], model)
-        encoded, dimensions = _pack_vectors(vectors) if vectors else ("", 0)
-        local_index = {
-            "fingerprint": local_hash,
-            "model": model,
-            "passages": local_passages,
-            "vectors": encoded,
-            "dimensions": dimensions,
-        }
-        _write(local_path, local_index)
-    if local_passages:
-        vectors = _unpack_vectors(
-            local_index["vectors"], len(local_passages), local_index["dimensions"]
-        )
-        for kind in ("canon", "notes", "sessions"):
-            selected = [
-                (p, v) for p, v in zip(local_passages, vectors, strict=True) if p["kind"] == kind
-            ]
-            if selected:
-                passages, selected_vectors = zip(*selected, strict=True)
-                collect(list(passages), list(selected_vectors), "campaign", kind, None)
     sources = listing(ws)
     purchased = machine.purchased_content()
     settings = _read(_settings(ws))
@@ -448,12 +492,62 @@ def search(ws: Workspace, query: str, *, local: bool = False, limit: int = 10) -
             ):
                 source["model_blocked_by_purchased_content"] = True
                 continue
-            cache = _read(_cache(ws, source["id"]))
-            vectors = _unpack_vectors(cache["vectors"], len(cache["passages"]), cache["dimensions"])
-            collect(cache["passages"], vectors, source["filename"], "source", source["id"])
-    hits = [hit for hit in hits if hit["score"] >= 0.2]
-    hits.sort(key=lambda hit: (-hit["score"], hit["filename"], hit["location"]))
-    return {"matches": hits[:limit], "sources": sources, "method": "semantic"}
+            done = _indexed(ws, source["id"])
+            if done:  # "ready" was just read from it; a concurrent reset drops the source
+                origins.setdefault(done["sha256"], []).append(
+                    {"filename": source["filename"], "kind": "source", "source": source["id"]}
+                )
+    if not origins:
+        return {"matches": [], "sources": sources, "method": "hybrid"}
+    digests = list(origins)
+    marks = ",".join("?" * len(digests))
+    fused: dict[int, float] = {}
+    with closing(_db()) as db:
+        # ponytail: loads every authorized vector per query (~1 s at 300k passages); keep a
+        # per-process matrix cache if serve latency matters.
+        rows = db.execute(
+            f"SELECT id, vector FROM passages WHERE model = ? AND digest IN ({marks})",
+            (model, *digests),
+        ).fetchall()
+        if rows:
+            ids = np.array([row[0] for row in rows])
+            matrix = np.frombuffer(b"".join(row[1] for row in rows), dtype="<f4")
+            query_vector = np.asarray(_embed([QUERY_INSTRUCTION + query], model)[0], dtype="<f4")
+            if matrix.size != len(rows) * query_vector.size:
+                raise WorkspaceError("The semantic model changed dimensions; reindex sources.")
+            scores = matrix.reshape(len(rows), -1) @ query_vector
+            best = [i for i in np.argsort(-scores)[:CANDIDATES] if scores[i] >= 0.2]
+            for rank, i in enumerate(best):
+                fused[int(ids[i])] = 1 / (RRF_K + rank)
+        # Every query term must appear: the lexical leg is for precision, the semantic for recall.
+        terms = " ".join(f'"{word}"' for word in re.findall(r"\w+", query))
+        if terms:
+            lexical = db.execute(
+                f"SELECT p.id FROM passages_fts JOIN passages p ON p.id = passages_fts.rowid "
+                f"WHERE passages_fts MATCH ? AND p.model = ? AND p.digest IN ({marks}) "
+                f"ORDER BY bm25(passages_fts) LIMIT ?",
+                (terms, model, *digests, CANDIDATES),
+            ).fetchall()
+            for rank, (rowid,) in enumerate(lexical):
+                fused[rowid] = fused.get(rowid, 0) + 1 / (RRF_K + rank)
+        exact = {rowid for (rowid,) in lexical} if terms else set()
+        # On equal fused rank an exact-term match beats a semantic neighbour.
+        ranked = sorted(fused, key=lambda i: (fused[i], i in exact), reverse=True)[:limit]
+        found = {
+            row[0]: row[1:]
+            for row in db.execute(
+                f"SELECT id, digest, location, text FROM passages "
+                f"WHERE id IN ({','.join('?' * len(ranked))})",
+                ranked,
+            )
+        }
+    hits = [
+        {"location": location, "text": text, **origin, "score": fused[rowid]}
+        for rowid in ranked
+        for digest, location, text in [found[rowid]]
+        for origin in origins[digest]
+    ]
+    return {"matches": hits[:limit], "sources": sources, "method": "hybrid"}
 
 
 def tools(ws: Workspace) -> list[Tool]:

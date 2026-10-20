@@ -4,14 +4,17 @@
 creation, maintenance and play, with conflict-safe installs and separate working
 notes. The reference library provides per-source local indexing and model-excerpt
 permissions, full-document passage embeddings through the local Ollama service,
-semantic search and citations, and explicit approval before reindexing a changed
+hybrid lexical and semantic search with citations, and explicit approval before reindexing a changed
 source. OCR handles text-empty PDF pages using local Tesseract and Poppler tools.
 
 The [workspace contract](../contracts/workspace-layout.md#campaign-workshop-and-reference-library-spec-12-first-delivery)
 documents commands, storage, permissions and operational limits. Embedding text
 stays on the GM's machine. A local Ollama install and the multilingual
 `qwen3-embedding:0.6b` model are required. OCR uses installed Poppler and Tesseract
-language data. No model service call occurs in the Core.
+language data. The Core calls no generative model; its only model call is embedding
+on the GM's Ollama server ([ADR 0001 amendment](../adr/0001-no-in-house-orchestrator-llm-free-core.md#amendment-2026-10-20-the-core-may-compute-embeddings-on-the-gms-ollama)).
+Search is hybrid: exact-term BM25 (names of spells, gods, places) fused with semantic
+similarity, over a machine-wide index shared by every campaign.
 
 Validation includes installation/update conflict tests, provisional-note isolation,
 permission/revocation and changed-source checks, paraphrase retrieval, text and
