@@ -351,6 +351,7 @@ def test_a_duplicate_adds_provenance_and_knowledge_but_no_fact(ws: Workspace) ->
 
     [dup] = capture.consolidate(ws, job)
 
+    assert dup["status"] == "duplicate"
     assert dup["fact"] == gauge["fact"]
     assert len(index.search_facts(ws)) == 1
     assert [k["fact"] for k in index.search_knowledge(ws, [edda])] == [gauge["fact"]]
