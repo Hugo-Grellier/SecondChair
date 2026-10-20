@@ -36,6 +36,9 @@ HOSTS: dict[str, list[str]] = {
         "--plugin-dir={playbooks}",
         "--allowedTools",
         "mcp__secondchair Read",
+        # A job has no GM at hand: relaying the GM's approval is never a job's to do (DEL-27).
+        "--disallowedTools",
+        "mcp__secondchair__approve_proposal",
     ],
     "codex": [
         "codex",
@@ -48,6 +51,8 @@ HOSTS: dict[str, list[str]] = {
         # not the host, decides what a SecondChair tool may do (ARC-04).
         "-c",
         'mcp_servers.secondchair.default_tools_approval_mode="approve"',
+        "-c",
+        'mcp_servers.secondchair.disabled_tools=["approve_proposal"]',
         "--skip-git-repo-check",
         "{prompt}",
     ],

@@ -514,3 +514,10 @@ def test_the_codex_template_lets_exec_call_the_secondchair_tools() -> None:
     template = runner.HOSTS["codex"]
     at = template.index('mcp_servers.secondchair.default_tools_approval_mode="approve"')
     assert template[at - 1] == "-c"
+
+
+def test_no_runner_template_lets_a_job_relay_the_gms_approval() -> None:
+    """A job has no GM at hand, so a headless host never gets approve_proposal (DEL-27)."""
+    claude, codex = runner.HOSTS["claude"], runner.HOSTS["codex"]
+    assert claude[claude.index("--disallowedTools") + 1] == "mcp__secondchair__approve_proposal"
+    assert 'mcp_servers.secondchair.disabled_tools=["approve_proposal"]' in codex
