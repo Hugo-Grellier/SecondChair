@@ -57,6 +57,25 @@ jobs:
       - name: node --test
         run: node --test "foundry/**/*.test.js"
 
+  bench:
+    # BEN-06: S0 on the scripted fake runner; CI holds no model credentials. The real run is
+    # local, through `secondchair bench s0` with the GM's own agent host.
+    name: S0 bench (scripted fake runner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+      - run: uv sync --locked
+      - name: S0, delegated and baseline, N = 3
+        run: uv run secondchair bench s0 "$RUNNER_TEMP/s0" --runner fake/scripted/none
+      - name: Publish the report
+        if: ${{ !cancelled() }}
+        run: cat "$RUNNER_TEMP/s0/report.md" >> "$GITHUB_STEP_SUMMARY"
+
   guards:
     name: Guards and workflow checks
     runs-on: ubuntu-latest

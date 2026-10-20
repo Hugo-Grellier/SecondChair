@@ -877,7 +877,7 @@ def read_log(ws: Workspace) -> tuple[list[dict], list[str]]:
     return entries, errors
 
 
-def _core_states(entries: list[dict]) -> dict[str, str | None]:
+def core_states(entries: list[dict]) -> dict[str, str | None]:
     """Each target's content as the Core last left it, replaying writes in the order they hit
     the workspace: an action when applied (at its approval, if any), an undo, a confirmation,
     a hand edit."""
@@ -903,7 +903,7 @@ def log_hand_edits(ws: Workspace) -> list[dict]:
     agent-proposal rank (CAN-11). The GM promotes one with `promote`."""
     with locked(ws):
         entries, _ = read_log(ws)
-        known = _core_states(entries)
+        known = core_states(entries)
         current = {
             p.relative_to(ws.root).as_posix(): p.read_text()
             for p in sorted((ws.root / CANON_DIR).rglob("*.md"))

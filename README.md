@@ -65,3 +65,14 @@ CI runs the same checks, the Python ones on 3.14 and 3.15. The spec is in [`docs
 
 The original [sample campaign](sample-campaign/README.md) supplies S0 material,
 synthetic session notes and a frozen reference set under CC BY 4.0.
+
+The S0 bench rebuilds the sample campaign three times at the delegated table and three times at
+the manual baseline, and reports GM effort, entity recall and precision and the two invariants
+from the stored action logs; it exits 1 when an invariant fails. CI runs it with the scripted fake
+runner and holds no model credentials. The real run is local, with your own agent host:
+
+```sh
+uv run secondchair bench s0 ~/bench/s0-run --runner claude/<model>/high   # serves each run on your configured port
+uv run secondchair bench s0 /tmp/s0 --runner fake/scripted/none          # what CI runs
+uv run secondchair bench report ~/bench/s0-run                           # recompute from the stored logs
+```
