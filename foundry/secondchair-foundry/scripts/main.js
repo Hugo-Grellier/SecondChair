@@ -8,7 +8,9 @@ import { createOutbox, createRecorder, describe, keyInput } from "./traces.js";
 
 /** @typedef {import("./actions.js").Adapter} Adapter @typedef {import("./actions.js").Doc} Doc */
 
-const SOCKET = `module.${MODULE}`;
+// Players reach the active GM's client through Foundry queries, which go to that one client only.
+const TRACES = `${MODULE}.traces`;
+const ERASE = `${MODULE}.erase`;
 
 /** The Core's socket while this GM client is connected to it, else null. */
 /** @type {WebSocket | null} */
@@ -513,17 +515,20 @@ async function offerErase() {
       "<p>Recording stopped. Also erase all the behaviour traces already recorded for you?</p>",
   });
   if (!erase) return;
-  if (isActiveGM()) eraseFor(game.user.id);
-  else if (game.users.activeGM) game.socket.emit(SOCKET, { type: "erase" });
+  const gm = game.users.activeGM;
+  if (isActiveGM()) erasedNotice(eraseFor(game.user.id));
+  else if (gm)
+    gm.query(ERASE, {}).then(
+      (ok) => erasedNotice(ok === true),
+      () => erasedNotice(false),
+    );
   else erasedNotice(false);
 }
 
-/** @param {string} user */
+/** @param {string} user @returns {boolean} whether the request reached the Core */
 function eraseFor(user) {
-  const ok = core !== null;
   core?.send(JSON.stringify({ type: "erase_traces", user }));
-  if (user === game.user.id) erasedNotice(ok);
-  else game.socket.emit(SOCKET, { type: "erased", user, ok });
+  return core !== null;
 }
 
 /** @param {boolean} ok */
@@ -537,9 +542,9 @@ function erasedNotice(ok) {
 
 /** Record this user's behaviour traces once they consent; the active GM also relays the table's. */
 function traces() {
-  // Players' traces reach the Core only through the active GM's client (TRC-05). Foundry hands
-  // module socket messages to every client; the others drop them unread. Who is the active GM
-  // can change, so it is asked at each send; a GM client that never dialed counts gaps.
+  // Players' traces reach the Core only through the active GM's client (TRC-05), as a Foundry
+  // query that no other client receives. Who is the active GM can change, so it is asked at each
+  // send; a GM client that never dialed, or a query that fails, counts gaps.
   const outbox = createOutbox({
     ready: () => (isActiveGM() ? core !== null : game.users.activeGM !== null),
     send: (user, records) =>
@@ -553,19 +558,23 @@ function traces() {
               records,
             }),
           )
-        : game.socket.emit(SOCKET, { type: "traces", records }),
+        : (game.users.activeGM?.query(TRACES, { records }, { timeout: 5000 }) ?? Promise.reject()),
   });
   const rec = createRecorder({ consented, flush: (records) => outbox.push(game.user.id, records) });
   recorder = rec;
   setInterval(() => rec.flush(), 1000);
 
-  // Foundry passes the sender's user id, so a player cannot send traces as someone else.
-  game.socket.on(SOCKET, (/** @type {any} */ data, /** @type {string} */ sender) => {
-    if (isActiveGM() && data?.type === "traces" && Array.isArray(data.records))
-      outbox.push(sender, data.records);
-    else if (isActiveGM() && data?.type === "erase") eraseFor(sender);
-    else if (data?.type === "erased" && data.user === game.user.id) erasedNotice(data.ok);
-  });
+  // Foundry passes the querying user, so a player cannot send or erase traces as someone else.
+  // A client that is no longer the active GM refuses, and the player counts a gap.
+  CONFIG.queries[TRACES] = (/** @type {any} */ data, { user }) => {
+    if (!isActiveGM()) throw new Error("not the active GM");
+    if (Array.isArray(data?.records)) outbox.push(user.id, data.records);
+    return true;
+  };
+  CONFIG.queries[ERASE] = (_data, { user }) => {
+    if (!isActiveGM()) throw new Error("not the active GM");
+    return eraseFor(user.id);
+  };
 
   // The checkbox follows the user signed in here; their flag follows their own consent.
   if (game.settings.get(MODULE, "traces") !== consented())
