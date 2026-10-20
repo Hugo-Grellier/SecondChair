@@ -298,7 +298,7 @@ origin: {kind: source, source: bible.md, page: "B14"}
 
 ## `speakers.yaml`
 
-The speaker table (CAP-02): each Discord user whose track is recorded maps to its player, their PC, and whether it is the GM's track. The GM writes it; `secondchair check` validates it.
+The speaker table (CAP-02): each Discord user whose track is recorded maps to its player, their PC, and whether it is the GM's track. The GM writes it; `secondchair check` validates it. Keys are strings: quote a numeric Discord id.
 
 ```yaml
 gm_hugo: {player: Hugo, gm: true}

@@ -192,6 +192,7 @@ def test_any_engines_attributed_transcript_is_accepted(ws: Workspace, tmp_path: 
         {"speaker": "gm_hugo", "start": 0, "end": 1.5, "text": "Bonsoir."},
         {"speaker": "alice_42", "start": 2, "end": 3, "text": "Salut."},
     )
+    other.write_text(other.read_text() + "\n")  # a trailing blank line is fine
     assert transcribe(ws, "--from", str(other)) == 0
     [ref] = [yaml.safe_load(p.read_text()) for p in (ws.root / "sources").glob("*.yaml")]
     assert ref == {
@@ -243,6 +244,7 @@ def test_a_session_not_yet_played_is_refused(
         {"a": {"player": "A", "gm": True}, "b": {"player": "B", "gm": True}},
         {"a": {"player": "A", "gm": True}, "b": {"pc": "X"}},  # no player
         ["a", "b"],
+        {123456789012345678: {"player": "A", "gm": True}, "b": {"player": "B"}},  # unquoted
     ],
 )
 def test_check_reports_an_invalid_speaker_table(
@@ -251,3 +253,50 @@ def test_check_reports_an_invalid_speaker_table(
     (ws.root / "speakers.yaml").write_text(yaml.safe_dump(table))
     assert main(["check", "-w", str(ws.root)]) == 1
     assert "speakers.yaml" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "engine",
+    [
+        "print('no output')",
+        "import sys, json, pathlib; pathlib.Path(sys.argv[2], 'a.json').write_text("
+        "json.dumps({{'segments': [{{'start': None, 'end': 1, 'text': 'x'}}]}}))",
+        "import sys, json, pathlib; pathlib.Path(sys.argv[2], 'a.json').write_text("
+        "json.dumps({{'segments': [{{'start': 2, 'end': 1, 'text': 'x'}}]}}))",
+    ],
+)  # braces doubled: the command template is a format string
+def test_malformed_engine_output_is_reported(
+    ws: Workspace,
+    tracks: list[Path],
+    tmp_path: Path,
+    engine: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = tmp_path / "config/secondchair/config.yaml"
+    config.write_text(
+        yaml.safe_dump({"transcription": [sys.executable, "-c", engine, "{audio}", "{out_dir}"]})
+    )
+    assert transcribe(ws, f"gm_hugo={tracks[0]}", f"alice_42={tracks[1]}") == 1
+    assert "transcription engine" in capsys.readouterr().err
+    assert not (ws.root / "sources").exists()
+
+
+def test_an_existing_transcript_or_a_shared_track_is_refused(
+    ws: Workspace, tracks: list[Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert transcribe(ws, f"gm_hugo={tracks[0]}", f"alice_42={tracks[0]}") == 1
+    assert "their own track" in capsys.readouterr().err
+    assert (
+        transcribe(ws, f"gm_hugo={tracks[0]}", f"alice_42={tracks[1]}", "--out", str(tracks[0]))
+        == 1
+    )
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_check_reports_an_invalid_source_reference(
+    ws: Workspace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (ws.root / "sources").mkdir()
+    (ws.root / "sources/s-1234abcd.yaml").write_text("id: s-1234abcd\nkind: video\n")
+    assert main(["check", "-w", str(ws.root)]) == 1
+    assert "s-1234abcd.yaml" in capsys.readouterr().err

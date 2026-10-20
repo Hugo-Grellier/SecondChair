@@ -50,6 +50,8 @@ def speakers(ws: Workspace) -> dict[str, dict]:
     """The speaker table (CAP-02): Discord user -> {player, pc, gm}, exactly one GM track."""
     path = ws.root / SPEAKERS_FILE
     table = _read_yaml(path)
+    if not all(isinstance(user, str) for user in table):
+        raise WorkspaceError(f"{path}: quote each Discord user so it is a string.")
     if not all(
         isinstance(row, dict)
         and isinstance(row.get("player"), str)
@@ -74,9 +76,18 @@ def check(ws: Workspace) -> list[str]:
             errors.append(str(e))
     for path in sorted((ws.root / SOURCES_DIR).glob("*.yaml")):
         try:
-            _read_yaml(path)
+            ref = _read_yaml(path)
         except WorkspaceError as e:
             errors.append(str(e))
+            continue
+        digest = str(ref.get("sha256", ""))
+        if not (
+            ref.get("kind") in ("audio", "transcript")
+            and len(digest) == 64
+            and set(digest) <= set("0123456789abcdef")
+            and ref.get("id") == path.stem == f"s-{digest[:8]}"
+        ):
+            errors.append(f"{path}: not a Source reference {{id, kind, sha256, session}}.")
     return errors
 
 
@@ -93,7 +104,11 @@ def transcribe(
     _session(ws, session)
     _attributed(ws, set(tracks))
     tracks = {speaker: _outside(ws, path) for speaker, path in tracks.items()}
+    if len(set(tracks.values())) != len(tracks):
+        raise TranscriptionError("Each speaker needs their own track.")
     out = _outside(ws, out or next(iter(tracks.values())).parent / f"session-{session}.jsonl")
+    if out.exists():
+        raise TranscriptionError(f"{out} already exists: choose another --out.")
     hotwords = ", ".join(canon.vocabulary(ws))
     language = language or ws.campaign_language.split("-")[0]
     segments = []
@@ -119,6 +134,8 @@ def register(ws: Workspace, session: int, path: Path) -> str:
     path = _outside(ws, path)
     found = set()
     for n, line in enumerate(path.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
         try:
             segment = json.loads(line)
         except ValueError:
@@ -171,27 +188,36 @@ def _engine(template: list[str] | None, audio: Path, hotwords: str, language: st
     """The engine's segments for one track: {start, end, text}, empty ones dropped."""
     if not audio.is_file():
         raise TranscriptionError(f"{audio} is not a file.")
+    fields = {"audio": str(audio), "hotwords": hotwords, "language": language}
     with tempfile.TemporaryDirectory() as out_dir:
-        fields = {"audio": str(audio), "out_dir": out_dir, "hotwords": hotwords}
-        command = [a.format(**fields, language=language) for a in template or WHISPERX]
+        try:
+            command = [a.format(**fields, out_dir=out_dir) for a in template or WHISPERX]
+        except (KeyError, ValueError, IndexError) as e:
+            raise TranscriptionError(
+                f"The transcription command has an unknown placeholder {e}; use "
+                "{audio}, {out_dir}, {language}, {hotwords}, and double other braces."
+            ) from e
         try:  # the environment, Hugging Face token included, is inherited as is
             subprocess.run(command, check=True, capture_output=True, text=True)
             [result] = Path(out_dir).glob("*.json")
-            raw = json.loads(result.read_text())["segments"]
-        except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as e:
+            segments = [
+                {"start": float(s["start"]), "end": float(s["end"]), "text": s["text"].strip()}
+                for s in json.loads(result.read_text())["segments"]
+                if s["text"].strip()
+            ]
+        except (OSError, subprocess.CalledProcessError, ValueError, KeyError, TypeError) as e:
             detail = getattr(e, "stderr", None) or e
             raise TranscriptionError(f"The transcription engine failed on {audio}: {detail}") from e
-    return [
-        {"start": float(s["start"]), "end": float(s["end"]), "text": s["text"].strip()}
-        for s in raw
-        if s["text"].strip()
-    ]
+    if bad := [s for s in segments if not _segment({"speaker": "-", **s})]:
+        raise TranscriptionError(f"The transcription engine gave an invalid segment: {bad[0]}")
+    return segments
 
 
 def _reference(ws: Workspace, path: Path, record: dict) -> str:
     """Reference a Source by id and hash in the workspace (PKG-12), and remember where it is in
     the machine configuration."""
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    with path.open("rb") as f:
+        digest = hashlib.file_digest(f, "sha256").hexdigest()
     source_id = f"s-{digest[:8]}"
     with locked(ws):
         (ws.root / SOURCES_DIR).mkdir(exist_ok=True)
@@ -203,6 +229,13 @@ def _reference(ws: Workspace, path: Path, record: dict) -> str:
         _write(ws.root / SOURCES_DIR / f"{source_id}.yaml", text)
     locations_path = machine.config_dir() / LOCATIONS_FILE
     locations_path.parent.mkdir(parents=True, exist_ok=True)
-    locations = yaml.safe_load(locations_path.read_text()) if locations_path.exists() else None
+    # ponytail: unlocked read-modify-write; two concurrent transcribe runs on one machine can
+    # drop a location (the workspace reference stays). Lock it if that ever happens.
+    try:
+        locations = yaml.safe_load(locations_path.read_text()) if locations_path.exists() else None
+    except yaml.YAMLError as e:
+        raise TranscriptionError(f"{locations_path} is not valid YAML: {e}") from e
+    if not isinstance(locations, dict | None):
+        raise TranscriptionError(f"{locations_path} must map Source ids to paths.")
     _write(locations_path, yaml.safe_dump({**(locations or {}), source_id: str(path)}))
     return source_id
