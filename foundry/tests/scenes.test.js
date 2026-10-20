@@ -1,8 +1,6 @@
 // Realising a prepared scene by reconciliation (ARC-10, BVE-02, docs/contracts/foundry-bridge.md).
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { Ajv2020 } from "ajv/dist/2020.js";
 import {
   canonical,
   MODULE,
@@ -11,11 +9,7 @@ import {
   summary,
   withoutPlayed,
 } from "../secondchair-foundry/scripts/scenes.js";
-
-const schema = JSON.parse(
-  readFileSync(new URL("../../docs/contracts/foundry-bridge.schema.json", import.meta.url), "utf8"),
-);
-const valid = new Ajv2020().compile(schema);
+import { validMessage as valid } from "./schema.js";
 
 // The v3 reconciliation cases, carried as tests (BVE-01, BVE-02).
 
