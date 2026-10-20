@@ -59,6 +59,7 @@ Two ticket resolutions disagreed with an ADR or with each other. The GM settled 
 | [0012](../adr/0012-behaviour-traces-capture-raw-input-with-consent.md) | Behaviour traces capture raw input, locally and only with consent | [04](04-canon-memory-capture.md), [10](10-success-bench.md) |
 | [0013](../adr/0013-third-party-modules-are-evidence-turn-drivers-take-over.md) | Third-party modules are optional evidence; a turn driver takes over; house rules come from discrepancies | [06](06-pf2e-rules.md) |
 | [0014](../adr/0014-declarative-campaign-calendar-core-follows-paizo.md) | Declarative campaign calendar; the Core follows Paizo over the PF2e clock | [05](05-living-world-calendar.md) |
+| [0015](../adr/0015-evidence-is-resolved-by-the-core-before-it-confers-rank.md) | **Proposed, awaiting the GM.** Evidence is resolved by the Core before it confers a rank | [04](04-canon-memory-capture.md) |
 
 ### Ticket resolutions without an ADR
 
