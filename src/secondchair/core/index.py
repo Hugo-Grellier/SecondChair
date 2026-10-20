@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 from contextlib import closing
 from importlib.metadata import entry_points
 from typing import Any
@@ -159,7 +160,8 @@ def rebuild(ws: Workspace) -> list[str]:
         docs, load_errors = _load(ws)
     path = ws.root / STATE_DIR / INDEX_FILE
     path.parent.mkdir(exist_ok=True)
-    tmp = path.with_name(f"{INDEX_FILE}.{os.getpid()}.tmp")
+    # One per thread: the bridge rebuilds from several worker threads at once (#141).
+    tmp = path.with_name(f"{INDEX_FILE}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.unlink(missing_ok=True)
     with closing(sqlite3.connect(tmp)) as conn, conn:
         conn.executescript(_SCHEMA)
