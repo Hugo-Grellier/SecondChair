@@ -199,6 +199,38 @@
 - expect: []
   envelope:
     <<: *base
+    id: follow-up-applied
+    actor: Actor.sella
+    visibility: gm
+    payload:
+      type: follow-up
+      message: null
+      user: null
+      actor: Actor.sella
+      target: null
+      action: trip
+      degree: success
+      flags: {}
+      follow_up: {condition: prone, value: null, result: applied}
+- expect: [follow_up]
+  envelope:
+    <<: *base
+    id: follow-up-ambiguous
+    actor: Actor.sella
+    visibility: gm
+    payload:
+      type: follow-up
+      message: null
+      user: null
+      actor: Actor.sella
+      target: null
+      action: demoralize
+      degree: criticalSuccess
+      flags: {}
+      follow_up: {condition: frightened, value: 2, settled: 1, result: ambiguous}
+- expect: []
+  envelope:
+    <<: *base
     id: demoralize
     actor: Actor.sella
     payload:

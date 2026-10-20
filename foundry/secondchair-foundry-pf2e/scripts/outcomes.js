@@ -19,7 +19,7 @@
  */
 
 /** The degree pf2e records on a check message. */
-const DEGREES = ["criticalFailure", "failure", "success", "criticalSuccess"];
+export const DEGREES = ["criticalFailure", "failure", "success", "criticalSuccess"];
 
 /** Message types whose roll is not a check. */
 const NOT_CHECKS = ["damage-roll", "damage-taken", "spell-cast", "self-effect"];

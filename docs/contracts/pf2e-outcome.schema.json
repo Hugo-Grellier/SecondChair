@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/pf2e-outcome.schema.json",
   "title": "PF2e outcome trace",
-  "description": "The payload of a `pf2e.outcome` observation (RUL-13), which the PF2e system adapter `secondchair-foundry-pf2e` emits in every mode of play for each outcome it sees: a check roll, a damage roll, damage taken, a spell cast, a condition change. Each section is present only when the outcome has it. The PF2e System extension's rules checks read nothing else (RUL-14, RUL-15). Protocol version 0.1.0.",
+  "description": "The payload of a `pf2e.outcome` observation (RUL-13), which the PF2e system adapter `secondchair-foundry-pf2e` emits in every mode of play for each outcome it sees: a check roll, a damage roll, damage taken, a spell cast, a condition change, and the follow-up of an agent's system action (RUL-10). Each section is present only when the outcome has it. The PF2e System extension's rules checks read nothing else (RUL-14, RUL-15). Protocol version 0.1.0.",
   "type": "object",
   "required": ["type", "message", "user", "actor", "target", "action", "flags"],
   "additionalProperties": false,
@@ -21,7 +21,7 @@
     }
   },
   "properties": {
-    "type": {"type": "string", "description": "pf2e's context type (attack-roll, saving-throw, skill-check, damage-roll, damage-taken, spell-cast, …), or `condition` for a condition change."},
+    "type": {"type": "string", "description": "pf2e's context type (attack-roll, saving-throw, skill-check, damage-roll, damage-taken, spell-cast, …), `condition` for a condition change, or `follow-up` for the condition an agent's system action gives its target."},
     "message": {"type": ["string", "null"], "description": "The chat message's id, null for a condition change."},
     "user": {"type": ["string", "null"], "description": "The Foundry user whose client made it (RUL-17)."},
     "actor": {"type": ["string", "null"], "description": "The rolling, casting or affected actor's UUID."},
@@ -93,6 +93,19 @@
       "required": ["after"],
       "additionalProperties": false,
       "properties": {"before": {"$ref": "#/$defs/conditions"}, "after": {"$ref": "#/$defs/conditions"}}
+    },
+    "follow_up": {
+      "type": "object",
+      "description": "A follow-up (RUL-10): the condition the executor's system action gives its target at its degree, its value on the target before the call and once it settled (each absent when the target did not have it), and what the executor did: `applied` it, found it `already` applied, or left it `ambiguous` (changed while the call settled, not as the degree says), a discrepancy, never applied.",
+      "required": ["condition", "value", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "condition": {"type": "string"},
+        "value": {"type": ["integer", "null"]},
+        "before": {"type": ["integer", "null"]},
+        "settled": {"type": ["integer", "null"]},
+        "result": {"enum": ["applied", "already", "ambiguous"]}
+      }
     },
     "flags": {
       "type": "object",

@@ -59,6 +59,19 @@ def publish_journal(journal: str, cites: list[str]) -> VttAction:
     )
 
 
+def speak(
+    token: str, line: str, cites: list[str] | None = None, entity: str | None = None
+) -> VttAction:
+    """A creature says `line` aloud to the whole table, in character: a public chat message
+    spoken by its token (its Foundry UUID), a disclosure, so its own action, apart from any
+    strike it goes with (DEL-23). `cites` the ids of the facts the players learn from it, which
+    become known by the party; `entity` the speaker's canon entity id, if it has one.
+    Irreversible: held for the GM's approval unless the GM lifted the hold."""
+    return VttAction(
+        op="speak", target=token, params={"content": line}, cites=cites or None, entity=entity
+    )
+
+
 def prepare_scene(
     key: str,
     scene: dict[str, Any],
@@ -159,6 +172,7 @@ def tools(ws: Workspace) -> list[Tool]:
         Tool(
             fn=publish_journal, responsibility="disclosure", delegated_action=True, reversible=False
         ),
+        Tool(fn=speak, responsibility="disclosure", delegated_action=True, reversible=False),
         Tool(fn=prepare_scene, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=scene_report, responsibility="prep", delegated_action=False, reversible=True),
         # ponytail: a read sits under memory (canon and continuity), as the Core's own reads.

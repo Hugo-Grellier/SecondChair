@@ -43,6 +43,13 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
       },
     };
   }
+  /** @type {string[]} */
+  const said = [];
+  /** @param {unknown} _token @param {string} line */
+  const say = async (_token, line) => {
+    said.push(line);
+    return `m${said.length}`;
+  };
   /** @type {unknown[]} */
   let saved = [];
   const store = {
@@ -57,6 +64,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
     adapter: () => adapter,
     ceiling: () => ceiling,
     language: () => "fr",
+    say,
   });
   /** @param {object} request */
   const handle = async (request) => {
@@ -83,6 +91,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
   };
   return {
     docs,
+    said,
     handle,
     read,
     store,
@@ -93,6 +102,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
         adapter: () => adapter,
         ceiling: () => ceiling,
         language: () => "fr",
+        say,
       }),
   };
 }
@@ -204,6 +214,30 @@ test("a disclosure reveals a token and publishes a journal entry to the players"
     after: { "ownership.default": 2 },
   });
   assert.equal(docs["Scene.s.Token.t"].hidden, false);
+});
+
+test("a creature speaks a line aloud, which no undo takes back", async () => {
+  const { said, handle } = world();
+  const line = { op: "speak", target: "Scene.s.Token.t", params: { content: "Die, longshanks!" } };
+  const spoken = await handle({ id: "s1", expect: null, ...line });
+  assert.deepEqual(spoken, {
+    type: "reply",
+    id: "s1",
+    ok: true,
+    before: { message: null },
+    after: { message: "m1" },
+  });
+  assert.deepEqual(said, ["Die, longshanks!"]);
+  const undo = await handle({
+    id: "s2",
+    ...line,
+    params: { message: null },
+    expect: { message: "m1" },
+  });
+  assert.equal(undo.ok, false);
+  const wall = await handle({ id: "s3", expect: null, ...line, target: "Scene.s.Wall.w" });
+  assert.match(wall.ok ? "" : wall.error, /not a Token/);
+  assert.deepEqual(said, ["Die, longshanks!"]);
 });
 
 test("a generic action refuses the wrong document or fields", async () => {

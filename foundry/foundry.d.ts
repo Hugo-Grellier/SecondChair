@@ -41,6 +41,8 @@ declare const game: {
   user: {
     id: string;
     isGM: boolean;
+    /** pf2e's per-user settings: whether checks and damage rolls open their dialog. */
+    settings: { showCheckDialogs: boolean; showDamageDialogs: boolean };
     getFlag(scope: string, key: string): unknown;
     setFlag(scope: string, key: string, value: unknown): Promise<unknown>;
   };
@@ -81,6 +83,11 @@ declare const game: {
   pf2e: {
     worldClock: { worldTime: { year: number; month: number; day: number } };
     system: { sluggify(text: string): string };
+    /** The system actions (Demoralize, Trip, …), by slug. */
+    actions: { get(slug: string): FoundryDoc };
+    ConditionManager: {
+      updateConditionValue(id: string, actor: FoundryDoc, value: number): Promise<void>;
+    };
   };
   scenes: {
     get(id: string): { uuid: string } | undefined;
@@ -148,6 +155,10 @@ declare const ui: {
 // biome-ignore lint/suspicious/noExplicitAny: Foundry documents, not modelled here
 type FoundryDoc = any;
 declare const Scene: { create(data: object): Promise<FoundryDoc> };
+declare const ChatMessage: {
+  create(data: object): Promise<FoundryDoc>;
+  getSpeaker(options: { token?: FoundryDoc }): object;
+};
 declare const Actor: { create(data: object): Promise<FoundryDoc> };
 
 declare namespace foundry.applications.api {
