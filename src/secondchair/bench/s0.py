@@ -18,7 +18,7 @@ from typing import Any
 import py3langid
 import yaml
 
-from secondchair.core import calls, index, knowledge, world
+from secondchair.core import calls, capture, index, knowledge, world
 from secondchair.core.delegation import LOG_DIR
 from secondchair.core.workspace import Workspace
 
@@ -85,7 +85,48 @@ def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
             "total": refused + gm + failed,
         },
         "language_drift": language_drift(ws),
+        "capture_coverage": capture_coverage(ws, gold),
     }
+
+
+def capture_coverage(ws: Workspace, gold: dict) -> dict:
+    """Capture coverage (10-success-bench.md; the protocol's step 4): recall and precision of the
+    candidate facts captured from the session notes against the gold set's units. A unit is a
+    Source and quote; it matches when its quote, date and knowers (known_by and learned_by, by
+    gold label) all match. Several candidates on one quote are one unit. Dropped candidates are
+    never stored, so they never count.
+    ponytail: the gold's evaluator fields (fact, clue, amount) have no workspace form; the quote
+    stands for them until capture emits structured answers."""
+    labels = _labels(ws, gold) | {index.PARTY: "party"}
+    units: dict[tuple[str, str], dict] = {}
+    for c in capture.candidates(ws):
+        unit = units.setdefault((c["source"], c["quote"]), {"dates": set(), "knowers": set()})
+        unit["dates"].add(c["date"])
+        unit["knowers"] |= {labels.get(k, k) for k in c["known_by"]}
+    matched, missed = [], []
+    for g in gold["capture"]["candidates"]:
+        learned = g["expected"].get("learned_by", [])
+        knowers = {*g["expected"].get("known_by", []), *_as_list(learned)}
+        hit = any(
+            source.endswith(g["source"])
+            and quote == g["quote"]
+            and u["dates"] == {g["date"]}
+            and u["knowers"] == knowers
+            for (source, quote), u in units.items()
+        )
+        (matched if hit else missed).append(g["id"])
+    total = len(gold["capture"]["candidates"])
+    return {
+        "recall": len(matched) / total,
+        "precision": len(matched) / len(units) if units else 0.0,
+        "matched": matched,
+        "missed": missed,
+        "proposed_units": len(units),
+    }
+
+
+def _as_list(value: Any) -> list:
+    return value if isinstance(value, list) else [value]
 
 
 def score_world_turn(ws: Workspace, gold: dict, case: str) -> dict:

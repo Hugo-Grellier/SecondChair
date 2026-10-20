@@ -83,11 +83,13 @@ def queue(
     entities: list[str] | None = None,
 ) -> dict:
     """Queue a job for a playbook, at the playbook's tier unless the job overrides it, with the
-    vocabulary of the given entities (default: the whole campaign vocabulary)."""
+    vocabulary of the given entities (default: the whole campaign vocabulary). An input the
+    playbook declares with a trailing `?` is optional."""
     meta = playbook(name)
-    expected = sorted(i.strip() for i in meta["inputs"].split(",") if i.strip())
-    if sorted(inputs) != expected:
-        raise RunnerError(f"Playbook {name} takes the inputs: {', '.join(expected)}.")
+    declared = sorted(i.strip() for i in meta["inputs"].split(",") if i.strip())
+    required = {i for i in declared if not i.endswith("?")}
+    if not required <= set(inputs) <= {i.removesuffix("?") for i in declared}:
+        raise RunnerError(f"Playbook {name} takes the inputs: {', '.join(declared)}.")
     return jobs.queue(
         ws,
         playbook=name,

@@ -8,7 +8,17 @@ import pytest
 import yaml
 
 from secondchair.bench import s0
-from secondchair.core import canon, delegation, index, jobs, knowledge, mystery, workspace, world
+from secondchair.core import (
+    canon,
+    capture,
+    delegation,
+    index,
+    jobs,
+    knowledge,
+    mystery,
+    workspace,
+    world,
+)
 from secondchair.core.workspace import Workspace
 
 SAMPLE = Path(__file__).parents[1] / "sample-campaign"
@@ -417,3 +427,83 @@ def test_a_wrong_clock_fails_its_living_world_probe(tmp_path: Path) -> None:
 
     assert report["probes"]["clocks"] is False
     assert report["probes"]["unless_evidence"] is False
+
+
+# What a wrap agent captures from each note's numbered lines: (line, statement, knowers by
+# name). The quote is the line's text, verbatim.
+NOTES = {
+    "01-dry-bell.md": [
+        ("S1-01", "The dry gauge at the Weir stayed at zero while the bell rang.", ["party"]),
+        ("S1-02", "Edda Vale paid the party 12 silver coins.", ["party", "Edda Vale"]),
+        ("S1-03", "Edda Vale learned that the gauge stayed at zero.", ["Edda Vale"]),
+        ("S1-04", "Orin Doss offered free crossings for a new rope.", ["party", "Orin Doss"]),
+    ],
+    "02-bypass.md": [
+        ("S2-01", "The party opened the bypass at the Weir.", ["party"]),
+        ("S2-02", "Tovan Reed told the Reed Union of the bypass.", ["Tovan Reed", "Reed Union"]),
+        ("S2-03", "Mira Pell signed the transfer of the relay fund.", ["party"]),
+        ("S2-04", "The party keeps the transfer from Edda Vale.", ["party"]),
+    ],
+}
+CHATTER = "perhaps the cook is secretly behind everything?"
+
+
+def wrap_notes(
+    ws: Workspace, ids: dict[str, str], notes: dict = NOTES, chatter: bool = False
+) -> None:
+    """Both notes captured in order, one wrap job each, as the wrap playbook does."""
+    for session, (name, lines) in enumerate(notes.items(), start=1):
+        path = SAMPLE / "sessions" / name
+        job = jobs.queue(
+            ws,
+            playbook="wrap-a-session",
+            inputs={"session": str(session), "notes": str(path)},
+            expected_output="",
+            responsibility="memory",
+            tier="standard",
+        )["id"]
+        jobs.start(ws, job, {"host": "h", "model": "m", "effort": "e"}, manual=True)
+        date = "0302-04-26" if session == 1 else "0302-05-01"
+        text = path.read_text()
+        submitted = [
+            (line, text.split(f"**{line}**: ")[1].split("\n")[0], statement, knowers)
+            for line, statement, knowers in lines
+        ]
+        if chatter and session == 1:
+            submitted.append(("chatter", CHATTER, "The cook is behind everything.", []))
+        for line, quote, statement, knowers in submitted:
+            result = capture.capture(
+                ws,
+                job,
+                source=str(path),
+                locator=f"{name}#{line}",
+                quote=quote,
+                statement=statement,
+                date=date,
+                known_by=[ids.get(k, k) for k in knowers],
+            )
+            assert result["status"] == "captured"
+        capture.consolidate(ws, job)
+
+
+def test_s0_reports_capture_recall_and_precision_against_the_gold_set(tmp_path: Path) -> None:
+    ws, ids, _ = rebuild(tmp_path)
+    assert s0.capture_coverage(ws, GOLD)["recall"] == 0.0
+
+    wrap_notes(ws, ids)
+
+    report = s0.score_probes(ws, GOLD, {})["capture_coverage"]
+    assert (report["recall"], report["precision"], report["missed"]) == (1.0, 1.0, [])
+    assert all(c["status"] == "applied" for c in capture.candidates(ws))
+
+
+def test_chatter_and_wrong_knowers_lower_capture_coverage(tmp_path: Path) -> None:
+    ws, ids, _ = rebuild(tmp_path)
+    gauge, *rest = NOTES["01-dry-bell.md"]
+    wrong = {**NOTES, "01-dry-bell.md": [(*gauge[:2], ["party", "Edda Vale"]), *rest]}
+
+    wrap_notes(ws, ids, wrong, chatter=True)
+
+    report = s0.capture_coverage(ws, GOLD)
+    assert report["missed"] == ["capture-gauge"]
+    assert (report["recall"], report["precision"]) == (7 / 8, 7 / 9)

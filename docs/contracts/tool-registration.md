@@ -102,6 +102,8 @@ An irreversible action is held at propose (DEL-09) and only an authenticated Sur
 
 The effective level is the table cell for the moment, lowered by every **entity override** of the action's acting entity for that responsibility and moment (DEL-12; [workspace layout](workspace-layout.md#entity-overrides)); the log entry records the `entity` and whether an override lowered the level (`override_lowered`). An override at manual refuses the action like a manual cell.
 
+The Core can hold an action at propose whatever the level: the wrap does so for a contradiction or a blocking question (CAP-10), the call carrying the reason as its `message`.
+
 A delegated action's `fn` that finds its change would contradict canon raises `secondchair.core.tools.Contradiction(path, message)`. The Core writes nothing, logs the action with `status: refused` and the message as `refusal` (a continuity error, MET-01), and returns an MCP error.
 
 The Core's own delegated actions are all under memory and reversible: `create_entity`, `record_fact`, `correct_fact`, `record_event` and `record_knowledge` ([workspace layout](workspace-layout.md#canonfacts)).
@@ -127,6 +129,15 @@ An agent running a job ([`job.schema.json`](job.schema.json)) passes `job` to ev
 | `finish_job(job)` | Marks a started job done. |
 | `settle_unless(occurrence, unless_holds, cites, job)` | The answer of a started `settle-an-unless` job (LW-10): whether a front's `unless` held on the tick's date, citing the ids of canon facts valid then. Held: the tick is suppressed. Not held: the tick applies at the agent-proposal rank. `null` or no citation: a call on the GM at the next break, and the tick stays queued. |
 
+The "wrap a session" job adds three tools, served the same way (CAP-04..13; [workspace layout](workspace-layout.md#capture)):
+
+| Tool | Does |
+|---|---|
+| `capture_candidate(job, source, locator, quote, statement, date, classification, reason, entities, relation, closes, known_by, duplicate_of, new_names, inferred, translation)` | Submits one candidate fact quoting `source`, one of the started job's inputs, verbatim. Returns its `key` and `captured`, `seen` (already captured: a rerun) or `dropped` (no quote, or a quote not in the Source). |
+| `report_session_interval(job, start, end, quote)` | Records the session's fictional interval as a Source of the job states it, quoted (CAL-14). |
+| `consolidate_candidates(job)` | Routes the session's captured candidates through the Core's delegated actions, under the job; returns each candidate's outcome. |
+| `run_world_turn(job)` | For a started `world-turn` job, which a wrap queues (LW-07): runs the Core's world-turn up to the job's `until` and returns the occurrences recorded. |
+
 A runner started by `secondchair jobs run` logs its attempt itself and gives the agent the contract in its prompt; the job is done when the agent calls `finish_job` or exits cleanly.
 
 ## Playbooks
@@ -137,11 +148,11 @@ A playbook is an [Agent Skills](https://agentskills.io/specification) skill (`sk
 metadata:
   secondchair-responsibility: memory
   secondchair-tier: standard              # fast, standard or deep; a job may override it
-  secondchair-inputs: bible               # comma-separated input names
+  secondchair-inputs: bible               # comma-separated input names; a trailing ? marks one optional
   secondchair-expected-output: One canon entity per named person, place, …
 ```
 
-Each block ships its playbooks in one directory that is both a Claude Code plugin (`.claude-plugin/`, the plugin and its marketplace named alike) and, through its `skills/` directory, a Codex skill bundle (PKG-19), registered under the `secondchair.playbooks` entry point group as the directory's path. Playbook names are unique across blocks. The Core's live in `src/secondchair/playbooks/` (`secondchair`): the first is `rebuild-entities-from-a-bible` (memory, standard). The Foundry connector's VTT playbooks ship with it (ARC-10) in `src/secondchair_foundry/playbooks/` (`secondchair-foundry`): `realise-a-scene` (prep, standard; inputs `brief` and `scene`), which writes a scene's desired state and reads back its reconciliation report.
+Each block ships its playbooks in one directory that is both a Claude Code plugin (`.claude-plugin/`, the plugin and its marketplace named alike) and, through its `skills/` directory, a Codex skill bundle (PKG-19), registered under the `secondchair.playbooks` entry point group as the directory's path. Playbook names are unique across blocks. The Core's live in `src/secondchair/playbooks/` (`secondchair`): `rebuild-entities-from-a-bible` (memory, standard), `wrap-a-session` (memory, standard; inputs `session` and the optional `notes`) and `world-turn` (living world, fast; inputs `until` and the optional `since`). The Foundry connector's VTT playbooks ship with it (ARC-10) in `src/secondchair_foundry/playbooks/` (`secondchair-foundry`): `realise-a-scene` (prep, standard; inputs `brief` and `scene`), which writes a scene's desired state and reads back its reconciliation report.
 
 ## What agents see
 

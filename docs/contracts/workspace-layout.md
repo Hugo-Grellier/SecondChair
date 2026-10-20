@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, ARC-10, CAP-01, CAP-02, CAP-03, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-13.
+Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -17,6 +17,8 @@ my-campaign/
 ├── observations/      # one JSON Lines file per live session: 000001.jsonl, …, and outside-sessions.jsonl
 ├── living-world.yaml  # the world-turn cursor; written by the first world-turn
 ├── occurrences/       # one YAML file per world-turn occurrence: 000001.yaml, …
+├── capture/           # one YAML file per candidate fact, named by its key
+├── time.yaml          # the current date and each wrapped session's interval; written by the wrap
 ├── canon/
 │   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 │   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
@@ -134,7 +136,7 @@ seq: 1         # grows by one at every moment change
 session: 0     # the last live session's id; the open one's while moment is live-session
 ```
 
-Only `secondchair moment <moment>`, `secondchair session start` and `secondchair session end` in an interactive terminal change it (DEL-03, DEL-03a). `session start` opens `live-session` with the next session id and is refused while one is open; `session end` returns to `between-sessions` (DEL-03b). Ending a live session, by either command, queues the "wrap a session" job (`wrap-a-session`, under memory, its input `session` the session id; DEL-04, CAP-09); its playbook comes with #46. The end of a moment is the last deadline of its calls: every call still open takes its safe default (`calls/`). While `live-session` is open, only `between-sessions` (ending it) is accepted (DEL-03b). Each action log entry records the `seq` it was taken in; once the moment changes, those entries are frozen and can no longer be undone, approved or rejected (DEL-25).
+Only `secondchair moment <moment>`, `secondchair session start` and `secondchair session end` in an interactive terminal change it (DEL-03, DEL-03a). `session start` opens `live-session` with the next session id and is refused while one is open; `session end` returns to `between-sessions` (DEL-03b). Ending a live session, by either command, queues the "wrap a session" job (`wrap-a-session`, under memory, its input `session` the session id; DEL-04, CAP-09); `session end --notes <file>` gives it the GM's notes for the session as its optional `notes` input, its Source ([capture](#capture)). The end of a moment is the last deadline of its calls: every call still open takes its safe default (`calls/`). While `live-session` is open, only `between-sessions` (ending it) is accepted (DEL-03b). Each action log entry records the `seq` it was taken in; once the moment changes, those entries are frozen and can no longer be undone, approved or rejected (DEL-25).
 
 ## `action-log/`
 
@@ -212,6 +214,53 @@ rescheduled_date: null
 ```
 
 Keys: `<front>/tick@<date>`, `<front>/<step id>`, `<situation>/deadline@<date>`, `<front>/pause@<date>`, `<front>/resume@<date>`, and `<key>~<date>` for a rescheduled one. A rule effect is applied through the action log under living world, every entry carrying the key (`occurrence`); an `unless` tick queues a `settle-an-unless` job (input `occurrence`) and an engaged situation's deadline a `propose-narrative-direction` job; a world-turn that applied anything queues one `propose-consequences` job (input `occurrences`, the keys). On the CLI, in the workspace: `secondchair world turn <date> [--since <date>]` (refused in a live session; `--since` on the first one), `secondchair world forecast <date>` (writes nothing), `secondchair world decide <key> accept|reject|reschedule [--date <date>]`, `secondchair world undo <key> --reason <reason>` (with its cascade; the keys return to the queue) and `secondchair world pause|resume <front> <date>`.
+
+## `capture/`
+
+Candidate facts (CAP-04..06), one YAML file each, named by the candidate's **key**: the first 16 hex digits of the SHA-256 of its Source path and quote, so a rerun of capture finds what it already holds and yields only what is new. The wrap job (`wrap-a-session`) submits them with `capture_candidate` ([tool registration](tool-registration.md#jobs)); a quote is short, so the workspace keeps quotes, never the Source (CAP-15).
+
+```yaml
+key: 3f2a9c0d1e4b5a6f
+session: 1
+job: 4
+source: /home/gm/notes/01-dry-bell.md   # one of the job's inputs
+locator: 01-dry-bell.md:7
+quote: Edda paid the party 12 silver coins for inspecting the bell chain.
+translation: null        # the quote in the campaign language, when the Source is in another
+statement: Edda Vale paid the party 12 silver coins.
+date: '0302-04-26'
+classification: certain  # certain, duplicate, contradiction, blocking_ambiguity, non_blocking_ambiguity
+reason: null             # for the GM, required unless certain
+entities: [e-1a2b3c4d]
+relation: null
+closes: []               # facts this played event ends
+known_by: [party, e-1a2b3c4d]
+duplicate_of: null       # the fact a duplicate repeats
+new_names: []            # names canon does not know yet
+inferred: false          # the statement goes beyond the quote: agent proposal, not played
+status: applied          # captured, applied, pending, duplicate, held, unattested, rejected or failed
+entries: [12, 13, 14]    # the action log entries it produced
+error: null
+fact: f-5e6f7a8b         # once applied, or the fact a duplicate repeats
+```
+
+- **No quote, no fact**: a candidate whose quote is empty or not in the Source, read from the job's input, is dropped and never stored.
+- **Near-miss** (CAN-23, CAP-12): the Core makes a candidate a `blocking_ambiguity` when its statement, or one of its `new_names`, is close to a canon name without being it (spelling similarity of 0.75 or more, case and a possessive `'s` ignored).
+- **Consolidation** (`consolidate_candidates`, CAP-10), under the wrap job, bound by the job's moment: a `certain` or `non_blocking_ambiguity` candidate is recorded with `record_fact` at the memory cell's level (`pending` when the cell holds it for approval), from its date, or opened by a played `record_event` closing `closes`; then `record_knowledge` for each of `known_by` on its date (CAP-08). Its origin is an `observation` with the quote and locator, ranked played (CAP-05), or a `job` origin carrying them, ranked agent_proposal, when `inferred`; a `translation` rides in the origin. A `duplicate` adds no fact: the candidate file is the added provenance, and its `known_by` learn the repeated fact. A `contradiction` or `blocking_ambiguity` is always a call on the GM, whatever the memory level: its `record_fact` is held at propose (`held`), the call's `message` saying why. The GM approves it to admit it as written, or rejects it (`rejected`). A candidate whose fact the table held for approval is `pending`; once the GM approves either, the wrap records its event and knowledge. A candidate whose actions fail part way is `failed`, its `error` and the entries already applied kept for the GM.
+- **New names** (CAP-12): an entity is created for a name in `new_names` only once two candidates attest it; until then the candidate is `unattested` (flagged, nothing applied) and is reconsidered at the next consolidation. A held candidate never creates an entity.
+
+## `time.yaml`
+
+Fictional time (CAP-14, CAL-14, LW-05): the current date, null until a wrap or a GM gesture sets it, and each session's interval.
+
+```yaml
+current_date: '0302-04-26'
+sessions:
+  1: {start: '0302-04-25', end: '0302-04-26', from: notes, wrapped: true}
+```
+
+- The wrap job reports the interval its notes state (`report_session_interval`, quoting them): `from: notes`.
+- `secondchair wrap <session> [--start <date>] [--end <date>]`, in an interactive terminal and outside a live session, is the GM's grouped round (CAP-13). It refuses while a wrap job for the session is queued or started, or a candidate is not consolidated. First come the session's open calls, held questions with contradictions leading, then pending proposals, which the GM answers with `secondchair approve` or `secondchair reject`, then, once none is open, what was applied with its action log entries, each undoable with `secondchair log undo`. It then settles the interval (the GM's dates over the notes', `from: gm`; it asks for `--end` when neither gives one), refuses an end before the current date, moves the current date to the end and queues the world-turn job (`world-turn`, under living world, inputs `until`, the new current date, and `since`, the session start, used only while `living-world.yaml` has no cursor) (LW-07). Its agent starts the Core's world-turn with `run_world_turn`; the GM may run `secondchair world turn` instead. A wrapped session is not wrapped again.
 
 ## `canon/entities/`
 

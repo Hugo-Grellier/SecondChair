@@ -13,7 +13,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute
 
-from secondchair.core import PROTOCOL_VERSION, delegation, jobs, machine, world
+from secondchair.core import PROTOCOL_VERSION, capture, delegation, jobs, machine, world
 from secondchair.core.delegation import DelegationError
 from secondchair.core.tools import RegistrationError, load_tools
 from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
@@ -60,9 +60,9 @@ def build_server(ws: Workspace) -> MCPServer:
             annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
             meta={"secondchair/gm_interaction": True},
         )
-    # A session taking and closing a queued job (ARC-29): job state, not canon.
-    # A settle-an-unless job's answer, which the Core applies through the action log, too.
-    for fn in [*jobs.agent_tools(ws), *world.agent_tools(ws)]:
+    # A session taking and closing a queued job (ARC-29): job state, not canon. A settle-an-unless
+    # job's answer and the wrap job's candidates (CAP-04) reach canon through the action log.
+    for fn in [*jobs.agent_tools(ws), *world.agent_tools(ws), *capture.agent_tools(ws)]:
         server.add_tool(
             fn,
             annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
