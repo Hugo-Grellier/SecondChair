@@ -19,11 +19,11 @@
 {"t": 1760000380000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
 {"t": 1760000390000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
 {"t": 1760000400000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 1, "players": ["alice0000000001"], "moment": "live-session", "seq": 2}
-{"t": 1760000500000, "stream": "semantic", "event": "window.open", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000500000, "stream": "semantic", "event": "window.open", "window": "secondchair-desk", "app": "DirectorsDesk", "document": null, "moment": "live-session", "seq": 2}
 {"t": 1760000501000, "stream": "input", "input": "click", "button": 0, "x": 5, "y": 5, "canvas": null, "target": "button[data-action=approve]", "moment": "live-session", "seq": 2}
-{"t": 1760000502000, "stream": "semantic", "event": "window.close", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
-{"t": 1760000503000, "stream": "semantic", "event": "window.open", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
-{"t": 1760000504000, "stream": "semantic", "event": "window.close", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
-{"t": 1760000505000, "stream": "semantic", "event": "window.open", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
-{"t": 1760000506000, "stream": "semantic", "event": "window.close", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000502000, "stream": "semantic", "event": "window.close", "window": "secondchair-desk", "app": "DirectorsDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000503000, "stream": "semantic", "event": "window.open", "window": "secondchair-desk", "app": "DirectorsDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000504000, "stream": "semantic", "event": "window.close", "window": "secondchair-desk", "app": "DirectorsDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000505000, "stream": "semantic", "event": "window.open", "window": "secondchair-desk", "app": "DirectorsDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000506000, "stream": "semantic", "event": "window.close", "window": "secondchair-desk", "app": "DirectorsDesk", "document": null, "moment": "live-session", "seq": 2}
 {"t": 1760000507000, "stream": "semantic", "event": "move", "token": "Scene.s.Token.t", "by": "secondchair", "moment": "live-session", "seq": 2}

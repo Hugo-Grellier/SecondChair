@@ -4,7 +4,7 @@ A closed list of deterministic detectors, no model: each reads one user's behavi
 records for one moment and returns its frictions, each citing its trace span (the `t` of its
 first and last record). Thresholds are in seconds, tunable per campaign under `frictions` in
 `workspace.yaml`. What SecondChair itself does is never the user's: the windows of its own
-applications (class names starting with `SecondChair`, the Director's Desk among them) and the
+applications (window ids starting with `secondchair-`, the Director's Desk's among them) and the
 semantic events recorded while it acts through the GM's client (`by: secondchair`) are left out,
 so a Desk interaction counts once, as the GM interaction the Core logs.
 """
@@ -97,7 +97,7 @@ def _own(records: list[dict]) -> list[dict]:
             for r in records
             if r.get("stream") in ("semantic", "input")
             and (r.get("by") != "secondchair" or _event(r) == "turn")
-            and not str(r.get("app") or "").startswith("SecondChair")
+            and not str(r.get("window") or "").startswith("secondchair-")
         ),
         key=lambda r: r["t"],
     )
