@@ -167,6 +167,10 @@ declare const ChatMessage: {
 };
 declare const Actor: { create(data: object): Promise<FoundryDoc> };
 
+declare namespace foundry.canvas.placeables {
+  const Token: { prototype: FoundryDoc };
+}
+
 declare namespace foundry.applications.api {
   class ApplicationV2 {
     constructor(options?: object);

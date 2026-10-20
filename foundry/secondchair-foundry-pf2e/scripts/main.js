@@ -1,6 +1,7 @@
 // secondchair-foundry-pf2e: the PF2e system adapter registers with the library through its hook
 // (ARC-08, ADR 0004). It refuses to start outside Foundry v14 + pf2e 8.x (RUL-02).
 import { visibilityOf } from "../../secondchair-foundry/scripts/capture.js";
+import { actOf } from "./acts.js";
 import {
   absalomDate,
   createAdapter,
@@ -383,9 +384,59 @@ const env = {
   }),
 };
 
+/**
+ * Trace this client's own pf2e acts for the friction detectors (TRC-02, TRC-03), each through
+ * the library's `api.trace`, which records nothing without this user's consent.
+ * @param {(event: string, data?: Record<string, unknown>) => void} trace
+ */
+function traceActs(trace) {
+  /** @param {ReturnType<typeof actOf>} act @param {unknown} item */
+  const started = (act, item) => act && trace(`pf2e.${act}`, { item: item ?? null });
+  // A check dialog starts its act when it opens; its message then counts it no more.
+  const opened = new WeakSet();
+  Hooks.on("renderCheckModifiersDialog", (/** @type {Doc} */ app) => {
+    if (opened.has(app)) return;
+    opened.add(app);
+    const { type, item, options } = app.context ?? {};
+    started(actOf({ type, item: item?.type, options: options ?? [] }), item?.uuid);
+  });
+  // Without a dialog, the roll's message or the card is the act.
+  Hooks.on("createChatMessage", (/** @type {Doc} */ msg, _options, userId) => {
+    const { context, origin } = msg.flags?.pf2e ?? {};
+    if (userId !== game.user.id || context?.skipDialog === false) return;
+    const options = [...(context?.options ?? []), ...(origin?.rollOptions ?? [])];
+    const reroll = context?.isReroll === true;
+    started(actOf({ type: context?.type, item: origin?.type, options, reroll }), origin?.uuid);
+  });
+  // A roll dialog closed without rolling (v1 Applications: close<ClassName> hooks).
+  Hooks.on("closeCheckModifiersDialog", (/** @type {Doc} */ app) => {
+    if (!app.isResolved) trace("pf2e.roll.cancel", { dialog: "check" });
+  });
+  Hooks.on("closeDamageModifierDialog", (/** @type {Doc} */ app) => {
+    if (!app.isRolled) trace("pf2e.roll.cancel", { dialog: "damage" });
+  });
+  // A token drag cancelled (Escape, right-click) rather than dropped: Foundry has no hook for it.
+  // ponytail: a movement stopped mid-way (`stopToken`) is not traced; walls and regions stop it
+  // too, so telling the user's own stop apart needs more than the hook.
+  const token = foundry.canvas.placeables.Token.prototype;
+  const cancel = token._onDragLeftCancel;
+  token._onDragLeftCancel = function (/** @type {Doc} */ event) {
+    const result = cancel.call(this, event);
+    if (result !== false && !event.interactionData?.dropped) {
+      trace("pf2e.move.cancel", { token: this.document?.uuid ?? null });
+    }
+    return result;
+  };
+}
+
 Hooks.once(
   "secondchairFoundryInit",
-  /** @param {{registerAdapter(adapter: import("./adapter.js").Adapter): void}} api */ (api) => {
+  /**
+   * @param {{
+   *   registerAdapter(adapter: import("./adapter.js").Adapter): void,
+   *   trace(event: string, data?: Record<string, unknown>): void,
+   * }} api
+   */ (api) => {
     const refusal = unsupported({
       generation: game.release.generation,
       system: game.system.id,
@@ -460,5 +511,6 @@ Hooks.once(
       });
     };
     api.registerAdapter(adapter);
+    traceActs(api.trace);
   },
 );
