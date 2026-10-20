@@ -15,13 +15,13 @@ The Core is the only MCP server agents see (ARC-03). A block (System extension, 
 ```toml
 # the block's pyproject.toml
 [project.entry-points."secondchair.tools"]
-pf2e = "secondchair_pf2e.tools:tools"
+pf2e = "secondchair_pf2e.tools:BLOCK"
 ```
 
-The entry point is a function called once when `serve` starts, with the served `Workspace`, returning the block's tools:
+The entry point names a `Block`: the protocol range the block supports and a function called once when `serve` starts, with the served `Workspace`, returning the block's tools:
 
 ```python
-from secondchair.core.tools import Tool
+from secondchair.core.tools import Block, Tool
 from secondchair.core.workspace import Workspace
 
 
@@ -38,7 +38,15 @@ def tools(ws: Workspace) -> list[Tool]:
             reversible=False,
         ),
     ]
+
+
+BLOCK = Block(protocol=("0.1.0", "0.2.0"), tools=tools)
 ```
+
+| `Block` field | Type | Rule |
+|---|---|---|
+| `protocol` | pair of strings | The protocol range the block supports (ARC-17): the lowest version it supports and the first it does not, each `X.Y.Z`. `serve` refuses the block unless the Core's protocol version lies in it. |
+| `tools` | function | Called with the served `Workspace`, returns the block's `Tool`s. |
 
 | `Tool` field | Type | Rule |
 |---|---|---|
@@ -47,7 +55,7 @@ def tools(ws: Workspace) -> list[Tool]:
 | `delegated_action` | bool | `true` for a delegated action, `false` for a read. |
 | `reversible` | bool | Whether the action can be undone (DEL-25). A read declares `true`. |
 
-All three declarations are required. A registration missing one, with an unknown responsibility or a non-boolean flag, a duplicate name, or an entry point that raises, stops `serve` before it listens, with a message naming the block.
+All three declarations are required. An entry point naming no `Block`, a protocol range not holding the Core's version, a registration missing a declaration, with an unknown responsibility or a non-boolean flag, a duplicate name, or an entry point that raises, stops `serve` before it listens, with a message naming the block.
 
 ## Delegated actions
 
@@ -188,4 +196,4 @@ The Core's own reads, all under memory: `campaign_info` returns the campaign lan
 
 ## Versioning
 
-The protocol version is semver and versions this contract and the wire contracts that follow (ARC-17a); before v4.0 a breaking change is free. The Foundry modules' version is checked at the bridge handshake ([foundry-bridge.md](foundry-bridge.md)); how a Python block declares its supported range is still open (#77).
+The protocol version is semver and versions this contract and the wire contracts that follow (ARC-17a); before v4.0 a breaking change is free. The Foundry modules' version is checked at the bridge handshake ([foundry-bridge.md](foundry-bridge.md)); a Python block declares the range it supports on its `Block`, and `serve` refuses an incompatible block at start, before it listens (#77). That range also covers the block's other entry points (connectors, rules checks, calendars, playbooks), which ship in the same distribution.

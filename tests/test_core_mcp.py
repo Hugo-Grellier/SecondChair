@@ -10,15 +10,17 @@ from mcp import Client
 from secondchair.cli import main
 
 BLOCK = """
-from secondchair.core.tools import Tool
+from secondchair.core.tools import Block, Tool
 
 def roll_initiative(creature: str) -> str:
     "Roll initiative for a creature."
     return creature
 
-def tools(ws):
+def _tools(ws):
     return [Tool(fn=roll_initiative, responsibility="rules_and_combat",
                  delegated_action=True, reversible=False)]
+
+tools = Block(protocol=("0.1.0", "0.2.0"), tools=_tools)
 """
 
 
@@ -103,13 +105,13 @@ def test_serve_refuses_an_incomplete_registration(
     site = install_block(
         "badblock",
         f"""
-        from secondchair.core.tools import Tool
+        from secondchair.core.tools import Block, Tool
 
         def act() -> None:
             "Act."
 
-        def tools(ws):
-            return [Tool(fn=act, {declaration})]
+        tools = Block(protocol=("0.1.0", "0.2.0"),
+                      tools=lambda ws: [Tool(fn=act, {declaration})])
         """,
     )
     monkeypatch.syspath_prepend(str(site))
@@ -120,4 +122,40 @@ def test_serve_refuses_an_incomplete_registration(
     assert main(["serve", str(ws)]) == 1
     err = capsys.readouterr().err
     assert "badblock" in err
+    assert message in err
+
+
+@pytest.mark.parametrize(
+    ("registration", "message"),
+    [
+        ('Block(protocol=("0.2.0", "0.3.0"), tools=lambda ws: [])', "0.2.0"),
+        ('Block(protocol=("0.0.1", "0.1.0"), tools=lambda ws: [])', "0.1.0"),
+        ('Block(protocol=("0.1", "0.2.0"), tools=lambda ws: [])', "0.1"),
+        ("lambda ws: []", "protocol range"),
+    ],
+)
+def test_serve_refuses_a_block_with_an_incompatible_protocol_range(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    install_block: InstallBlock,
+    registration: str,
+    message: str,
+) -> None:
+    site = install_block(
+        "oldblock",
+        f"""
+        from secondchair.core.tools import Block
+
+        tools = {registration}
+        """,
+    )
+    monkeypatch.syspath_prepend(str(site))
+    monkeypatch.delitem(sys.modules, "oldblock", raising=False)
+    ws = tmp_path / "campaign"
+    main(["init", str(ws), "--language", "fr", "--calendar", "absalom"])
+
+    assert main(["serve", str(ws)]) == 1
+    err = capsys.readouterr().err
+    assert "oldblock" in err
     assert message in err
