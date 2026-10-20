@@ -21,9 +21,12 @@ def create_entity(
     aliases: list[str] | None = None,
     official_reference: dict[str, str | None] | None = None,
     description: str = "",
+    kind: str | None = None,
 ) -> Change:
-    """Create a canon entity: identity only (names, aliases, an optional official reference and a
-    player-facing description with no truth value). What is true about it is stated by facts.
+    """Create a canon entity: identity only (names, aliases, an optional kind, an optional
+    official reference and a player-facing description with no truth value). What is true about
+    it is stated by facts. `kind` is pc, npc, faction, place, item or other; a pc is never a
+    knower.
     `official_reference` is {"key": the System extension's stable English key (PF2e: system.slug,
     else flags.babele.originalName), "pack": the compendium pack, only when the key collides};
     never the translated name, which goes in `names`."""
@@ -34,6 +37,7 @@ def create_entity(
         "id": entity_id,
         "names": names,
         "aliases": aliases or [],
+        "kind": index.entity_kind(kind),
         "official_reference": (
             None if official_reference is None else index.official_reference(official_reference)
         ),

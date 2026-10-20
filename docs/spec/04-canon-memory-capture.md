@@ -5,7 +5,7 @@ Decisions: [ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md), [ADR 0008](..
 ## Canon model
 
 - **CAN-01** The **fact** is the unit of canon: one statement about one or more entities, written in the campaign language, with an optional typed **relation**, a validity in fictional time, its provenance and its authority rank.
-- **CAN-02** An **entity** carries only identity: a stable id, its names and aliases, an optional **official reference**, and a player-facing description with no truth value. The GM's truth about it (agenda, secrets, deceptions) is facts the party does not know.
+- **CAN-02** An **entity** carries only identity: a stable id, its names and aliases, an optional **kind** (pc, npc, faction, place, item or other; an entity without one stays valid until the kind is set), an optional **official reference**, and a player-facing description with no truth value. The GM's truth about it (agenda, secrets, deceptions) is facts the party does not know.
 - **CAN-03** Relation types come from a closed Core list (member of, lives in, owns, knows, …) that a System extension can extend.
 - **CAN-04** Facts are **bitemporal**:
   - fictional validity from a start date to an optional end, empty while the fact holds; dates are campaign-calendar dates, partial (`year-month`, `year`) allowed ([05](05-living-world-calendar.md));
@@ -24,7 +24,7 @@ Decisions: [ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md), [ADR 0008](..
 
 ## Knowledge
 
-- **CAN-13** **Knowers** are the party as a whole, each NPC and each faction. Individual PCs are not knowers.
+- **CAN-13** **Knowers** are the party as a whole, each NPC and each faction. Individual PCs are not knowers: knowledge recorded for an entity of kind pc is refused.
 - **CAN-14** A knower knows, believes or suspects a fact, with when it learned it (fictional date and event). The model is closed-world, plus inheritance from the knower's factions and the **common knowledge** of the places it lives in.
 - **CAN-15** A **belief** is a fact recorded as never true, which a knower believes.
 - **CAN-16** Content written for an audience (an NPC line in an acting cue, a disclosure, an entity description) MUST cite the ids of the facts it uses. The Core refuses it if the audience does not know a cited fact, refuses unknown ids, and scans it for forbidden strings (secret names, canaries). Paraphrased leaks are not blocked; the test bench measures them. A disclosure is the exception: its cited facts teach the party (CAN-17), so the party need not know them beforehand. No knower bounds a disclosure the GM authored: its cited facts MUST exist in canon, be true and carry no canary, and the GM's authenticated approval (or a lifted hold, DEL-09a) is the gate. When an NPC (the acting entity) discloses, it MUST know every fact it cites.
