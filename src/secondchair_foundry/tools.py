@@ -167,7 +167,9 @@ def _check(key: str, desired: dict[str, Any]) -> None:
     for item in desired["items"]:
         _check_fields(item["key"], item["data"])
         _check_placed(item["key"], item["data"])
-        if item["type"] == "Token" and any(p[0] == "delta" for p in _paths(item["data"])):
+        if item["type"] == "Token" and any(
+            p[0] in ("delta", "actorData") for p in _paths(item["data"])
+        ):
             raise ValueError(f"{item['key']}: no `delta` in prep: a token is its actor's.")
     _check_fields("_scene", desired["scene"])
     if placed := sorted({str(f).split(".")[0] for f in desired["scene"]} & set(SCENE_EMBEDDED)):

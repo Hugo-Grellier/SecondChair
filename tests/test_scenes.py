@@ -117,6 +117,10 @@ def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F
             {**CAVE, "items": [{"key": "g", "type": "Token", "data": {"delta": {"name": "x"}}}]},
             "delta",
         ),
+        (
+            {**CAVE, "items": [{"key": "g", "type": "Token", "data": {"actorData": {"a": 1}}}]},
+            "delta",
+        ),
         *(
             ({**CAVE, "items": [{"key": "r", "type": "Region", "data": data}]}, error)
             for data, error in [

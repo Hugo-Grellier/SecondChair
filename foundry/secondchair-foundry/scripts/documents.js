@@ -8,6 +8,7 @@ import {
   canonical,
   local,
   MODULE,
+  RESERVED,
   ours,
   reconcile,
   sha,
@@ -124,18 +125,6 @@ function unowned(value, expand) {
   return Object.fromEntries(entries.map(([k, v]) => [k, unowned(v, expand)]));
 }
 
-/** The module's identity flags, which only reconciliation writes: prep may not forge them. */
-export const RESERVED = [
-  "scene",
-  "document",
-  "created",
-  "spec",
-  "shape",
-  "local",
-  "source",
-  "base",
-  "key",
-];
 
 /** `fields` with only the module's own flags, its identity flags left out.
  * @param {Data} fields @returns {Data} */
@@ -221,8 +210,8 @@ export function guardedScene(desired, { clean, expand }) {
   const items = desired.items.map((item) => {
     const data = guard(item.key, item.data);
     // A token's actor delta is play state: prep makes a token from its actor, unchanged.
-    if (item.type === "Token" && "delta" in data)
-      throw new Error(`${item.key}: no \`delta\` in prep.`);
+    if (item.type === "Token" && ("delta" in data || "actorData" in data))
+      throw new Error(`${item.key}: no \`delta\` (nor its old name \`actorData\`) in prep.`);
     if ("behaviors" in data) {
       const list = data.behaviors;
       const plain = (/** @type {any} */ b) => b && typeof b === "object" && !Array.isArray(b);

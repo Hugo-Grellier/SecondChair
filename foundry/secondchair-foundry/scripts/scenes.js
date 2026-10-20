@@ -219,8 +219,26 @@ export const ours = (fields) => ({ flags: { [MODULE]: fields } });
  * @param {Data} data @param {Data} fields */
 export const withOurs = (data, fields) => ({
   ...data.flags,
-  [MODULE]: { ...data.flags?.[MODULE], ...fields },
+  [MODULE]: { ...unreserved(data.flags?.[MODULE]), ...fields },
 });
+
+/** The module's identity flags, which only reconciliation writes: prep, and a document a
+ * prepared one is made from, may not forge them. */
+export const RESERVED = [
+  "scene",
+  "document",
+  "created",
+  "spec",
+  "shape",
+  "local",
+  "source",
+  "base",
+  "key",
+];
+
+/** @param {Data | undefined} flags */
+const unreserved = (flags) =>
+  Object.fromEntries(Object.entries(flags ?? {}).filter(([k]) => !RESERVED.includes(k)));
 
 /**
  * Realise one desired scene: create it, or reconcile it with what the VTT holds now.

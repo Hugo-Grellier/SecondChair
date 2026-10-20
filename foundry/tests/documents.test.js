@@ -627,6 +627,10 @@ test("prep keeps only the module's flags, never its identity ones, nor any updat
     () => guardedScene(scene([{ key: "g", type: "Token", data: { delta: { name: "x" } } }]), deps),
     /delta/,
   );
+  assert.throws(
+    () => guardedScene(scene([{ key: "g", type: "Token", data: { actorData: { a: 1 } } }]), deps),
+    /delta/,
+  );
   for (const type of ["modifyMovementCost", "pauseGame"]) {
     const region = { key: "r", type: "Region", data: { behaviors: [{ type }] } };
     assert.equal(guardedScene(scene([region]), deps).items[0].data.behaviors[0].type, type);

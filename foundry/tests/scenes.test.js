@@ -7,6 +7,7 @@ import {
   realise,
   reconcile,
   summary,
+  withOurs,
   withoutPlayed,
 } from "../secondchair-foundry/scripts/scenes.js";
 import { validMessage as valid } from "./schema.js";
@@ -364,4 +365,9 @@ test("before Foundry 14 the map stays the scene's background", async () => {
   await realiseChecked(w, cave({ scene: { name: "Cave", background: { src: "maps/cave.webp" } } }));
   assert.deepEqual(w.scenes[0].source.background, { src: "maps/cave.webp" });
   assert.equal(w.scenes[0].source.levels, undefined);
+});
+
+test("a base's own identity flags in our namespace are never kept", () => {
+  const flags = withOurs({ flags: { [MODULE]: { key: "forged", spec: "x", note: 1 } } }, { key: "k" });
+  assert.deepEqual(flags[MODULE], { note: 1, key: "k" });
 });
