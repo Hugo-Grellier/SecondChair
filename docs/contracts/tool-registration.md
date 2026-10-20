@@ -156,8 +156,8 @@ The "wrap a session" job adds three tools, served the same way (CAP-04..13; [wor
 
 | Tool | Does |
 |---|---|
-| `capture_candidate(job, source, locator, quote, statement, date, classification, reason, entities, relation, closes, known_by, duplicate_of, new_names, inferred, translation)` | Submits one candidate fact quoting `source`, one of the started job's inputs, verbatim. Returns its `key` and `captured`, `seen` (already captured: a rerun) or `dropped` (no quote, or a quote not in the Source). |
-| `report_session_interval(job, start, end, quote)` | Records the session's fictional interval as a Source of the job states it, quoted (CAL-14). |
+| `capture_candidate(job, source, locator, quote, statement, date, classification, reason, entities, relation, closes, known_by, duplicate_of, new_names, inferred, translation)` | Submits one candidate fact quoting `source`, one of the started job's inputs, verbatim. Returns its `key` and `captured`, `seen` (already captured: a rerun) or `dropped` (no quote, or a quote not in the Source). In the job's `transcript`, `locator` is `<file>:<line>` and the quote must be in that segment's `text`; the candidate records the segment's `speaker`. |
+| `report_session_interval(job, start, end, quote, locator)` | Records the session's fictional interval as a Source of the job states it, quoted (CAL-14). From the job's `transcript`, `locator` (`<file>:<line>`) names the segment whose decoded `text` holds the quote. |
 | `consolidate_candidates(job)` | Routes the session's captured candidates through the Core's delegated actions, under the job; returns each candidate's outcome. |
 | `run_world_turn(job)` | For a started `world-turn` job, which a wrap queues (LW-07): runs the Core's world-turn up to the job's `until` and returns the occurrences recorded. |
 

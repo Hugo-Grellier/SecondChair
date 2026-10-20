@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from secondchair.cli import main
-from secondchair.core import workspace
+from secondchair.core import capture, jobs, workspace
 from secondchair.core.workspace import Workspace
 
 SCHEMA = json.loads(
@@ -202,6 +202,45 @@ def test_any_engines_attributed_transcript_is_accepted(ws: Workspace, tmp_path: 
         "session": 1,
         "from": [],
     }
+
+
+def test_a_referenced_transcript_is_given_to_the_session_s_queued_wrap_job(
+    ws: Workspace, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    notes = tmp_path / "notes.md"
+    queued = capture.queue_wrap(ws, {"session": "1", "notes": str(notes)})
+    first = write_lines(
+        tmp_path / "other/s1.jsonl",
+        {"speaker": "gm_hugo", "start": 0, "end": 1.5, "text": "Bonsoir."},
+        {"speaker": "alice_42", "start": 2, "end": 3, "text": "Salut."},
+    )
+    assert transcribe(ws, "--from", str(first)) == 0
+    assert f'Job {queued["id"]} "wrap a session" given it' in capsys.readouterr().out
+    [job] = jobs.pending(ws)
+    assert job["id"] == queued["id"]
+    assert job["inputs"] == {"session": "1", "notes": str(notes), "transcript": str(first)}
+
+    jobs.start(ws, job["id"], {"host": "h", "model": "m", "effort": "e"}, manual=True)
+    jobs.end(ws, job["id"])
+    second = tmp_path / "other/s1b.jsonl"
+    second.write_text(first.read_text())
+    assert transcribe(ws, "--from", str(second)) == 0
+    [fresh] = jobs.pending(ws)  # the wrap was done: a new one, the notes carried over
+    assert "queued on it" in capsys.readouterr().out
+    assert fresh["playbook"] == "wrap-a-session"
+    assert fresh["inputs"] == {"session": "1", "transcript": str(second), "notes": str(notes)}
+
+
+def test_a_transcript_with_no_wrap_job_queues_one(
+    ws: Workspace, tracks: list[Path], tmp_path: Path
+) -> None:
+    assert transcribe(ws, f"gm_hugo={tracks[0]}", f"alice_42={tracks[1]}") == 0
+    [job] = jobs.pending(ws)
+    out = tmp_path / "recordings/session-1.jsonl"
+    assert (job["playbook"], job["inputs"]) == (
+        "wrap-a-session",
+        {"session": "1", "transcript": str(out)},
+    )
 
 
 @pytest.mark.parametrize(
