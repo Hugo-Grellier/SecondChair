@@ -378,6 +378,35 @@ def test_a_believed_or_future_state_fact_is_not_current_until_its_date(ws: Works
     assert flood in world.state(ws)["situations"]
 
 
+def test_unless_ticks_settled_out_of_order_move_the_one_clock(ws: Workspace) -> None:
+    silt, _ = front(ws, "Silt Choke", unless="the bypass is open")
+    closed = fact(ws, "The bypass is closed.", valid_from=DAY0)
+    turn(ws, "4725-01-15")
+    k1, k2 = f"{silt}/tick@4725-01-08", f"{silt}/tick@4725-01-15"
+
+    world.settle_unless(ws, k2, False, [closed], unless_job(ws, k2))
+    world.settle_unless(ws, k1, False, [closed], unless_job(ws, k1))  # applied after a later one
+
+    assert clock(ws, silt) == 2  # #205 review: the head of the chain, not a second open clock
+
+
+def test_a_front_starting_inside_the_window_ticks_from_its_start(ws: Workspace) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    rule = world._current(ws)[tolls]["front"]
+    act(
+        ws,
+        "correct_fact",
+        fact=rule["id"],
+        statement=rule["statement"],
+        entities=[],
+        origin=GM,
+        state=rule["state"],
+        valid_from="4725-01-10",
+    )
+
+    assert turn(ws, "4725-01-22") == [f"{tolls}/tick@4725-01-15", f"{tolls}/tick@4725-01-22"]
+
+
 def test_the_clock_stops_at_its_capacity(ws: Workspace) -> None:
     tolls, _ = front(ws, "Toll Squeeze", capacity=2)
     assert len(turn(ws, "4725-03-01")) == 2

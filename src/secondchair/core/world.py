@@ -121,11 +121,12 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
     return {**state, "value": value}, refs
 
 
-def _current(ws: Workspace, at: str | None = None) -> dict[str, dict[str, Any]]:
+def _current(ws: Workspace, at: str | None = None, head: bool = False) -> dict[str, dict[str, Any]]:
     """Entity id -> its state facts valid on `at`, by default the cursor (#170): one per key, a
-    list of agenda steps. A belief (`never_true`) never is; before the first world-turn, the open
-    ones are."""
-    at = at or cursor(ws)
+    list of agenda steps. A belief (`never_true`) never is. `head`, or before the first
+    world-turn: the open ones, whatever their dates, the head of each chain an effect transforms
+    (an occurrence may be applied after a later one, LW-17)."""
+    at = None if head else at or cursor(ws)
     facts = (
         index.search_facts(ws, at=at)
         if at
@@ -146,6 +147,12 @@ def _current(ws: Workspace, at: str | None = None) -> dict[str, dict[str, Any]]:
         else:
             mine[key] = f
     return found
+
+
+def _started(ws: Workspace, f: dict, date: str) -> bool:
+    """Whether fact `f` holds from `date` on: it has started by then."""
+    start = f["valid_from"]
+    return start is None or index.date_key(ws.calendar, start) <= index.date_key(ws.calendar, date)
 
 
 def state(ws: Workspace) -> dict[str, dict]:
@@ -239,7 +246,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
             day = cal.add(rule["anchor"], f"{every}d")
             while room > 0 and at(day) <= at(until):
                 key = f"{entity}/tick@{day}"
-                if at(day) > at(since) and key not in used:
+                if at(day) > at(since) and key not in used and _started(ws, s[FRONT], day):
                     n = min(rule["ticks"], room)
                     room -= n
                     cls = "rule" if rule["unless"] is None else "derived"
@@ -454,8 +461,10 @@ def _evolution(
 def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change]:
     """The files one occurrence writes; `_Blocked` when it no longer applies or contradicts
     played canon (LW-09)."""
-    s = _current(ws, record["date"]).get(record["entity"], {AGENDA: []})
+    s = _current(ws, head=True).get(record["entity"], {AGENDA: []})
     key, date, entity = record["key"], record["date"], record["entity"]
+    if FRONT in s and not _started(ws, s[FRONT], date):
+        raise _Blocked(f"{entity} only becomes a front on {s[FRONT]['valid_from']}")
     names = {e["id"]: e["names"][0] for e in index.search_entities(ws)}
     if record["kind"] == "tick":
         if FRONT not in s:
@@ -549,7 +558,7 @@ def _apply(
 def _cascade(ws: Workspace, tick: dict, approve: tuple[str, bool] | None, job: int | None) -> None:
     """The threshold steps a tick crosses, dated at the tick, each once (T5): new ones, and
     those an undo returned to the queue with it."""
-    s = _current(ws, tick["date"]).get(tick["entity"], {AGENDA: []})
+    s = _current(ws, head=True).get(tick["entity"], {AGENDA: []})
     clock = s[CLOCK]["state"]["value"] if CLOCK in s else 0
     known = {r["key"]: r for r in occurrences(ws)}
     for a in s[AGENDA]:
