@@ -238,7 +238,7 @@ def _describe(job: dict) -> str:
 def _jobs_command(args: argparse.Namespace) -> int:
     ws = workspace.load(args.workspace)
     if args.job_command == "queue":
-        job = runner.queue(ws, args.playbook, dict(args.input), args.tier)
+        job = runner.queue(ws, args.playbook, dict(args.input), args.tier, args.entity)
         print(f"Queued job {job['id']} ({job['playbook']}, tier {job['tier']}).")
         return 0
     if args.job_command is None:
@@ -391,6 +391,11 @@ def main(argv: list[str] | None = None) -> int:
         "--input", type=_input, action="append", default=[], help="a job input, name=value"
     )
     queue_cmd.add_argument("--tier", choices=jobs.TIERS, help="override the playbook's tier")
+    queue_cmd.add_argument(
+        "--entity",
+        action="append",
+        help="an entity id the job is about; its vocabulary is then theirs (default: all)",
+    )
     run_cmd = jobs_sub.add_parser(
         "run", parents=[sub_workspace], help="start queued jobs with the configured runner"
     )

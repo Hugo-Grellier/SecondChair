@@ -12,6 +12,7 @@ canary, no forbidden string, and, for the party at start, none of the forbidden 
 import json
 from typing import Any
 
+import py3langid
 import yaml
 
 from secondchair.core import index, knowledge
@@ -32,10 +33,32 @@ KNOWLEDGE_PROBES = ("edda-knowledge", "circle-knowledge", "common-knowledge", "b
 PROBES = FACT_PROBES + KNOWLEDGE_PROBES
 
 
+def language_drift(ws: Workspace) -> dict:
+    """Language drift (10-success-bench.md; VIS-05): the share, in characters, of the generated
+    text in canon (fact statements, event descriptions, entity descriptions) that a deterministic
+    language detector does not find in the campaign language. Measured, never blocked (CAN-23)."""
+    expected = ws.campaign_language.split("-")[0].lower()
+    texts = [(f["id"], f["statement"]) for f in index.search_facts(ws, include_retconned=True)]
+    texts += [(e["id"], e["description"]) for e in index.search_events(ws)]
+    texts += [(e["id"], e["description"]) for e in index.search_entities(ws)]
+    total = off = 0
+    drifted = []
+    for doc_id, text in texts:
+        if not text.strip():
+            continue
+        found, _ = py3langid.classify(text)
+        total += len(text)
+        if found != expected:
+            off += len(text)
+            drifted.append({"id": doc_id, "language": found})
+    return {"share": off / total if total else 0.0, "drifted": drifted}
+
+
 def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
     """Pass or fail per probe, the continuity errors (refused contradictions with canon,
-    rejections and undos for `contradiction`, failed probes) and the leaks. `passed` is false on
-    any leak, an invariant (10-success-bench.md); the rest is reported, not gated (MET-05a)."""
+    rejections and undos for `contradiction`, failed probes), the leaks and the language drift.
+    `passed` is false on any leak, an invariant (10-success-bench.md); the rest is reported, not
+    gated (MET-05a)."""
     labels = _labels(ws, gold)
     expected = {p["id"]: p["expected"] for p in gold["probes"]}
     probes = {
@@ -58,6 +81,7 @@ def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
             "failed_probes": failed,
             "total": refused + gm + failed,
         },
+        "language_drift": language_drift(ws),
     }
 
 

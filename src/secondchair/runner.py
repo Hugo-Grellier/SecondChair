@@ -64,8 +64,15 @@ def playbook(name: str) -> dict[str, str]:
     return {k.removeprefix(prefix): v for k, v in front["metadata"].items() if k.startswith(prefix)}
 
 
-def queue(ws: Workspace, name: str, inputs: dict[str, str], tier: str | None = None) -> dict:
-    """Queue a job for a playbook, at the playbook's tier unless the job overrides it."""
+def queue(
+    ws: Workspace,
+    name: str,
+    inputs: dict[str, str],
+    tier: str | None = None,
+    entities: list[str] | None = None,
+) -> dict:
+    """Queue a job for a playbook, at the playbook's tier unless the job overrides it, with the
+    vocabulary of the given entities (default: the whole campaign vocabulary)."""
     meta = playbook(name)
     expected = sorted(i.strip() for i in meta["inputs"].split(",") if i.strip())
     if sorted(inputs) != expected:
@@ -77,6 +84,7 @@ def queue(ws: Workspace, name: str, inputs: dict[str, str], tier: str | None = N
         expected_output=meta["expected-output"],
         responsibility=meta["responsibility"],
         tier=tier or meta["tier"],
+        entities=entities,
     )
 
 

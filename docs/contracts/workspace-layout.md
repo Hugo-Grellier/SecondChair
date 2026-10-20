@@ -168,6 +168,10 @@ official_reference: null
 Un prêtre voûté.
 ```
 
+`official_reference` (CAN-19) is null, or `{key, pack}`: `key` is the stable English key the System extension provides (PF2e: `system.slug`, falling back to `flags.babele.originalName`), never the translated name, which only ever goes in `names`; `pack` is the compendium pack id when the key collides across packs, null otherwise. The Core refuses a key that is not ASCII, or any other field. Example: `official_reference: {key: goblin-warrior, pack: null}` on an entity named `Gobelin guerrier`.
+
+The campaign vocabulary (CAN-22) is derived from these files: every entity's names and aliases. A job carries the vocabulary of the entities it is about (`secondchair jobs queue --entity <id>`, repeatable), or the whole vocabulary when none is given.
+
 ## `canon/facts/`
 
 A fact is one statement about one or more entities, in the campaign language (CAN-01): YAML front matter, then the statement.

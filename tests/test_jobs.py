@@ -16,7 +16,7 @@ from mcp import Client
 
 from secondchair import runner
 from secondchair.cli import main
-from secondchair.core import jobs, workspace
+from secondchair.core import index, jobs, workspace
 from secondchair.core.server import build_server
 from secondchair.core.tools import RESPONSIBILITIES
 from secondchair.core.workspace import Workspace
@@ -287,6 +287,20 @@ def test_the_runner_prompt_names_the_job_and_its_contract(ws: Workspace) -> None
     assert re.search(r"job 1\b", text) and PLAYBOOK in text and "finish_job" in text
     contract = json.loads(text.split("\n", 1)[1])
     assert "attempts" not in contract and contract["campaign_language"] == "fr"
+
+
+def test_a_job_carries_the_vocabulary_of_the_entities_it_is_about(ws: Workspace) -> None:
+    for names, aliases in ((["Frère Ezren"], ["Ezren"]), (["Ada Fen"], [])):
+        call(ws, "create_entity", {"names": names, "aliases": aliases, "agent": "gm"})
+    [ezren] = [e["id"] for e in index.search_entities(ws, "Ezren")]
+    root, bible = str(ws.root), f"bible={BIBLE}"
+
+    assert main(["jobs", "-w", root, "queue", PLAYBOOK, "--input", bible, "--entity", ezren]) == 0
+    assert main(["jobs", "-w", root, "queue", PLAYBOOK, "--input", bible]) == 0
+    assert main(["jobs", "-w", root, "queue", PLAYBOOK, "--input", bible, "--entity", "e-x"]) == 1
+
+    assert job(ws, 1)["vocabulary"] == ["Ezren", "Frère Ezren"]
+    assert job(ws, 2)["vocabulary"] == ["Ada Fen", "Ezren", "Frère Ezren"]
 
 
 # Playbooks (ARC-21, ARC-25, PKG-19)
