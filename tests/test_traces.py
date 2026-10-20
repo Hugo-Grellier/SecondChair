@@ -73,8 +73,18 @@ def test_traces_are_kept_outside_the_workspace_tagged_by_moment(
         ("input", "prep", 1),
         ("semantic", "prep", 1),
     ]
-    files = [p for p in workspace.rglob("*") if p.is_file()]
-    assert not [p for p in files if ALICE.encode() in p.read_bytes()]
+    assert not [p for p in workspace.rglob("*") if ALICE.encode() in _bytes(p)]
+
+
+def _bytes(path: Path) -> bytes:
+    """A workspace file's bytes; empty for a directory or a file gone since the listing.
+
+    A derived-index rebuild may delete its temporary SQLite journal between rglob and the read.
+    """
+    try:
+        return path.read_bytes()
+    except FileNotFoundError, IsADirectoryError:
+        return b""
 
 
 def test_erasing_removes_only_that_users_traces(
