@@ -28,8 +28,11 @@ function world() {
           : { kind: "slot", key: `entry1.slot${rank}` },
     conditions: (actor) => ({ ...actor.conditions }),
     evidence: () => ({ "pf2e-visioner": { cover: { t2: "standard" } } }),
+    driver: () => driver.id,
   };
-  return { shaman, sella, tracer: createTracer(env) };
+  /** @type {{id: string | null}} the active turn driver */
+  const driver = { id: null };
+  return { shaman, sella, driver, tracer: createTracer(env) };
 }
 
 /** @param {Record<string, any>} fields */
@@ -158,6 +161,23 @@ test("a condition change carries the conditions before, once seen, and after", (
   const second = tracer.conditions(shaman, "gm");
   assert.ok(validOutcome(second), JSON.stringify(validOutcome.errors));
   assert.deepEqual(second.conditions, { before: { frightened: 2 }, after: { frightened: 1 } });
+});
+
+test("an outcome made while a turn driver is active names it: the GM's act, run through it", () => {
+  const { shaman, tracer, driver } = world();
+  const strike = message({
+    actor: shaman,
+    flags: { pf2e: { context: { type: "attack-roll", outcome: "success" } } },
+    rolls: [{ total: 22, dice: [{ faces: 20, total: 14 }] }],
+  });
+  assert.equal(tracer.message(strike)?.turn_driver, undefined);
+  driver.id = "pf2e-combater";
+  const driven = tracer.message(strike);
+  assert.ok(validOutcome(driven), JSON.stringify(validOutcome.errors));
+  assert.equal(driven?.turn_driver, "pf2e-combater");
+  assert.equal(driven?.user, "gm");
+  shaman.conditions = { frightened: 1 };
+  assert.equal(tracer.conditions(shaman, "gm").turn_driver, "pf2e-combater");
 });
 
 test("a message with no pf2e outcome is no trace, and unreadable IWR is none", () => {

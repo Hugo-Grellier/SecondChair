@@ -1,7 +1,7 @@
 // secondchair-foundry-pf2e: the PF2e system adapter registers with the library through its hook
 // (ARC-08, ADR 0004). It refuses to start outside Foundry v14 + pf2e 8.x (RUL-02).
 import { visibilityOf } from "../../secondchair-foundry/scripts/capture.js";
-import { absalomDate, createAdapter, RULES_SETTINGS, unsupported } from "./adapter.js";
+import { absalomDate, createAdapter, RULES_SETTINGS, turnDriver, unsupported } from "./adapter.js";
 import { createExecutor } from "./executor.js";
 import { createTracer, DEGREES } from "./outcomes.js";
 
@@ -47,8 +47,12 @@ function resources(actor) {
   return found;
 }
 
+/** The active turn driver's module id, or null (RUL-11). */
+const driver = () => turnDriver(env.modules());
+
 /** @type {import("./outcomes.js").Env} */
 const traced = {
+  driver,
   actor: (uuid) => fromUuidSync(uuid, { strict: false }),
   hp: (actor) => ({
     value: Number(actor.system?.attributes?.hp?.value ?? 0),
@@ -334,6 +338,7 @@ const combat = {
     }
   },
   settle: () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS)),
+  driver,
   emit: (event) => emitted(event),
 };
 

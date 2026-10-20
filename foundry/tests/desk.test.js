@@ -141,6 +141,16 @@ test("the active NPC's acting cue offers I voice this one, then Hand back", () =
   assert.match(none, /No acting cue/);
 });
 
+test("while a turn driver is active the acting cue shows no agent's line", () => {
+  const cue = /** @type {NonNullable<DeskState["cue"]>} */ (STATE.cue);
+  const driven = { ...STATE, turn_driver: "pf2e-combater", cue: { ...cue, line: null } };
+  assert.ok(valid(driven), JSON.stringify(valid.errors));
+  const html = deskHtml({ isGM: true, state: driven, pile: null, ceiling: "propose" });
+  assert.doesNotMatch(html, /only rings/);
+  assert.match(html, /pf2e-combater runs the GM creatures' turns: agents stay silent/);
+  assert.match(html, /data-gesture="voice" data-entity="e-1"/);
+});
+
 test("I voice this one relays the NPC it is for", async () => {
   const { d, sent } = desk();
   await d.gesture("voice", { entity: "e-1" });

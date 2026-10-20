@@ -190,6 +190,21 @@ def test_the_desk_shows_the_active_npcs_acting_cue(ws: Workspace) -> None:
     assert found["does_not_know"] == [{"id": relay, "statement": "A cracked relay rings the bell."}]
 
 
+def test_while_a_turn_driver_is_active_the_cue_shows_no_agent_proposal(ws: Workspace) -> None:
+    tovan, bell, _relay = npc_who_knows(ws)
+    cue(ws, tovan, "It only rings when the nights are dry.", [bell])
+
+    driven = desk.state(ws, "pf2e-combater")
+    jsonschema.validate(driven, BRIDGE)
+    assert driven["turn_driver"] == "pf2e-combater"
+    assert driven["cue"]["line"] is None  # agents stay silent (RUL-12)
+    assert (driven["cue"]["npc"], driven["cue"]["voiced"]) == (tovan, False)
+
+    found = state(ws)
+    assert found["turn_driver"] is None
+    assert found["cue"]["line"] == "It only rings when the nights are dry."
+
+
 def test_a_line_citing_a_fact_the_npc_does_not_know_is_refused(ws: Workspace) -> None:
     tovan, bell, relay = npc_who_knows(ws)
     cue(ws, tovan, "It only rings when the nights are dry.", [bell])

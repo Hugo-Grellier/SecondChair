@@ -229,6 +229,7 @@ class Bridge:
                         delegation.current_moment(self.ws),
                         desk.due_now(self.ws),
                         knowledge.active_cue(self.ws),
+                        self.turn_driver,
                         len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
                     )
                 )
@@ -244,8 +245,15 @@ class Bridge:
                 print(f"SecondChair: Director's Desk not refreshed: {e}", file=sys.stderr)
             await asyncio.sleep(POLL)
 
+    @property
+    def turn_driver(self) -> str | None:
+        """The turn driver the last rules context names (RUL-11), if any."""
+        context = self.rules_context and self.rules_context[1]
+        found = context.get("turn_driver") if isinstance(context, dict) else None
+        return found if isinstance(found, str) else None
+
     async def _send_desk(self, socket: WebSocket) -> None:
-        await socket.send_json(await asyncio.to_thread(desk.state, self.ws))
+        await socket.send_json(await asyncio.to_thread(desk.state, self.ws, self.turn_driver))
 
     async def _gesture(self, socket: WebSocket, message: dict) -> None:
         """Take a GM gesture from the Director's Desk, answer it, then refresh the Desk. In a

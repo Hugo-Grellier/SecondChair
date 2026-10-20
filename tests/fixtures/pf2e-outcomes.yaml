@@ -212,6 +212,43 @@
       degree: success
       flags: {}
       follow_up: {condition: prone, value: null, result: applied}
+# A turn PF2e Combater ran (RUL-12): the GM's act, checked like any other.
+- expect: []
+  envelope:
+    <<: *base
+    id: combater-strike-ok
+    actor: Actor.orc
+    payload:
+      type: attack-roll
+      message: m12
+      user: gm
+      actor: Actor.orc
+      target: Actor.sella
+      action: strike
+      roll: {total: 19, natural: 11, modifiers: [{label: Greataxe, modifier: 8, enabled: true}]}
+      dc: 20
+      degree: failure
+      unadjusted: failure
+      flags: {pf2e: {dosAdjustments: {}}, pf2e-combater: {reactionUsed: false}}
+      turn_driver: pf2e-combater
+- expect: [modifiers]
+  envelope:
+    <<: *base
+    id: combater-strike-sum
+    actor: Actor.orc
+    payload:
+      type: attack-roll
+      message: m13
+      user: gm
+      actor: Actor.orc
+      target: Actor.sella
+      action: strike
+      roll: {total: 25, natural: 11, modifiers: [{label: Greataxe, modifier: 8, enabled: true}]}
+      dc: 20
+      degree: success
+      unadjusted: success
+      flags: {pf2e: {dosAdjustments: {}}}
+      turn_driver: pf2e-combater
 - expect: [follow_up]
   envelope:
     <<: *base

@@ -5,6 +5,7 @@ import {
   absalomDate,
   createAdapter,
   stripBilingual,
+  turnDriver,
   unsupported,
 } from "../secondchair-foundry-pf2e/scripts/adapter.js";
 
@@ -159,7 +160,17 @@ test("the rules context lists the system, the active modules and the known rules
     system_version: "8.6.1",
     modules: { "pf2-fr": "8.6.0", babele: "2.9.1" },
     settings: { "pf2e.proficiencyVariant": false },
+    turn_driver: null,
   });
+});
+
+test("PF2e Combater, when active, is the turn driver", async () => {
+  const { env, adapter } = foundry();
+  env.modules = () => ({ "pf2-fr": "8.6.0", babele: "2.9.1", "pf2e-combater": "1.4.2" });
+  const context = await adapter.reads?.rules_context({}, { language: "fr" });
+  assert.equal(/** @type {any} */ (context).turn_driver, "pf2e-combater");
+  assert.equal(turnDriver({ "pf2e-combater": "1.4.2" }), "pf2e-combater");
+  assert.equal(turnDriver({ "pf2e-toolbelt": "3.0.0" }), null);
 });
 
 test("an official name is offered translated with its English key, its pack only on a collision", async () => {

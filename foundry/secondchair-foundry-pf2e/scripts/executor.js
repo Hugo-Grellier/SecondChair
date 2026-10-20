@@ -62,6 +62,7 @@ import { canonical } from "../../secondchair-foundry/scripts/scenes.js";
  * @property {() => Promise<unknown>} settle  wait for the GM's modules to react to a call
  * @property {(event: import("../../secondchair-foundry/scripts/capture.js").Event) => void} emit
  *   an observation, through the library's durable capture
+ * @property {() => string | null} driver  the active turn driver's module id (RUL-11), or null
  */
 
 /**
@@ -413,5 +414,19 @@ export function createExecutor(env) {
       };
     },
   };
+  // While a turn driver is active the executor is off for every GM creature (RUL-12, DEL-22):
+  // every op is refused, except the GM's undo of an action taken before it came on.
+  for (const [name, op] of Object.entries(ops)) {
+    ops[name] = async (target, params, expect) => {
+      const driver = expect ? null : env.driver();
+      if (driver) {
+        throw new Error(
+          `${driver} runs the GM creatures' turns in this world: SecondChair takes no ` +
+            "monster-turn action while it is active; the GM runs turns through it (DEL-22).",
+        );
+      }
+      return op(target, params, expect);
+    };
+  }
   return ops;
 }

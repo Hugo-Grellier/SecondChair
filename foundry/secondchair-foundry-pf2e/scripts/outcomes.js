@@ -16,6 +16,7 @@
  * @property {(actor: Doc) => Record<string, number | null>} conditions  slug -> value
  * @property {(actor: Doc) => Record<string, Record<string, unknown>>} evidence
  *   the trace readers' module flags from the actor's token and combatant (RUL-19)
+ * @property {() => string | null} driver  the active turn driver's module id (RUL-11), or null
  */
 
 /** The degree pf2e records on a check message. */
@@ -184,6 +185,7 @@ export function createTracer(env) {
         resources.set(actor.uuid, now);
       }
       payload.flags = evidence;
+      payload.turn_driver = env.driver() ?? undefined;
       return defined(payload);
     },
     /**
@@ -194,7 +196,9 @@ export function createTracer(env) {
       const after = env.conditions(actor);
       const before = conditions.get(actor.uuid);
       conditions.set(actor.uuid, after);
+      const driver = env.driver();
       return {
+        ...(driver && { turn_driver: driver }),
         type: "condition",
         message: null,
         user,

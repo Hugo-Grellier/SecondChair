@@ -30,6 +30,7 @@ CONTEXT: dict[str, Any] = {
     "system_version": "8.6.1",
     "modules": {"pf2-fr": "8.6.0"},
     "settings": {"pf2e.proficiencyVariant": False},
+    "turn_driver": None,
 }
 SETTLE = 1.5  # seconds: the bridge looks at the moment once a second
 
@@ -44,6 +45,7 @@ class GmClient:
         self.date = "4725-03-01"
         self.names = {"goblin-warrior": "Gobelin guerrier"}
         self.results: list[dict] = []  # the Core's answers to Director's Desk gestures
+        self.desks: list[dict] = []  # what the Director's Desk was told to show
 
     def send(self, message: dict) -> None:
         BRIDGE.validate(message)
@@ -72,6 +74,8 @@ class GmClient:
                 self.send({"type": "reply", "id": message["id"], **self.act(message)})
             elif message["type"] == "result":
                 self.results.append(message)
+            elif message["type"] == "desk":
+                self.desks.append(message)
 
     def act(self, request: dict) -> dict:
         date = request["params"]["date"]
@@ -149,6 +153,24 @@ def test_a_module_toggled_reloads_the_client_and_its_new_context_is_recorded_onc
             pass
 
     assert [o["payload"] for o in recorded(workspace, "rules_context")] == [CONTEXT, toggled]
+
+
+def test_the_desk_learns_the_turn_driver_from_the_rules_context(
+    bridge: str,  # noqa: F811
+    token: str,  # noqa: F811
+    workspace: Path,  # noqa: F811
+) -> None:
+    driven = {
+        **CONTEXT,
+        "modules": {**CONTEXT["modules"], "pf2e-combater": "1.4.2"},
+        "turn_driver": "pf2e-combater",
+    }
+    with gm_client(bridge, token, driven) as client:
+        settle()
+        assert client.desks[-1]["turn_driver"] == "pf2e-combater"
+    with gm_client(bridge, token) as client:
+        settle()
+        assert client.desks[-1]["turn_driver"] is None
 
 
 def test_session_start_pushes_the_current_date_and_records_the_clock(
