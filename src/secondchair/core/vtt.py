@@ -6,6 +6,7 @@ talks to a VTT itself. One process serves one campaign (ARC-18), so there is one
 """
 
 from collections.abc import Callable
+from concurrent.futures import Future
 from typing import Any
 
 
@@ -17,9 +18,20 @@ class CeilingRefusal(VttError):
     """The VTT's ceiling refused the action (DEL-19): a failed action and a call (DEL-20)."""
 
 
+class Unanswered(VttError):
+    """The VTT did not answer in time: the action may still be taken. `later` resolves to what
+    `perform` would have returned, or raises its `VttError`, once the VTT answers; it is
+    cancelled when the VTT leaves without answering."""
+
+    def __init__(self, message: str, later: Future[tuple[dict, dict]]) -> None:
+        super().__init__(message)
+        self.later = later
+
+
 # perform(op, target, params, expect, level) -> (before, after): take the action at the delegation
 # `level` (None for the GM's undo), refusing it if the document's fields differ from `expect`
-# (when not None); raise VttError when it fails, CeilingRefusal when the ceiling refused it.
+# (when not None); raise VttError when it fails, CeilingRefusal when the ceiling refused it,
+# Unanswered when the VTT did not answer in time.
 type Perform = Callable[[str, str, dict, dict | None, str | None], tuple[dict, dict]]
 # read(op, params) -> the VTT's answer; raise VttError when it cannot answer.
 type Read = Callable[[str, dict], Any]

@@ -12,6 +12,7 @@ import threading
 import urllib.error
 import urllib.request
 from collections.abc import Generator, Iterator
+from concurrent.futures import CancelledError
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,10 @@ from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Origin
 
 from secondchair.cli import main
+from secondchair.core.vtt import Unanswered, VttError
+from secondchair.core.workspace import load
+from secondchair_foundry import bridge as bridge_module
+from secondchair_foundry.bridge import Bridge
 
 SCHEMA = json.loads(
     (Path(__file__).parent.parent / "docs/contracts/foundry-bridge.schema.json").read_text()
@@ -357,3 +362,72 @@ def test_the_desk_starts_a_session_and_approves_a_vtt_proposal_due_now(
         "applied",
         "desk",
     )
+
+
+class SlowClient:
+    """A GM client socket that keeps the requests it is sent, answered by the test."""
+
+    def __init__(self) -> None:
+        self.requests: queue.Queue[dict] = queue.Queue()
+
+    async def send_json(self, message: dict) -> None:
+        self.requests.put(message)
+
+
+@pytest.fixture
+def slow(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Bridge, SlowClient]]:
+    """A bridge with a GM client that answers after the reply timeout (#99)."""
+    monkeypatch.setattr(bridge_module, "REPLY_TIMEOUT", 0.1)
+    bridge, client = Bridge(load(workspace)), SlowClient()
+    bridge.loop = asyncio.new_event_loop()
+    bridge.gm = client  # ty: ignore[invalid-assignment]
+    thread = threading.Thread(target=bridge.loop.run_forever, daemon=True)
+    thread.start()
+    yield bridge, client
+    bridge.loop.call_soon_threadsafe(bridge.loop.stop)
+    thread.join(timeout=5)
+
+
+def late_reply(bridge: Bridge, reply: dict) -> None:
+    assert bridge.loop is not None
+    [request_id] = bridge.waiting  # still awaited after the timeout
+    future = bridge.waiting[request_id]
+    bridge.loop.call_soon_threadsafe(future.set_result, {"id": request_id, **reply})
+
+
+def test_a_late_reply_resolves_what_the_timeout_left_unanswered(
+    slow: tuple[Bridge, SlowClient],
+) -> None:
+    bridge, _ = slow
+    with pytest.raises(Unanswered, match="may have been taken") as unanswered:
+        bridge.perform("move_token", TOKEN, {"x": 300, "y": 200}, None, "act-then-review")
+
+    late_reply(bridge, {"ok": True, "before": {"x": 100}, "after": {"x": 300}})
+
+    assert unanswered.value.later.result(timeout=5) == ({"x": 100}, {"x": 300})
+
+
+def test_a_late_refusal_raises_its_error_later(slow: tuple[Bridge, SlowClient]) -> None:
+    bridge, _ = slow
+    with pytest.raises(Unanswered) as unanswered:
+        bridge.perform("move_token", TOKEN, {"x": 300, "y": 200}, None, "act-then-review")
+
+    late_reply(bridge, {"ok": False, "error": "changed since"})
+
+    with pytest.raises(VttError, match="changed since"):
+        unanswered.value.later.result(timeout=5)
+
+
+def test_a_client_leaving_unanswered_cancels_what_it_left(
+    slow: tuple[Bridge, SlowClient],
+) -> None:
+    bridge, _ = slow
+    with pytest.raises(Unanswered) as unanswered:
+        bridge.perform("move_token", TOKEN, {"x": 300, "y": 200}, None, "act-then-review")
+    assert bridge.loop is not None
+    [future] = bridge.waiting.values()
+
+    bridge.loop.call_soon_threadsafe(future.set_exception, VttError("No GM client"))
+
+    with pytest.raises(CancelledError):
+        unanswered.value.later.result(timeout=5)
