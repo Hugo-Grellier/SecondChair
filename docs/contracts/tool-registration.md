@@ -1,12 +1,12 @@
 # Contract: tool registration and the Core's MCP endpoint
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-10, DEL-14, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-29, PKG-05, PKG-06, PKG-19.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-10, DEL-14, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-29, PKG-05, PKG-06, PKG-19, ARC-10.
 
 ## The MCP endpoint
 
 `secondchair serve <workspace>` carries the Core's MCP server over **Streamable HTTP** at `http://127.0.0.1:<port>/mcp`, the port coming from the machine configuration (default 7240). There is no stdio mode: every agent host (the GM's session, the runners) shares this one Core. The endpoint is unauthenticated and bound to loopback only; requests whose `Host` or `Origin` is not a loopback name are refused (DNS rebinding). `GET /` answers `{"service": "secondchair", "campaign_language": …, "protocol_version": …}`.
 
-`secondchair host setup <claude|codex>` prints the configuration an agent host needs to reach that endpoint, and how to install the playbooks: for Claude Code a plugin (`claude plugin marketplace add <playbooks>` then `claude plugin install secondchair@secondchair`), for Codex a skill bundle linked into `~/.codex/skills/`. It writes no file: the GM pastes or runs what it prints.
+`secondchair host setup <claude|codex>` prints the configuration an agent host needs to reach that endpoint, and how to install the playbooks: for Claude Code one plugin per block (`claude plugin marketplace add <playbooks>` then `claude plugin install <name>@<name>`, `secondchair` for the Core's), for Codex every skill linked into `~/.codex/skills/`. It writes no file: the GM pastes or runs what it prints.
 
 ## Registering tools
 
@@ -88,7 +88,7 @@ def move_token(token: str, x: int, y: int) -> VttAction:
 | `source` | string or null | As for `Change`. |
 | `entity` | string or null | As for `Change`. |
 
-The log entry of a VTT action carries `op`, and the fields the VTT reported `before` and `after` it. A VTT action the VTT did not take is a **failed action**: logged with status `failed` and its `error`, and returned to the agent as an MCP error. The Foundry connector registers `move_token` and `set_door` (VTT operations, reversible).
+The log entry of a VTT action carries `op`, and the fields the VTT reported `before` and `after` it. A VTT action the VTT did not take is a **failed action**: logged with status `failed` and its `error`, and returned to the agent as an MCP error. The Foundry connector registers `move_token` and `set_door` (VTT operations, reversible), and `prepare_scene` (prep, reversible), which writes a scene's desired state, with its read `scene_report` ([foundry-bridge.md](foundry-bridge.md#prepared-scenes-arc-10-bve-02)).
 
 The Core adds a required `agent` string argument to every delegated action's MCP input schema: the agent's name, recorded for traceability only (ARC-22). It also adds an optional `job` integer: the job the agent is running (see below), and an optional `blocking` boolean (default false): whether the table waits on this action to go on with the current turn or scene, which makes its proposal due now rather than at the next break (DEL-30; a job's actions block as the job does). A block's `fn` must not have an `agent`, `job` or `blocking` parameter. On each call the Core reads the current moment and the delegation table, then:
 
@@ -140,7 +140,7 @@ metadata:
   secondchair-expected-output: One canon entity per named person, place, …
 ```
 
-The Core's playbooks live in `src/secondchair/playbooks/`, which is both a Claude Code plugin (`.claude-plugin/`) and, through its `skills/` directory, a Codex skill bundle (PKG-19). The first is `rebuild-entities-from-a-bible` (memory, standard).
+Each block ships its playbooks in one directory that is both a Claude Code plugin (`.claude-plugin/`, the plugin and its marketplace named alike) and, through its `skills/` directory, a Codex skill bundle (PKG-19), registered under the `secondchair.playbooks` entry point group as the directory's path. Playbook names are unique across blocks. The Core's live in `src/secondchair/playbooks/` (`secondchair`): the first is `rebuild-entities-from-a-bible` (memory, standard). The Foundry connector's VTT playbooks ship with it (ARC-10) in `src/secondchair_foundry/playbooks/` (`secondchair-foundry`): `realise-a-scene` (prep, standard; inputs `brief` and `scene`), which writes a scene's desired state and reads back its reconciliation report.
 
 ## What agents see
 

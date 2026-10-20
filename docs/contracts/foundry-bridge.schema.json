@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/blob/main/docs/contracts/foundry-bridge.schema.json",
   "title": "Foundry bridge message",
-  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies, the live session and observations.",
+  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies, the live session and observations, and the scenes to realise.",
   "oneOf": [
     {
       "title": "hello",
@@ -309,6 +309,224 @@
           "additionalProperties": false
         }
       ]
+    },
+    {
+      "title": "realise",
+      "description": "The Core asks the GM client to realise a desired scene by reconciliation.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "realise"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scene": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The scene's key in the workspace."
+        },
+        "desired": {
+          "$ref": "#/$defs/desired_scene"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "scene",
+        "desired"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "realised",
+      "description": "The GM client's reconciliation report, or why it could not realise the scene.",
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "realised"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ok": {
+              "const": true
+            },
+            "report": {
+              "type": "object",
+              "properties": {
+                "scene": {
+                  "type": "string",
+                  "description": "The Foundry id of the Scene."
+                },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "description": "How many objects each action took."
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "enum": [
+                          "create",
+                          "update",
+                          "delete",
+                          "noop",
+                          "retouched",
+                          "kept-deleted",
+                          "conflict"
+                        ]
+                      },
+                      "key": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "action",
+                      "key"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "errors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Objects that could not be written, each with why."
+                }
+              },
+              "required": [
+                "scene",
+                "summary",
+                "actions",
+                "errors"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ok",
+            "report"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "realised"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ok",
+            "error"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
-  ]
+  ],
+  "$defs": {
+    "desired_scene": {
+      "title": "desired scene",
+      "description": "What prep asks a scene to look like (a workspace's scenes/<key>.yaml). The Foundry connector gives the data its meaning: Foundry document fields.",
+      "type": "object",
+      "properties": {
+        "scene": {
+          "type": "object",
+          "description": "The Scene document's fields, set when it is created and reconciled after.",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "items": {
+          "type": "array",
+          "description": "The objects placed on the scene.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+                "description": "Stable within the scene: it names the object across reconciliations."
+              },
+              "type": {
+                "enum": [
+                  "Token",
+                  "Wall",
+                  "AmbientLight",
+                  "AmbientSound",
+                  "Note",
+                  "Tile",
+                  "Drawing",
+                  "Region"
+                ]
+              },
+              "actor": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Tokens only: the UUID of the Actor (world or compendium) the token is made from."
+              },
+              "data": {
+                "type": "object",
+                "description": "The document's fields."
+              }
+            },
+            "required": [
+              "key",
+              "type",
+              "data"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "choices": {
+          "type": "object",
+          "description": "The GM's calls by object key ('_scene' for the scene itself): keep the VTT's version of a conflict, overwrite it, or recreate an object deleted in play.",
+          "additionalProperties": {
+            "enum": [
+              "keep",
+              "overwrite",
+              "recreate"
+            ]
+          }
+        }
+      },
+      "required": [
+        "scene",
+        "items"
+      ],
+      "additionalProperties": false
+    }
+  }
 }

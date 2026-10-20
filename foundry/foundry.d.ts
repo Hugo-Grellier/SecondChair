@@ -31,8 +31,16 @@ declare const game: {
   };
   world: { id: string };
   modules: { get(id: string): object | undefined };
-  scenes: { get(id: string): { uuid: string } | undefined; active: { uuid: string } | null };
-  actors: { get(id: string): { uuid: string } | undefined };
+  scenes: {
+    get(id: string): { uuid: string } | undefined;
+    active: { uuid: string } | null;
+    find(fn: (scene: FoundryDoc) => boolean): FoundryDoc;
+  };
+  actors: {
+    get(id: string): { uuid: string } | undefined;
+    find(fn: (actor: FoundryDoc) => boolean): FoundryDoc;
+    fromCompendium(doc: FoundryDoc): FoundryDoc;
+  };
 };
 
 declare function fromUuid(uuid: string): Promise<object | null>;
@@ -74,3 +82,9 @@ declare const ui: {
     (message: string, options?: { permanent?: boolean }) => unknown
   >;
 };
+
+// Scene realisation (scenes.js): documents are loosely typed on purpose.
+// biome-ignore lint/suspicious/noExplicitAny: Foundry documents, not modelled here
+type FoundryDoc = any;
+declare const Scene: { create(data: object): Promise<FoundryDoc> };
+declare const Actor: { create(data: object): Promise<FoundryDoc> };

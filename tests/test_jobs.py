@@ -187,6 +187,25 @@ def test_a_manual_cell_refuses_the_actions_of_a_started_job(
     assert not (ws.root / "action-log").exists()
 
 
+def test_every_block_s_playbooks_reach_the_agent_host(
+    ws: Workspace, config: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "argv.json"
+    dump = "import json, sys; json.dump(sys.argv[1:], open(sys.argv[1], 'w'))"
+    configure(
+        config,
+        {"echo": [sys.executable, "-c", dump, str(out), "--plugin-dir={playbooks}"]},
+        ("echo", "m"),
+    )
+    queue(ws)
+
+    assert main(["jobs", "-w", str(ws.root), "run"]) == 0
+
+    dirs = [f"--plugin-dir={d}" for d in runner.playbook_dirs()]
+    assert json.loads(out.read_text())[1:] == dirs
+    assert len(dirs) == 2  # the Core's and the Foundry connector's (ARC-10)
+
+
 def test_with_the_first_entry_broken_the_second_is_used_and_both_are_logged(
     ws: Workspace, config: Path
 ) -> None:
@@ -307,16 +326,21 @@ def test_a_job_carries_the_vocabulary_of_the_entities_it_is_about(ws: Workspace)
 
 
 def test_every_playbook_is_an_agent_skill_with_a_tier_and_a_responsibility() -> None:
-    skills = sorted(runner.SKILLS.iterdir())
-    assert [s.name for s in skills] == [PLAYBOOK]
+    skills = runner.skills()
+    assert sorted(s.name for s in skills) == ["realise-a-scene", PLAYBOOK]
     for skill in skills:
         front = yaml.safe_load((skill / "SKILL.md").read_text().split("---", 2)[1])
         assert front["name"] == skill.name and len(front["description"]) <= 1024
         meta = runner.playbook(skill.name)
         assert meta["tier"] in jobs.TIERS and meta["responsibility"] in RESPONSIBILITIES
         assert "campaign language" in (skill / "SKILL.md").read_text()
-    plugin = json.loads((runner.PLAYBOOKS / ".claude-plugin/plugin.json").read_text())
-    assert plugin["name"] == "secondchair"
+    names = []
+    for playbooks in runner.playbook_dirs():
+        plugin = json.loads((playbooks / ".claude-plugin/plugin.json").read_text())
+        marketplace = json.loads((playbooks / ".claude-plugin/marketplace.json").read_text())
+        assert marketplace["name"] == marketplace["plugins"][0]["name"] == plugin["name"]
+        names.append(plugin["name"])
+    assert names == ["secondchair", "secondchair-foundry"]
 
 
 # Model names live only in the GM's machine configuration (ARC-25): checked in CI.
@@ -330,7 +354,7 @@ MODEL_NAME = re.compile(
 def test_no_model_name_appears_in_the_core_or_in_a_playbook() -> None:
     files = [
         *(ROOT / "src/secondchair/core").rglob("*.py"),
-        *(p for p in runner.PLAYBOOKS.rglob("*") if p.is_file()),
+        *(p for d in runner.playbook_dirs() for p in d.rglob("*") if p.is_file()),
     ]
     found = {
         str(p.relative_to(ROOT)): MODEL_NAME.findall(p.read_text())

@@ -1,0 +1,8 @@
+{
+  "name": "secondchair-foundry",
+  "description": "SecondChair's Foundry VTT playbooks: the procedures agents follow to realise prepared scenes in Foundry.",
+  "version": "0.1.0",
+  "author": { "name": "Hugo Grellier" },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/Hugo-Grellier/SecondChair"
+}
