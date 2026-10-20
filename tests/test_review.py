@@ -102,7 +102,14 @@ def test_prep_lists_markdown_and_desired_state_with_its_report(
 
     found = client.get("/api/prep").json()
     assert found["files"] == ["prep/session-1/handoff.md", "notes/workshop/idea.md"]
-    assert found["desired"][0]["report"] == {"ok": True, "pending": False}
+    (cave,) = found["desired"]
+    assert cave["report"] == {"ok": True, "pending": False}
+    assert (cave["type"], cave["status"], cave["conflicts"], cave["errors"]) == (
+        "Scene",
+        "realised",
+        0,
+        0,
+    )
     text = client.get("/api/file", params={"path": "prep/session-1/handoff.md"}).json()["text"]
     assert text == "# Séance 1\n"
 
@@ -153,6 +160,7 @@ def test_the_overview_gives_the_next_steps(ws: Workspace, client: TestClient) ->
     first = client.get("/api/overview").json()["next"]
     assert first["handoff"] is None and first["next_session"] == 1
     assert first["unwrapped_session"] is None and first["approve"] is None
+    assert first["date"] == f"secondchair date '<date>' -w {root}"
 
     delegation.start_session(ws)
     delegation.end_session(ws)
@@ -161,6 +169,7 @@ def test_the_overview_gives_the_next_steps(ws: Workspace, client: TestClient) ->
     (ws.root / "prep/session-2/handoff.md").write_text("# Séance 2\n")
     found = client.get("/api/overview").json()
     steps = found["next"]
+    assert steps["date"] is not None  # still no campaign date
     assert steps["unwrapped_session"] == 1
     assert steps["wrap"] == f"secondchair wrap 1 -w {root}"
     (job,) = steps["jobs"]
@@ -169,3 +178,37 @@ def test_the_overview_gives_the_next_steps(ws: Workspace, client: TestClient) ->
     (entry,) = steps["pending_entries"]
     assert steps["approve"] == f"secondchair approve {entry} -w {root}"
     assert steps["handoff"] == "prep/session-2/handoff.md"
+
+
+def test_desired_documents_show_their_type_status_conflicts_and_errors(
+    ws: Workspace, client: TestClient
+) -> None:
+    (ws.root / "documents").mkdir()
+    (ws.root / "documents/grik.yaml").write_text("type: Actor\ndata: {name: Grik}\n")
+    (ws.root / "documents/note.yaml").write_text("type: JournalEntry\n")
+    (ws.root / "documents/new.yaml").write_text("type: Item\n")
+    reports = ws.root / ".secondchair/documents"
+    reports.mkdir(parents=True)
+    report = {
+        "desired": "stale",
+        "ok": True,
+        "report": {
+            "document": "Actor.x",
+            "summary": {"conflict": 1},
+            "actions": [{"action": "conflict", "key": "_document"}],
+            "errors": ["no portrait"],
+        },
+    }
+    (reports / "grik.json").write_text(json.dumps(report))
+    (reports / "note.json").write_text(json.dumps({"ok": False, "error": "x", "reason": "ceiling"}))
+
+    found = {d["key"]: d for d in client.get("/api/prep").json()["desired"]}
+    grik, note, new = found["grik"], found["note"], found["new"]
+    assert (grik["type"], grik["status"], grik["conflicts"], grik["errors"]) == (
+        "Actor",
+        "pending",
+        1,
+        1,
+    )
+    assert (note["status"], note["errors"]) == ("failed", 1)
+    assert (new["status"], new["report"]) == ("not realised", None)

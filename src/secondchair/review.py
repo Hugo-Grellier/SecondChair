@@ -163,6 +163,8 @@ def routes(ws: Workspace) -> list[BaseRoute]:
                 "unfinished_jobs": len(to_do),  # queued or started
                 # The GM's next steps, as `secondchair status` gives them.
                 "next": {
+                    # play needs a campaign date (CAL-14): set it first
+                    "date": None if live or time["current_date"] else command(ws, "date", "<date>"),
                     "unwrapped_session": unwrapped,
                     "wrap": unwrapped and command(ws, "wrap", unwrapped),
                     "jobs": [
@@ -239,7 +241,9 @@ def routes(ws: Workspace) -> list[BaseRoute]:
                     # pending: the desired state changed since this realisation (ARC-10)
                     digest = report.pop("desired", None)
                     report["pending"] = digest != hashlib.sha256(text.encode()).hexdigest()
-                desired.append({"kind": kind, "key": p.stem, "content": text, "report": report})
+                desired.append(
+                    {"kind": kind, "key": p.stem, "content": text, **_realised(text, report)}
+                )
         return JSONResponse({"files": readable, "desired": desired})
 
     async def read_file(request: Request) -> Response:
@@ -281,6 +285,32 @@ def routes(ws: Workspace) -> list[BaseRoute]:
         _PageRoute("/", _guarded(page), methods=["GET"]),
         *(Route(f"/api/{name}", _guarded(fn), methods=["GET"]) for name, fn in endpoints.items()),
     ]
+
+
+def _realised(text: str, report: dict | None) -> dict:
+    """What the left list says of a desired VTT document: its type, how its last realisation
+    went, and how many conflicts and errors it reported."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        data = None
+    data = data if isinstance(data, dict) else {}
+    kind = "Scene" if "scene" in data else data.get("type")
+    if report is None:
+        status = "not realised"
+    elif report.get("ok") is False:
+        status = "failed"
+    else:
+        status = "pending" if report["pending"] else "realised"
+    detail = (report or {}).get("report") or {}
+    actions = detail.get("actions") or []
+    return {
+        "type": kind if isinstance(kind, str) else None,
+        "report": report,
+        "status": status,
+        "conflicts": sum(isinstance(a, dict) and a.get("action") == "conflict" for a in actions),
+        "errors": len(detail.get("errors") or []) + bool((report or {}).get("error")),
+    }
 
 
 def _inside(root: Path, path: Path) -> bool:

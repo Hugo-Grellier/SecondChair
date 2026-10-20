@@ -113,6 +113,7 @@ const render = {
     const o = await api("/api/overview");
     const stat = (label, v) => `<div class="card stat"><span class="meta">${label}</span><b>${esc(v ?? "—")}</b></div>`;
     const n = o.next, steps = [];
+    if (n.date) steps.push(`The campaign has no current date: set it before play ${commands({ date: n.date })}`);
     if (n.unwrapped_session) steps.push(`Session ${esc(n.unwrapped_session)} is not wrapped: what was played is not in canon yet. After its wrap job: ${commands({ wrap: n.wrap })}`);
     for (const j of n.jobs) steps.push(`Job ${j.id} ${esc(j.status)}: ${esc(j.playbook)}${j.status === "queued" ? ` — <code>${esc(j.ask)}</code>` : ""}`);
     if (n.approve) steps.push(`Awaiting your approval: entries ${n.pending_entries.join(", ")} (<a href="#review">To review</a>) ${commands({ approve: n.approve })}`);
@@ -152,29 +153,36 @@ const render = {
   async prep() {
     const p = await api("/api/prep");
     if (!state.file && p.files.length) state.file = p.files.find((f) => f.endsWith("handoff.md")) || p.files[0];
+    if (!state.file && p.desired.length) state.file = `foundry:${p.desired[0].kind}/${p.desired[0].key}`;
     const groups = {};
     for (const f of p.files) (groups[f.slice(0, f.lastIndexOf("/"))] ??= []).push(f);
     const tree = Object.entries(groups).map(([dir, fs]) => `<h4>${esc(dir)}/</h4>${fs.map((f) =>
       `<a href="#prep" data-file="${esc(f)}" class="${f === state.file ? "on" : ""}">${esc(f.slice(dir.length + 1))}</a>`).join("")}`).join("");
-    const desired = p.desired.map((d) => {
-      const r = d.report;
-      const status = !r ? "not realised yet" : r.pending ? "changed since last realised" : r.ok === false ? "failed" : "realised";
-      const rep = r?.report || {};
-      const conflicts = rep.conflicts?.length ? `<div>Conflicts: <pre>${esc(JSON.stringify(rep.conflicts, null, 2))}</pre></div>` : "";
-      const errors = [r?.error, ...(rep.errors || []).map((e) => (typeof e === "string" ? e : JSON.stringify(e)))].filter(Boolean);
-      return `<div class="card"><b>${esc(d.kind)}/${esc(d.key)}.yaml</b> <span class="tag">${esc(status)}</span>
-        ${rep.summary ? `<span class="meta">${esc(JSON.stringify(rep.summary))}</span>` : ""}${r?.reason ? ` <span class="meta">reason: ${esc(r.reason)}</span>` : ""}
-        ${conflicts}${errors.length ? `<div>Errors:<ul>${errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}
-        <details><summary class="meta">Desired state</summary><pre>${esc(d.content)}</pre></details></div>`;
+    const foundry = p.desired.map((d) => {
+      const id = `foundry:${d.kind}/${d.key}`;
+      const counts = [d.conflicts && `${d.conflicts} conflict${d.conflicts > 1 ? "s" : ""}`, d.errors && `${d.errors} error${d.errors > 1 ? "s" : ""}`].filter(Boolean).join(", ");
+      return `<a href="#prep" data-file="${esc(id)}" class="${id === state.file ? "on" : ""}">${esc(d.key)} <span class="meta">${esc(d.type || d.kind)} · ${esc(d.status)}${counts ? ` · ${esc(counts)}` : ""}</span></a>`;
     }).join("");
     let doc = "<p class='note'>No Markdown under prep/ or notes/ yet.</p>";
-    if (state.file) {
+    const picked = p.desired.find((d) => `foundry:${d.kind}/${d.key}` === state.file);
+    if (picked) {
+      const r = picked.report, rep = r?.report || {};
+      const conflicts = (rep.actions || []).filter((a) => a?.action === "conflict");
+      const errors = [r?.error, ...(rep.errors || []).map((e) => (typeof e === "string" ? e : JSON.stringify(e)))].filter(Boolean);
+      doc = `<h2>${esc(picked.kind)}/${esc(picked.key)}.yaml</h2>
+        <p><span class="tag">${esc(picked.type || picked.kind)}</span> <span class="tag">${esc(picked.status)}</span>${r?.reason ? ` <span class="meta">reason: ${esc(r.reason)}</span>` : ""}</p>
+        ${rep.summary ? `<p class="meta">${Object.entries(rep.summary).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(" · ")}</p>` : ""}
+        ${conflicts.length ? `<h3>Conflicts</h3><pre>${esc(JSON.stringify(conflicts, null, 2))}</pre>` : ""}
+        ${errors.length ? `<h3>Errors</h3><ul>${errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : ""}
+        ${rep.actions?.length ? `<details><summary>Actions (${rep.actions.length})</summary><pre>${esc(JSON.stringify(rep.actions, null, 2))}</pre></details>` : ""}
+        <details ${r ? "" : "open"}><summary>Desired state</summary><pre>${esc(picked.content)}</pre></details>`;
+      state.lastText = null;
+    } else if (state.file) {
       const f = await api(`/api/file?path=${encodeURIComponent(state.file)}`);
       doc = `<p class="meta">${esc(f.path)} <button class="no-print" onclick="print()">Print</button></p><div id="toc"></div><article class="doc" id="doc"></article>`;
       state.lastText = f.text;
     }
-    return `<div class="prep"><div class="tree">${tree}</div><div>${doc}</div></div>
-      ${desired ? `<h2 class="no-print">Desired Foundry state</h2><div class="no-print">${desired}</div>` : ""}`;
+    return `<div class="prep"><div class="tree">${tree}${foundry ? `<h4>In Foundry</h4>${foundry}` : ""}</div><div>${doc}</div></div>`;
   },
   async canon() {
     return `<div class="filters no-print"><input id="q" type="search" placeholder="Search entities, facts, events" value="${esc(state.q)}" size="40"></div><div id="results">${await canonResults()}</div>`;
@@ -214,7 +222,7 @@ async function show(quiet = false) {
   busy = true;
   document.getElementById("tabs").innerHTML = Object.entries(TABS).map(([k, v]) => `<a href="#${k}" class="${k === state.tab ? "on" : ""}">${v}</a>`).join("");
   try {
-    if (state.tab === "prep" && quiet && state.file) { // keep the reader's place unless the file changed
+    if (state.tab === "prep" && quiet && state.file && !state.file.startsWith("foundry:")) { // keep the reader's place unless the file changed
       const f = await api(`/api/file?path=${encodeURIComponent(state.file)}`).catch(() => null);
       if (f && f.text === state.lastText) return;
     }
