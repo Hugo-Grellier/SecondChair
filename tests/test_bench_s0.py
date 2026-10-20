@@ -11,11 +11,19 @@ import pytest
 import yaml
 
 from secondchair import cli
-from secondchair.bench import harness
+from secondchair.bench import harness, s0
 from secondchair.core import canon, delegation, workspace
 
 SAMPLE = Path(__file__).parents[1] / "sample-campaign"
-METRICS = ("gm_effort", "entity_recall", "entity_precision", "leaks", "narrative_direction")
+METRICS = (
+    "gm_effort",
+    "entity_recall",
+    "entity_precision",
+    "leaks",
+    "narrative_direction",
+    "fact_probes",
+    "continuity_errors",
+)
 
 
 def bench(*args: str) -> int:
@@ -51,6 +59,27 @@ def test_report_compares_the_delegated_table_with_the_baseline(scripted: Path) -
     assert delegated["entity_precision"]["median"] == pytest.approx(26 / 27)
     assert delegated["leaks"] == {"median": 0, "min": 0, "max": 0}
     assert (scripted / "report.md").read_text().startswith("# S0 bench report")
+
+
+def test_the_fact_probes_are_asked_and_scored_but_not_gated(scripted: Path) -> None:
+    found = report(scripted)
+    asked = yaml.safe_load((scripted / "delegated/1/probes.yaml").read_text())
+    assert list(asked) == list(s0.FACT_PROBES)
+    assert "expected" not in str(asked) and "npc-mira" not in str(asked)  # never the gold
+    # The fake records the factions and situations, and answers those two probes from canon.
+    for run in found["tables"]["delegated"]["runs"]:
+        assert [p for p, ok in run["probes"].items() if ok] == ["factions", "situations"]
+        assert run["continuity_errors"] == len(s0.FACT_PROBES) - 2
+    assert found["tables"]["delegated"]["fact_probes"]["median"] == 2
+    # The baseline's hand-made canon holds no fact: every probe fails, and the run still passes.
+    assert found["tables"]["baseline"]["fact_probes"]["max"] == 0
+    assert found["passed"] is True
+
+
+def test_a_reply_answers_with_its_last_json_object() -> None:
+    reply = 'Done: 2 probes.\n{"factions": {"e-1": ["e-2"]}, "situations": {}}\n'
+    assert s0.parse_answers(reply) == {"factions": {"e-1": ["e-2"]}, "situations": {}}
+    assert s0.parse_answers("I could not answer.") == {}
 
 
 def test_a_passing_run_writes_the_mapping_in_runner_configuration_format(scripted: Path) -> None:

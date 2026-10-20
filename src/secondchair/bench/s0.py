@@ -15,6 +15,7 @@ The narrative-direction invariant and the drift ratio are read from the action l
 """
 
 import json
+from contextlib import suppress
 from typing import Any
 
 import py3langid
@@ -65,17 +66,6 @@ def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
     rejections and undos for `contradiction`, failed probes), the leaks, the narrative-direction
     breaches, the drift ratio and the language drift. `passed` is false on any leak or narrative
     breach, the invariants (10-success-bench.md); the rest is reported, not gated (MET-05a)."""
-    labels = _labels(ws, gold)
-    expected = {p["id"]: p["expected"] for p in gold["probes"]}
-    probes = {
-        p: p in answers and _norm(answers[p], labels) == _norm(expected[p], {}) for p in PROBES
-    }
-    refused = gm = 0
-    for path in sorted((ws.root / LOG_DIR).glob("*.yaml")):
-        entry = yaml.safe_load(path.read_text())
-        refused += entry.get("status") == "refused"
-        gm += entry.get("interaction") in ("reject", "undo") and entry["reason"] == "contradiction"
-    failed = sum(not ok for ok in probes.values())
     actions = _actions(ws)
     found, narrative = leaks(ws, gold), narrative_direction(ws, actions)
     return {
@@ -83,6 +73,29 @@ def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
         "leaks": found,
         "narrative_direction": narrative,
         "drift_ratio": drift_ratio(ws, actions),
+        **score_answers(ws, gold, answers),
+        "language_drift": language_drift(ws),
+        "capture_coverage": capture_coverage(ws, gold),
+    }
+
+
+def score_answers(
+    ws: Workspace, gold: dict, answers: dict[str, Any], asked: tuple[str, ...] = PROBES
+) -> dict:
+    """Pass or fail per asked probe (no answer fails) and the continuity errors: refused
+    contradictions with canon, rejections and undos for `contradiction`, failed probes."""
+    labels = _labels(ws, gold)
+    expected = {p["id"]: p["expected"] for p in gold["probes"]}
+    probes = {
+        p: p in answers and _norm(answers[p], labels) == _norm(expected[p], {}) for p in asked
+    }
+    refused = gm = 0
+    for path in sorted((ws.root / LOG_DIR).glob("*.yaml")):
+        entry = yaml.safe_load(path.read_text())
+        refused += entry.get("status") == "refused"
+        gm += entry.get("interaction") in ("reject", "undo") and entry["reason"] == "contradiction"
+    failed = sum(not ok for ok in probes.values())
+    return {
         "probes": probes,
         "continuity_errors": {
             "refused_contradictions": refused,
@@ -90,9 +103,19 @@ def score_probes(ws: Workspace, gold: dict, answers: dict[str, Any]) -> dict:
             "failed_probes": failed,
             "total": refused + gm + failed,
         },
-        "language_drift": language_drift(ws),
-        "capture_coverage": capture_coverage(ws, gold),
     }
+
+
+def parse_answers(reply: str) -> dict[str, Any]:
+    """The structured answers an agent replied to the probes with: the last JSON object of its
+    reply. A reply with none answers nothing, so every probe fails."""
+    end = reply.rfind("}")
+    for start in reversed([i for i, c in enumerate(reply[:end]) if c == "{"]):
+        with suppress(ValueError):
+            found = json.loads(reply[start : end + 1])
+            if isinstance(found, dict):
+                return found
+    return {}
 
 
 def capture_coverage(ws: Workspace, gold: dict) -> dict:
