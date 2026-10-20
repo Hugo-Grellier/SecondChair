@@ -2,11 +2,9 @@
 import { CEILING, createActions } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
-import { realise } from "./scenes.js";
+import { MODULE, realise } from "./scenes.js";
 
 /** @typedef {import("./actions.js").Adapter} Adapter @typedef {import("./actions.js").Doc} Doc */
-
-const MODULE = "secondchair-foundry";
 
 /** The system adapter, once one registered (ARC-08); without it mechanical actions fail (ARC-09). */
 /** @type {Adapter | null} */

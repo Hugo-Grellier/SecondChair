@@ -260,7 +260,10 @@ class Bridge:
         # ponytail: polls the scenes directory; a file watcher if many scenes make it costly.
         while True:
             for path in sorted((self.ws.root / SCENES_DIR).glob("*.yaml")):
-                text = path.read_text()
+                try:
+                    text = path.read_text()
+                except FileNotFoundError:
+                    continue  # removed meanwhile (an undone first preparation)
                 if sent.get(path.stem) == digest(text):
                     continue
                 sent[path.stem] = digest(text)
@@ -274,6 +277,7 @@ class Bridge:
                 except yaml.YAMLError as e:
                     record = {"ok": False, "error": f"{path.name} is not valid YAML: {e}"}
                 except TimeoutError:
+                    del sent[path.stem]  # sent again: realising twice changes nothing more
                     record = {"ok": False, "error": "The GM client did not answer: check the VTT."}
                 except VttError:
                     return  # the GM client left: the next connection realises it

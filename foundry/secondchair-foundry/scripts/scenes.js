@@ -92,9 +92,16 @@ export function reconcile(desired, existing, created = {}, choices = {}) {
   const byKey = new Map(existing.map((e) => [e.key, e]));
   /** @type {Action[]} */
   const actions = [];
+  /** @type {Existing[]} */
+  const replaced = []; // prep changed the object's type: the old one goes, a new one is made
   for (const { key, type, spec } of desired) {
     const have = byKey.get(key);
     byKey.delete(key);
+    if (have && have.type !== type) {
+      replaced.push(have);
+      actions.push({ action: "create", key, type, spec });
+      continue;
+    }
     if (!have) {
       if (created[key] && choices[key] !== "recreate") {
         const reason = "deleted in the VTT since it was prepared (played or removed by the GM)";
@@ -121,7 +128,7 @@ export function reconcile(desired, existing, created = {}, choices = {}) {
       actions.push({ action: "conflict", key, type, id, spec, reason });
     }
   }
-  for (const { key, type, id, local, current } of byKey.values()) {
+  for (const { key, type, id, local, current } of [...replaced, ...byKey.values()]) {
     if (!local || current === local || choices[key] === "overwrite") {
       actions.push({ action: "delete", key, type, id });
     } else {
@@ -247,17 +254,24 @@ export async function realise(key, desired, { findScene, createScene, tokenData 
       let doc;
       if (action.action === "create") {
         const data = type === "Token" && item.actor ? await tokenData(item) : item.data;
-        const flags = ours({ key: k, spec, shape: JSON.stringify(item.data) });
-        [doc] = await scene.createEmbeddedDocuments(type, [{ ...data, ...flags }]);
+        const { flags } = ours({ key: k, spec, shape: JSON.stringify(item.data) });
+        [doc] = await scene.createEmbeddedDocuments(type, [
+          { ...data, flags: { ...data.flags, ...flags } },
+        ]);
         created[k] = true;
       } else if (action.action === "update") {
+        /** @type {Data} */
         const changes = { _id: id, ...withoutPlayed(type, item.data) }; // play state stays
+        if (type === "Token" && item.actor) changes.actorId = (await tokenData(item)).actorId;
         await scene.updateEmbeddedDocuments(type, [
           { ...changes, ...ours({ spec, shape: JSON.stringify(item.data) }) },
         ]);
         doc = embedded(scene, type, /** @type {string} */ (id));
       } else if (action.action === "delete") {
         await scene.deleteEmbeddedDocuments(type, [/** @type {string} */ (id)]);
+        // Dropped from prep, not played: added back later, it is created again. False, not
+        // deleted, since Foundry merges flag updates.
+        if (!items.has(k)) created[k] = false;
       }
       if (doc) await doc.update(ours({ local: await local(type, doc, item.data) }));
     } catch (err) {

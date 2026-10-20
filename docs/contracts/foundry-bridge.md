@@ -116,6 +116,9 @@ With no GM client the desired state waits: every connection starts by sending al
 | unchanged | retouched by the GM | `retouched`: kept |
 | changed | unchanged | `update`, leaving the play state as it is |
 | changed | retouched | `conflict`: kept until the GM chooses `keep` or `overwrite` |
-| removed | unchanged / retouched | `delete` / `conflict` |
+| removed | unchanged / retouched | `delete` / `conflict` (deleted this way, it is created again if prep adds it back) |
+| type changed | unchanged / retouched | `create` the new one; the old one as if removed |
+
+A Token whose `actor` prep changed is rebound to the new Actor on update. A copy the GM pasted carries the same key: only one object per key is prep's, the others are the GM's.
 
 The **play state** is never compared nor rewritten: a token's position, elevation, rotation, visibility and actor delta, a door's state, a light, sound, tile or drawing's visibility, whether a region's behaviours are disabled. So a token the GM or a player moved stays where it is when prep changes it. A retouch is judged on the fields prep wrote only. The scene itself (`_scene`) is reconciled the same way, never deleted. An object that cannot be written is reported in `errors`; the others are still realised.

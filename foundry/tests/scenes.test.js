@@ -184,7 +184,7 @@ function world() {
       scenes.push(scene);
       return scene;
     },
-    /** @param {{actor?: string, data: Record<string, any>}} item */
+    /** @param {{actor?: string, data: Record<string, any>}} item @returns {Promise<Record<string, any>>} */
     tokenData: async (item) => ({ actorId: `actor-of-${item.actor}`, ...item.data }),
   };
   return { scenes, deps };
@@ -283,4 +283,53 @@ test("an object that cannot be written is reported, the others are realised", as
   const report = await realiseChecked(w, cave());
   assert.deepEqual(report.errors, ["boss: Compendium.pf2e.x: not found"]);
   assert.equal(w.scenes[0].embedded.AmbientLight.length, 1);
+});
+
+test("an object dropped from prep and added back is created again", async () => {
+  const w = world();
+  await realiseChecked(w, cave());
+  await realiseChecked(w, cave({ items: [cave().items[0]] }));
+  const report = await realiseChecked(w, cave());
+  assert.equal(report.actions.find((a) => a.key === "torch")?.action, "create");
+});
+
+test("a copy the GM pasted stays the GM's: dropping the item from prep deletes one object", async () => {
+  const w = world();
+  await realiseChecked(w, cave());
+  const scene = w.scenes[0];
+  await scene.createEmbeddedDocuments("Token", [scene.embedded.Token[0].toObject()]);
+
+  await realiseChecked(w, cave({ items: [cave().items[1]] }));
+  assert.equal(scene.embedded.Token.length, 1);
+});
+
+test("a prep change of a token's actor or of an object's type takes effect", async () => {
+  const w = world();
+  await realiseChecked(w, cave());
+  const changed = cave();
+  changed.items[0].actor = "Compendium.pf2e.pathfinder-bestiary.Actor.ogre";
+  /** @type {any[]} */ (changed.items)[1] = {
+    key: "torch",
+    type: "Tile",
+    data: { x: 500, y: 500 },
+  };
+  const report = await realiseChecked(w, changed);
+
+  assert.deepEqual(report.errors, []);
+  const scene = w.scenes[0];
+  assert.equal(
+    scene.embedded.Token[0].source.actorId,
+    "actor-of-Compendium.pf2e.pathfinder-bestiary.Actor.ogre",
+  );
+  assert.equal(scene.embedded.AmbientLight.length, 0);
+  assert.equal(scene.embedded.Tile.length, 1);
+});
+
+test("a created object keeps the flags its data or actor gave it", async () => {
+  const w = world();
+  w.deps.tokenData = async (item) => ({ ...item.data, flags: { pf2e: { linkToActorSize: true } } });
+  await realiseChecked(w, cave());
+  const { flags } = w.scenes[0].embedded.Token[0].source;
+  assert.deepEqual(flags.pf2e, { linkToActorSize: true });
+  assert.equal(flags[MODULE].key, "boss");
 });
