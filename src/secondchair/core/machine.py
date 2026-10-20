@@ -7,9 +7,19 @@ from pathlib import Path
 TOKEN_FILE = "foundry-token"
 
 
+def _xdg(variable: str, default: str) -> Path:
+    base = Path(os.environ.get(variable) or Path.home() / default)
+    # The XDG spec: a relative path is invalid and ignored.
+    return (base if base.is_absolute() else Path.home() / default) / "secondchair"
+
+
 def config_dir() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
-    return Path(base) / "secondchair"
+    return _xdg("XDG_CONFIG_HOME", ".config")
+
+
+def data_dir() -> Path:
+    """Where the Core keeps Sources it records itself, such as behaviour traces (TRC-04)."""
+    return _xdg("XDG_DATA_HOME", ".local/share")
 
 
 def foundry_token() -> str | None:

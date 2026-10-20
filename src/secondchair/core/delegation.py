@@ -42,6 +42,7 @@ CALLS_DIR = "calls"
 OBSERVATIONS_DIR = "observations"
 OCCURRENCES_DIR = "occurrences"  # the world-turn's occurrences (world.py)
 WORLD_FILE = "living-world.yaml"  # the world-turn's cursor
+FRICTIONS_DIR = "frictions"
 
 # The base profiles (DEL-06), in RESPONSIBILITIES order; every cell's deadline mode is auto.
 _PROFILE_LEVELS = {
@@ -855,6 +856,7 @@ def _target(ws: Workspace, relative: str) -> Path:
         OBSERVATIONS_DIR,
         OCCURRENCES_DIR,
         WORLD_FILE,
+        FRICTIONS_DIR,
         STATE_DIR,
     ):
         raise DelegationError(f"{relative!r} belongs to the Core; no delegated action writes it.")

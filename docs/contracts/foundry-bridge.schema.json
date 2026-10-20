@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/blob/main/docs/contracts/foundry-bridge.schema.json",
   "title": "Foundry bridge message",
-  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies, the live session and observations, and the scenes to realise.",
+  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies, the live session and observations, and the scenes to realise, and behaviour traces.",
   "oneOf": [
     {
       "title": "hello",
@@ -448,6 +448,58 @@
           "additionalProperties": false
         }
       ]
+    },
+    {
+      "title": "traces",
+      "description": "GM module to Core: behaviour traces of one consenting user (TRC-02, TRC-05), relayed as captured, about once a second.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "traces"
+        },
+        "user": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]{1,64}$",
+          "description": "The Foundry user id the traces belong to: the GM's own, or the sender of the Foundry socket message as Foundry reported it."
+        },
+        "name": {
+          "type": "string",
+          "description": "The user's name, for the report."
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/record"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "user",
+        "name",
+        "records"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "erase_traces",
+      "description": "GM module to Core: the user revoked consent and asked to erase all their past traces (TRC-01).",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "erase_traces"
+        },
+        "user": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]{1,64}$",
+          "description": "The Foundry user id the traces belong to: the GM's own, or the sender of the Foundry socket message as Foundry reported it."
+        }
+      },
+      "required": [
+        "type",
+        "user"
+      ],
+      "additionalProperties": false
     }
   ],
   "$defs": {
@@ -527,6 +579,131 @@
         "items"
       ],
       "additionalProperties": false
+    },
+    "record": {
+      "description": "One behaviour trace record. It says nothing about the fiction: no typed character, no chat text.",
+      "oneOf": [
+        {
+          "title": "semantic",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Milliseconds since the Unix epoch on the capturing client's clock: one clock for both streams."
+            },
+            "stream": {
+              "const": "semantic"
+            },
+            "event": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$",
+              "description": "A generic event of the library, or one a system adapter adds, prefixed by its system id."
+            }
+          },
+          "required": [
+            "t",
+            "stream",
+            "event"
+          ]
+        },
+        {
+          "title": "input",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Milliseconds since the Unix epoch on the capturing client's clock: one clock for both streams."
+            },
+            "stream": {
+              "const": "input"
+            },
+            "input": {
+              "enum": [
+                "click",
+                "move",
+                "wheel",
+                "drag",
+                "drop",
+                "key"
+              ]
+            }
+          },
+          "required": [
+            "t",
+            "stream",
+            "input"
+          ]
+        },
+        {
+          "title": "typing",
+          "description": "A key pressed inside a text field: only the rhythm, never which key.",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Milliseconds since the Unix epoch on the capturing client's clock: one clock for both streams."
+            },
+            "stream": {
+              "const": "input"
+            },
+            "input": {
+              "const": "type"
+            },
+            "del": {
+              "type": "boolean",
+              "description": "A deletion (Backspace or Delete)."
+            }
+          },
+          "required": [
+            "t",
+            "stream",
+            "input",
+            "del"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "title": "gap",
+          "description": "Traces dropped because nothing could relay them: no GM client open, or the GM client not connected to the Core (TRC-05).",
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Milliseconds since the Unix epoch on the capturing client's clock: one clock for both streams."
+            },
+            "stream": {
+              "const": "gap"
+            },
+            "from": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Milliseconds since the Unix epoch on the capturing client's clock: one clock for both streams."
+            },
+            "to": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Milliseconds since the Unix epoch on the capturing client's clock: one clock for both streams."
+            },
+            "lost": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "How many records were dropped."
+            }
+          },
+          "required": [
+            "t",
+            "stream",
+            "from",
+            "to",
+            "lost"
+          ],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

@@ -16,10 +16,10 @@ import yaml
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from secondchair.core import PROTOCOL_VERSION, delegation, observations, vtt
+from secondchair.core import PROTOCOL_VERSION, delegation, observations, traces, vtt
 from secondchair.core.machine import foundry_token
 from secondchair.core.vtt import CeilingRefusal, VttError
-from secondchair.core.workspace import Workspace
+from secondchair.core.workspace import Workspace, WorkspaceError
 from secondchair_foundry.tools import REPORTS_DIR, SCENES_DIR, digest
 
 PATH = "/foundry"
@@ -173,6 +173,8 @@ class Bridge:
                     continue  # not a message the Core waits for
                 if kind == "observation":
                     await self._observe(socket, message.get("envelope"))
+                elif kind in ("traces", "erase_traces"):
+                    await self._trace(campaign, message)
                 elif waiting and not waiting.done():
                     waiting.set_result(message)
         except WebSocketDisconnect:
@@ -210,6 +212,20 @@ class Bridge:
         id_ = envelope.get("id") if isinstance(envelope, dict) else None
         ack = {"type": "ack", "id": str(id_), "ok": problem is None}
         await socket.send_json(ack if problem is None else ack | {"error": problem})
+
+    async def _trace(self, campaign: str, message: dict) -> None:
+        """Keep a consenting user's traces on this machine (TRC-04), or erase them all (TRC-01).
+        There is no ack: a trace that cannot be kept is lost like one sent with no GM client
+        (TRC-05), and never drops the GM connection."""
+        try:
+            if message["type"] == "erase_traces":
+                await asyncio.to_thread(traces.erase, self.ws, campaign, message.get("user"))
+            elif reason := traces.problem(message):
+                print(f"SecondChair: traces refused: {reason}", file=sys.stderr)
+            else:
+                await asyncio.to_thread(traces.record, self.ws, campaign, message)
+        except (OSError, WorkspaceError) as e:
+            print(f"SecondChair: traces not kept or erased: {e}", file=sys.stderr)
 
     def perform(
         self, op: str, target: str, params: dict, expect: dict | None, level: str | None
