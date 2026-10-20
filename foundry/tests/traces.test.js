@@ -145,3 +145,26 @@ test("a relay ignores records without a time instead of corrupting the gap", () 
   relay.push("bob", [/** @type {any} */ ({ stream: "input" })]);
   assert.deepEqual(sent, [[{ t: 7, stream: "gap", from: 7, to: 7, lost: 1 }]]);
 });
+
+test("a relay counts as a gap the records a failed send lost", async () => {
+  /** @type {object[][]} */
+  const sent = [];
+  let fail = true;
+  const relay = createOutbox({
+    ready: () => true,
+    send: async (_user, records) => {
+      if (fail) throw new Error("the GM left");
+      sent.push(records);
+    },
+  });
+  relay.push("bob", [{ t: 3, stream: "input", input: "click" }]);
+  await new Promise((resolve) => setImmediate(resolve));
+  fail = false;
+  relay.push("bob", [{ t: 9, stream: "input", input: "click" }]);
+  assert.deepEqual(sent, [
+    [
+      { t: 3, stream: "gap", from: 3, to: 3, lost: 1 },
+      { t: 9, stream: "input", input: "click" },
+    ],
+  ]);
+});

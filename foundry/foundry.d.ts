@@ -47,17 +47,16 @@ declare const game: {
     setFlag(scope: string, key: string, value: unknown): Promise<unknown>;
   };
   users: {
-    activeGM: { id: string } | null;
+    activeGM: {
+      id: string;
+      /** Asks this user's client only, through a handler in `CONFIG.queries` (Foundry 13+). */
+      query(name: string, data: object): Promise<unknown>;
+    } | null;
     get(
       id: string,
     ): { name: string; isGM: boolean; getFlag(scope: string, key: string): unknown } | undefined;
   };
   world: { id: string };
-  socket: {
-    emit(event: string, data: unknown): void;
-    // Foundry passes the id of the user whose client emitted the message.
-    on(event: string, fn: (data: unknown, senderId: string) => unknown): void;
-  };
   keybindings: {
     register(
       module: string,
@@ -142,6 +141,11 @@ interface CombatantLike {
 }
 
 declare const canvas: { ready: boolean; mousePosition: { x: number; y: number } } | undefined;
+
+declare const CONFIG: {
+  // Foundry passes the querying user, as the server reported it, so nobody can query as another.
+  queries: Record<string, (data: unknown, context: { user: { id: string } }) => unknown>;
+};
 
 declare const CONST: { REGION_VISIBILITY: { ALWAYS: number } };
 

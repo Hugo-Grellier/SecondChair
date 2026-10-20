@@ -14,7 +14,6 @@
     }
   ],
   "esmodules": ["scripts/main.js"],
-  "socket": true,
   "url": "https://github.com/Hugo-Grellier/SecondChair",
   "manifest": "https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry/module.json",
   "download": "https://github.com/Hugo-Grellier/SecondChair/releases/download/secondchair-foundry-v0.1.0/secondchair-foundry.zip",

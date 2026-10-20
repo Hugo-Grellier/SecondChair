@@ -35,14 +35,27 @@ export function createRecorder({ consented, flush, now = Date.now }) {
 
 /**
  * Sends records when there is someone to send them to, and otherwise drops them, counting the
- * gap, which leaves first once sending works again (TRC-05: no buffer).
+ * gap, which leaves first once sending works again (TRC-05: no buffer). A send that returns a
+ * promise lost its records if it rejects; they are counted the same way.
  * @param {object} args
  * @param {() => boolean} args.ready
- * @param {(user: string, records: TraceRecord[]) => void} args.send
+ * @param {(user: string, records: TraceRecord[]) => unknown} args.send
  */
 export function createOutbox({ ready, send }) {
   /** @type {Map<string, {from: number, to: number, lost: number}>} */
   const gaps = new Map();
+  /** @param {string} user @param {TraceRecord[]} records */
+  const drop = (user, records) => {
+    for (const r of records) {
+      const gap = r.stream === "gap" ? /** @type {any} */ (r) : { from: r.t, to: r.t, lost: 1 };
+      const held = gaps.get(user) ?? { from: gap.from, to: gap.to, lost: 0 };
+      gaps.set(user, {
+        from: Math.min(held.from, gap.from),
+        to: Math.max(held.to, gap.to, r.t),
+        lost: held.lost + gap.lost,
+      });
+    }
+  };
   return {
     /** @param {string} user @param {TraceRecord[]} records */
     push(user, records) {
@@ -52,22 +65,14 @@ export function createOutbox({ ready, send }) {
           Number.isInteger(r?.t) &&
           (r.stream !== "gap" || [r.from, r.to, r.lost].every(Number.isInteger)),
       );
-      if (!ready()) {
-        for (const r of valid) {
-          const gap = r.stream === "gap" ? /** @type {any} */ (r) : { from: r.t, to: r.t, lost: 1 };
-          const held = gaps.get(user) ?? { from: gap.from, to: gap.to, lost: 0 };
-          gaps.set(user, {
-            from: Math.min(held.from, gap.from),
-            to: Math.max(held.to, gap.to, r.t),
-            lost: held.lost + gap.lost,
-          });
-        }
-        return;
-      }
+      if (!ready()) return drop(user, valid);
       const gap = gaps.get(user);
       gaps.delete(user);
+      /** @type {TraceRecord[]} */
       const out = gap ? [{ t: gap.to, stream: "gap", ...gap }, ...valid] : valid;
-      if (out.length) send(user, out);
+      if (!out.length) return;
+      const sent = send(user, out);
+      if (sent instanceof Promise) sent.catch(() => drop(user, out));
     },
   };
 }
