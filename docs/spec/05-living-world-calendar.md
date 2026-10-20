@@ -66,12 +66,12 @@ The class, not the agent, decides which responsibility governs an effect.
 ### Absalom Reckoning (PF2e System extension)
 
 - **CAL-08** Follows Paizo: one day added to the leap month every 4 years. It does not follow the PF2e system's world clock (Gregorian + 2700 years through Luxon).
-- **CAL-09** Its week is anchored so the table and the Core agree on every date before 4800 AR (1 Abadius 4726 AR is Oathday).
+- **CAL-09** Its week is anchored so the table and the Core agree on every date between 1 Pharast 4600 and 28 Calistril 4800 AR (1 Abadius 4726 AR is Oathday).
 
 ### Foundry sync
 
 - **CAL-10** Only a System extension's named calendar is synced with Foundry. A declared calendar (such as the sample campaign's) has no Foundry sync in v4.
 - **CAL-11** At session start the PF2e system adapter pushes the campaign's current date into the world clock as a prep desired state, keeping Foundry's time of day. The Core never writes the clock live.
 - **CAL-12** The adapter reads clock advances as observations.
-- **CAL-13** The adapter refuses to set a date after 28 Calistril 4800 AR (a failed action) instead of compensating for the PF2e clock's drift.
+- **CAL-13** The adapter refuses to set a date before 1 Pharast 4600 or after 28 Calistril 4800 AR (a failed action) instead of compensating for the PF2e clock's drift.
 - **CAL-14** The observed clock at session start and end proposes the session's fictional interval. The GM's notes override it. The wrap asks the GM, in its grouped round, only when both are missing or they disagree. The current date moves only through the wrap or a GM gesture.
