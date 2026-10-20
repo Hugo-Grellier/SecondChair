@@ -9,7 +9,7 @@ encounter or a hoard through the Core (ARC-03).
 
 from typing import Any, NamedTuple
 
-from secondchair.core.tools import Tool
+from secondchair.core.tools import Block, Tool
 from secondchair.core.workspace import Workspace
 
 THREATS = ("trivial", "low", "moderate", "severe", "extreme")
@@ -158,3 +158,7 @@ def tools(ws: Workspace) -> list[Tool]:
         Tool(fn=fn, responsibility="prep", delegated_action=False, reversible=True)
         for fn in (encounter_xp, treasure_budget)
     ]
+
+
+# The protocol range this block supports (ARC-17): `serve` refuses it outside the range.
+BLOCK = Block(protocol=("0.1.0", "0.2.0"), tools=tools)

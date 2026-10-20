@@ -8,7 +8,7 @@ discrepancy (RUL-10). The Core logs each one under rules and combat; the GM undo
 
 from typing import Literal
 
-from secondchair.core.tools import Tool, VttAction
+from secondchair.core.tools import Block, Tool, VttAction
 from secondchair.core.workspace import Workspace
 
 RESPONSIBILITY = "rules_and_combat"
@@ -153,3 +153,7 @@ def tools(_ws: Workspace) -> list[Tool]:
             reactive_strike,
         )
     ]
+
+
+# The protocol range this block supports (ARC-17): `serve` refuses it outside the range.
+BLOCK = Block(protocol=("0.1.0", "0.2.0"), tools=tools)

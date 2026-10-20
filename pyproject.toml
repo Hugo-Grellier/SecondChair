@@ -33,10 +33,10 @@ pf2e = "secondchair_pf2e:PLAYBOOKS"
 pf2e = "secondchair_pf2e.checks:check"
 
 [project.entry-points."secondchair.tools"]
-core = "secondchair.core.campaign:tools"
-foundry = "secondchair_foundry.tools:tools"
-pf2e = "secondchair_pf2e.calculators:tools"
-pf2e-encounters = "secondchair_pf2e.tools:tools"
+core = "secondchair.core.campaign:BLOCK"
+foundry = "secondchair_foundry.tools:BLOCK"
+pf2e = "secondchair_pf2e.calculators:BLOCK"
+pf2e-encounters = "secondchair_pf2e.tools:BLOCK"
 
 [dependency-groups]
 dev = [

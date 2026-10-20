@@ -13,7 +13,7 @@ from typing import Any, Literal, TypedDict
 import yaml
 
 from secondchair.core import index, vtt
-from secondchair.core.tools import Change, Tool, VttAction
+from secondchair.core.tools import Block, Change, Tool, VttAction
 from secondchair.core.workspace import STATE_DIR, Workspace
 
 DOOR_STATES = {"closed": 0, "open": 1, "locked": 2}  # Foundry's wall door states (`ds`)
@@ -178,3 +178,7 @@ def tools(ws: Workspace) -> list[Tool]:
         # ponytail: a read sits under memory (canon and continuity), as the Core's own reads.
         Tool(fn=official_name, responsibility="memory", delegated_action=False, reversible=True),
     ]
+
+
+# The protocol range this block supports (ARC-17): `serve` refuses it outside the range.
+BLOCK = Block(protocol=("0.1.0", "0.2.0"), tools=tools)
