@@ -407,6 +407,25 @@ def test_a_front_starting_inside_the_window_ticks_from_its_start(ws: Workspace) 
     assert turn(ws, "4725-01-22") == [f"{tolls}/tick@4725-01-15", f"{tolls}/tick@4725-01-22"]
 
 
+def test_a_front_the_gm_ends_in_the_future_ticks_until_its_end(ws: Workspace) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    rule = world._current(ws)[tolls]["front"]
+    act(
+        ws,
+        "correct_fact",
+        fact=rule["id"],
+        statement=rule["statement"],
+        entities=[],
+        origin=GM,
+        state=rule["state"],
+        valid_to="4725-01-20",
+    )
+
+    assert turn(ws, "4725-01-29") == [f"{tolls}/tick@4725-01-08", f"{tolls}/tick@4725-01-15"]
+    assert world.world_turn(ws, "4725-01-29") == []  # no exception call either
+    assert not list(ws.root.glob("calls/*.yaml"))
+
+
 def test_the_clock_stops_at_its_capacity(ws: Workspace) -> None:
     tolls, _ = front(ws, "Toll Squeeze", capacity=2)
     assert len(turn(ws, "4725-03-01")) == 2

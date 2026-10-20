@@ -123,15 +123,22 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
 
 def _current(ws: Workspace, at: str | None = None, head: bool = False) -> dict[str, dict[str, Any]]:
     """Entity id -> its state facts valid on `at`, by default the cursor (#170): one per key, a
-    list of agenda steps. A belief (`never_true`) never is. `head`, or before the first
-    world-turn: the open ones, whatever their dates, the head of each chain an effect transforms
-    (an occurrence may be applied after a later one, LW-17)."""
+    list of agenda steps. A belief (`never_true`) never is. `head`: the last fact of each chain,
+    whatever its dates, which an effect transforms (an occurrence may be applied after a later
+    one, LW-17) and whose dates `_holds` checks. Before the first world-turn, the open ones."""
     at = None if head else at or cursor(ws)
-    facts = (
-        index.search_facts(ws, at=at)
-        if at
-        else [f for f in index.search_facts(ws) if f["valid_to"] is None and not f["never_true"]]
-    )
+    if at:
+        facts = index.search_facts(ws, at=at)
+    else:
+        facts = [f for f in index.search_facts(ws) if not f["never_true"] and f.get("state")]
+        if not head:
+            facts = [f for f in facts if f["valid_to"] is None]
+        last: dict[tuple, dict] = {}
+        for f in sorted(facts, key=lambda f: _order(ws, f)):  # later in the chain wins
+            st = f["state"]
+            step = st["value"].get("id") if st["key"] == AGENDA else None
+            last[(st["of"], st["key"], step)] = f
+        facts = list(last.values())
     found: dict[str, dict[str, Any]] = {}
     for f in facts:
         if f.get("state") is None:
@@ -149,10 +156,23 @@ def _current(ws: Workspace, at: str | None = None, head: bool = False) -> dict[s
     return found
 
 
-def _started(ws: Workspace, f: dict, date: str) -> bool:
-    """Whether fact `f` holds from `date` on: it has started by then."""
+def _order(ws: Workspace, f: dict) -> tuple:
+    """A state fact's place in its chain: by start, an open fact last."""
     start = f["valid_from"]
-    return start is None or index.date_key(ws.calendar, start) <= index.date_key(ws.calendar, date)
+    return (
+        start is not None,
+        index.date_key(ws.calendar, start) if start else 0,
+        f["valid_to"] is None,
+    )
+
+
+def _holds(ws: Workspace, f: dict, date: str) -> bool:
+    """Whether fact `f` holds on `date`: started by then and not yet ended."""
+    on = index.date_key(ws.calendar, date)
+    start, end = f["valid_from"], f["valid_to"]
+    return (start is None or index.date_key(ws.calendar, start) <= on) and (
+        end is None or index.date_key(ws.calendar, end) > on
+    )
 
 
 def state(ws: Workspace) -> dict[str, dict]:
@@ -235,7 +255,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
         out.append({**occ, "rule": rule, **more})
         return out[-1]
 
-    for entity, s in sorted(_current(ws, until).items()):  # what starts in the window counts
+    for entity, s in sorted(_current(ws, head=True).items()):  # each date checked with _holds
         if FRONT in s and s[FRONT]["state"]["value"]["active"]:  # a pause suspends it (LW-14)
             rule = s[FRONT]["state"]["value"]
             clock = s[CLOCK]["state"]["value"] if CLOCK in s else 0
@@ -246,7 +266,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
             day = cal.add(rule["anchor"], f"{every}d")
             while room > 0 and at(day) <= at(until):
                 key = f"{entity}/tick@{day}"
-                if at(day) > at(since) and key not in used and _started(ws, s[FRONT], day):
+                if at(day) > at(since) and key not in used and _holds(ws, s[FRONT], day):
                     n = min(rule["ticks"], room)
                     room -= n
                     cls = "rule" if rule["unless"] is None else "derived"
@@ -268,6 +288,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
                 if (
                     "date" in step["when"]
                     and at(step["when"]["date"]) <= at(until)
+                    and _holds(ws, s[FRONT], step["when"]["date"])
                     and step_key not in used  # a dated step never scheduled is, late
                 ):
                     due(step_key, "step", "rule", entity, step["when"]["date"], a["id"])
@@ -278,6 +299,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
                 v["deadline"] is not None
                 and v["stage"] in ("available", "active")
                 and at(v["deadline"]) <= at(until)
+                and _holds(ws, s[SITUATION], v["deadline"])
                 and key not in used
             ):
                 # An engaged situation's deadline is new narrative (ADR 0009).
@@ -463,8 +485,8 @@ def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change
     played canon (LW-09)."""
     s = _current(ws, head=True).get(record["entity"], {AGENDA: []})
     key, date, entity = record["key"], record["date"], record["entity"]
-    if FRONT in s and not _started(ws, s[FRONT], date):
-        raise _Blocked(f"{entity} only becomes a front on {s[FRONT]['valid_from']}")
+    if FRONT in s and not _holds(ws, s[FRONT], date):
+        raise _Blocked(f"{entity} is not a front on {date}")
     names = {e["id"]: e["names"][0] for e in index.search_entities(ws)}
     if record["kind"] == "tick":
         if FRONT not in s:
