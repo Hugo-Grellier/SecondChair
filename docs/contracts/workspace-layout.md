@@ -295,7 +295,7 @@ frictions:
 | `rules_lookup` | GM (live session only), player | a window opened on a compendium document (`Compendium.…`) or a window of an app in `apps`; its span runs to that window's close | `apps` (`[Compendium, CompendiumBrowser]`) |
 | `hunting` | GM, player | `windows` windows opened and closed within `within` s with no act between | `windows` (3), `within` (30) |
 | `long_creature_turn` | GM | a turn whose combatant no player owns (`players: []`) lasting over `over` s, up to the next `turn` | `over` (90) |
-| `manual_correction` | GM | an `undo` event or Ctrl/Cmd+Z outside a text field, a `move.cancel`, or the same roll formulas rolled again within `within` s | `within` (10) |
+| `manual_correction` | GM | an `undo` event or Ctrl/Cmd+Z (not Shift: a redo) outside a text field, a `move.cancel`, or the same roll formulas rolled again within `within` s | `within` (10) |
 | `dead_time` | GM | in a GM creature's turn, over `over` s with no input record | `over` (20) |
 | `long_turn` | player | a turn of a combatant the player owns lasting over `over` s | `over` (120) |
 | `cancelled_roll_dialog` | player | a `roll.cancel` event | none |
@@ -304,7 +304,7 @@ frictions:
 | `targeting_fixed` | player | a `target` within `within` s after an action started: a `roll`, a system adapter's action event or a `roll.cancel` | `within` (10) |
 | `stumbling_input` | player | a burst of typing (no pause over `pause` s) with at least `deletions` deletions making at least `share` of its key presses | `deletions` (5), `share` (0.25), `pause` (2) |
 
-`roll.cancel`, `move.cancel` and `undo` also match a system adapter's event of that name (`pf2e.roll.cancel`). A turn still running when the records stop is not measured. The diagnostic playbook `diagnose-frictions` reads a report and proposes delegation table changes citing friction ids, at propose only: it changes nothing, and the GM edits `delegation.yaml` (TRC-06).
+`roll.cancel`, `move.cancel` and `undo` also match a system adapter's event of that name (`pf2e.roll.cancel`), which is then no action. A turn lasts until the next `turn` of the same combat, whoever advanced it; a combat's last turn, and one still running when the records stop, are not measured. Every threshold is a non-negative number, `apps` a list of names; any other value is refused. The diagnostic playbook `diagnose-frictions` reads a report and proposes delegation table changes citing friction ids, at propose only: it changes nothing, and the GM edits `delegation.yaml` (TRC-06).
 
 ## `capture/`
 

@@ -25,7 +25,7 @@ from secondchair_foundry import desk
 from secondchair_foundry.tools import REPORTS_DIR, SCENES_DIR, digest
 
 PATH = "/foundry"
-BINDING_FILE = "foundry.yaml"
+BINDING_FILE = traces.BINDING_FILE  # the traces of a campaign are filed under the id it binds
 HELLO_TIMEOUT = 10  # seconds the module has to say hello once the socket is open
 REPLY_TIMEOUT = 15  # seconds the GM client has to take an action and answer
 POLL = 1  # seconds between two looks at the live session, and at the desired scenes

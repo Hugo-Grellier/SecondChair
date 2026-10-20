@@ -66,24 +66,37 @@ def thresholds(ws: Workspace) -> dict[str, dict]:
     """The detectors' thresholds: the defaults, overridden by `frictions` in workspace.yaml."""
     path = ws.root / CONFIG_FILE
     tuned = (yaml.safe_load(path.read_text()) or {}).get("frictions") or {}
-    if not isinstance(tuned, dict) or any(
-        k not in DEFAULTS or not isinstance(v, dict) for k, v in tuned.items()
-    ):
+
+    def valid(name: str, values: object) -> bool:
+        if name not in DEFAULTS or not isinstance(values, dict):
+            return False
+        for key, value in values.items():
+            default = DEFAULTS[name].get(key)
+            if isinstance(default, list):
+                ok = isinstance(value, list) and all(isinstance(v, str) for v in value)
+            else:
+                ok = default is not None and type(value) in (int, float) and value >= 0
+            if not ok:
+                return False
+        return True
+
+    if not isinstance(tuned, dict) or not all(valid(k, v) for k, v in tuned.items()):
         raise WorkspaceError(
-            f"{path}: frictions maps detectors ({', '.join(DEFAULTS)}) to their thresholds; "
-            f"got {tuned!r}."
+            f"{path}: frictions maps detectors ({', '.join(DEFAULTS)}) to their thresholds, "
+            f"each a number (apps: a list of names); got {tuned!r}."
         )
     return {k: {**v, **tuned.get(k, {})} for k, v in DEFAULTS.items()}
 
 
 def _own(records: list[dict]) -> list[dict]:
-    """The user's own records, in time order: not SecondChair's, not gaps."""
+    """The user's own records, in time order: not SecondChair's acts, not gaps. A turn stays,
+    whoever advanced the combat: it is a boundary, not an act."""
     return sorted(
         (
             r
             for r in records
             if r.get("stream") in ("semantic", "input")
-            and r.get("by") != "secondchair"
+            and (r.get("by") != "secondchair" or _event(r) == "turn")
             and not str(r.get("app") or "").startswith("SecondChair")
         ),
         key=lambda r: r["t"],
@@ -101,8 +114,7 @@ def _is(r: dict, name: str) -> bool:
 
 
 def _system_action(r: dict) -> bool:
-    event = _event(r)
-    return event is not None and event not in GENERIC and not _is(r, "roll.cancel")
+    return _event(r) is not None and not any(_is(r, g) for g in GENERIC)
 
 
 def _act(r: dict) -> bool:
@@ -170,10 +182,13 @@ def hunting(recs: list[dict], _user: str, lim: dict) -> Iterator[Span]:
 
 def _turns(recs: list[dict]) -> Iterator[tuple[list[str], int, int]]:
     """Each turn this client saw end: whose it was (the users owning its combatant), its span.
-    ponytail: a turn still running when the records stop is not measured."""
+    A turn ends at the next turn of the same combat.
+    ponytail: a combat's last turn, and one still running when the records stop, are not
+    measured; the module traces no combat end."""
     turns = [r for r in recs if _event(r) == "turn" and isinstance(r.get("players"), list)]
     for a, b in pairwise(turns):
-        yield a["players"], a["t"], b["t"]
+        if a.get("turn") is not None and a.get("combat") == b.get("combat"):
+            yield a["players"], a["t"], b["t"]
 
 
 def long_creature_turn(recs: list[dict], _user: str, lim: dict) -> Iterator[Span]:
@@ -202,12 +217,17 @@ def dead_time(recs: list[dict], _user: str, lim: dict) -> Iterator[Span]:
 
 
 def manual_correction(recs: list[dict], _user: str, lim: dict) -> Iterator[Span]:
-    """An undo (Ctrl or Cmd+Z outside a text field), a cancelled move, or the same roll made
-    again within `within` s."""
+    """An undo (Ctrl or Cmd+Z outside a text field, not the Shift redo), a cancelled move, or
+    the same roll made again within `within` s."""
     last: dict | None = None
     for r in recs:
-        undo = r.get("input") == "key" and str(r.get("key")).lower() == "z"
-        if _is(r, "undo") or _is(r, "move.cancel") or (undo and (r.get("ctrl") or r.get("meta"))):
+        undo = (
+            r.get("input") == "key"
+            and str(r.get("key")).lower() == "z"
+            and (r.get("ctrl") or r.get("meta"))
+            and not r.get("shift")
+        )
+        if _is(r, "undo") or _is(r, "move.cancel") or undo:
             yield r["t"], r["t"]
         elif _event(r) == "roll":
             if (
@@ -245,15 +265,15 @@ def rage_clicks(recs: list[dict], _user: str, lim: dict) -> Iterator[Span]:
     while i < len(clicks):
         first = clicks[i]
         burst = [
-            c
-            for c in clicks[i:]
-            if c["t"] - first["t"] <= lim["within"] * 1000
-            and abs(c.get("x", 0) - first.get("x", 0)) <= lim["radius"]
-            and abs(c.get("y", 0) - first.get("y", 0)) <= lim["radius"]
+            j
+            for j in range(i, len(clicks))
+            if clicks[j]["t"] - first["t"] <= lim["within"] * 1000
+            and abs(clicks[j].get("x", 0) - first.get("x", 0)) <= lim["radius"]
+            and abs(clicks[j].get("y", 0) - first.get("y", 0)) <= lim["radius"]
         ]
         if len(burst) >= lim["clicks"]:
-            yield first["t"], burst[-1]["t"]
-            i = clicks.index(burst[-1]) + 1
+            yield first["t"], clicks[burst[-1]]["t"]
+            i = burst[-1] + 1
         else:
             i += 1
 

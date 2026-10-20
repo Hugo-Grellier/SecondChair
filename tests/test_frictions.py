@@ -11,7 +11,7 @@ from mcp import Client
 
 from secondchair import runner
 from secondchair.cli import main
-from secondchair.core import delegation, frictions, traces
+from secondchair.core import delegation, frictions, jobs, traces
 from secondchair.core import workspace as wsmod
 from secondchair.core.server import build_server
 
@@ -73,6 +73,60 @@ def test_thresholds_are_tunable_per_campaign(tmp_path: Path) -> None:
     config.write_text(config.read_text() + "  hunted: {}\n")
     with pytest.raises(wsmod.WorkspaceError, match="hunted"):
         frictions.thresholds(ws)
+
+
+def _sem(t: int, event: str, **data: object) -> dict:
+    return {"t": T0 + t, "stream": "semantic", "event": event, **data}
+
+
+def _click(t: int) -> dict:
+    return {"t": T0 + t, "stream": "input", "input": "click", "button": 0, "x": 1, "y": 1}
+
+
+def _found(records: list[dict], gm: bool) -> set[str]:
+    return {f["detector"] for f in frictions.detect(records, ALICE, gm, "live-session", DEFAULTS)}
+
+
+DEFAULTS = frictions.DEFAULTS
+
+
+def test_edge_cases_of_the_detectors() -> None:
+    # Identical click records, as a resend could duplicate them: one burst, and it ends.
+    assert len(list(frictions.rage_clicks([_click(0)] * 4, ALICE, DEFAULTS["rage_clicks"]))) == 1
+    # Ctrl+Shift+Z is a redo, not an undo.
+    redo = {"t": T0, "stream": "input", "input": "key", "key": "Z", "ctrl": True, "shift": True}
+    assert "manual_correction" not in _found([redo], True)
+    # A combat's last turn does not run into the next combat's first.
+    turns = [
+        _sem(0, "turn", combat="a", turn=0, players=[]),
+        _sem(999_000, "turn", combat="b", turn=0, players=[]),
+    ]
+    assert "long_creature_turn" not in _found(turns, True)
+    # A turn SecondChair advanced is still a boundary.
+    turns = [
+        _sem(0, "turn", combat="a", turn=0, players=[]),
+        _sem(10_000, "turn", combat="a", turn=1, players=[ALICE], by="secondchair"),
+        _sem(200_000, "turn", combat="a", turn=2, players=[]),
+    ]
+    assert _found(turns, True) == set() and _found(turns, False) == {"long_turn"}
+    # An adapter's cancelled move is a correction, never an act.
+    assert frictions.manual_acts([_sem(0, "pf2e.move.cancel")]) == 0
+
+
+def test_a_threshold_that_is_no_number_is_refused_and_a_moment_still_ends(
+    tmp_path: Path, machine_config: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", machine_config["XDG_DATA_HOME"])
+    ws = wsmod.init(tmp_path / "ws", "en", "absalom")
+    config = ws.root / "workspace.yaml"
+    config.write_text(config.read_text() + "frictions:\n  long_turn: {over: 90s}\n")
+    with pytest.raises(wsmod.WorkspaceError, match="long_turn"):
+        frictions.thresholds(ws)
+    delegation.change_moment(ws, "live-session")
+    (ws.root / "foundry.yaml").write_text("world: w\ncampaign: c0ffee\n")
+    _store("c0ffee", ALICE, "Alice", False, recorded("player"))
+    assert delegation.change_moment(ws, "between-sessions")
+    assert [j["playbook"] for j in jobs.pending(ws)] == ["wrap-a-session"]
 
 
 def test_secondchair_own_windows_and_acts_are_not_manual_acts() -> None:

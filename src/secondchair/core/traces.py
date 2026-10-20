@@ -24,6 +24,7 @@ from secondchair.core.workspace import Workspace
 
 USER = re.compile(r"[A-Za-z0-9]{1,64}")  # a Foundry user id, and so a safe file name
 STREAMS = ("semantic", "input", "gap")
+BINDING_FILE = "foundry.yaml"  # written by the Foundry connector: the campaign id it bound
 _lock = threading.Lock()
 
 
@@ -84,7 +85,9 @@ def record_lines(campaign: str, user: str, name: str, gm: bool, lines: list[dict
         with file.open("a") as out:
             out.write("\n" if torn else "")
             out.writelines(json.dumps(line, ensure_ascii=False) + "\n" for line in lines)
-        file.with_suffix(".json").write_text(json.dumps({"name": name, "gm": gm}))
+        meta, who = file.with_suffix(".json"), json.dumps({"name": name, "gm": gm})
+        if not meta.is_file() or meta.read_text() != who:
+            meta.write_text(who)
 
 
 def erase(ws: Workspace, campaign: str, user: object) -> None:
@@ -121,22 +124,24 @@ def _report_path(ws: Workspace, seq: int) -> Path:
 
 
 def campaign_of(ws: Workspace) -> str | None:
-    """The campaign id the Foundry connector bound this workspace to (foundry.yaml), if any."""
-    path = ws.root / "foundry.yaml"
+    """The campaign id the Foundry connector bound this workspace to, if any: its traces'
+    directory (workspace-layout.md, `foundry.yaml`)."""
+    path = ws.root / BINDING_FILE
     data = yaml.safe_load(path.read_text()) if path.is_file() else None
     campaign = data.get("campaign") if isinstance(data, dict) else None
     return campaign if isinstance(campaign, str) else None
 
 
-def report_moment(ws: Workspace, seq: int) -> Path | None:
-    """Write moment `seq`'s friction report, or None when no traces were kept in it."""
+def report_moment(ws: Workspace, seq: int, moment: str | None = None) -> Path | None:
+    """Write moment `seq`'s friction report, or None when no traces were kept in it. Without
+    `moment`, its name is read from the traces."""
     campaign = campaign_of(ws)
     if campaign is None:
         return None
     for file in sorted(directory(campaign).glob("*.jsonl")):
         for r in _read(file):
             if r.get("seq") == seq:
-                return report(ws, campaign, seq, r["moment"])
+                return report(ws, campaign, seq, moment or r["moment"])
     return None
 
 

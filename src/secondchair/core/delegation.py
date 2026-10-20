@@ -8,6 +8,7 @@ YAML file per action log entry in `action-log/` (docs/contracts/action-log-entry
 import fcntl
 import functools
 import inspect
+import sys
 import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -138,7 +139,6 @@ def change_moment(ws: Workspace, moment: str, notes: str | None = None) -> bool:
         calls.pass_deadline(ws, "end")
         ended = current_session(ws)
         _write_moment(ws.root, moment, seq + 1, session + (moment == "live-session"))
-    traces.report_moment(ws, seq)  # the ended moment's friction report (TRC-03)
     if ended is not None:
         jobs.queue(
             ws,
@@ -148,6 +148,10 @@ def change_moment(ws: Workspace, moment: str, notes: str | None = None) -> bool:
             responsibility="memory",
             tier="standard",
         )
+    try:  # the ended moment's friction report (TRC-03); `secondchair frictions` can redo it
+        traces.report_moment(ws, seq, current)
+    except (WorkspaceError, OSError) as e:
+        print(f"SecondChair: friction report of moment {seq} not written: {e}", file=sys.stderr)
     return True
 
 
