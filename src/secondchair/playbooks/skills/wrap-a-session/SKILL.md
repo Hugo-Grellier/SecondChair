@@ -47,7 +47,7 @@ When the job has both notes and a transcript, they tell the same session twice: 
 4. For each played statement, call `capture_candidate` with:
    - `job`, `source` (the Source's path, as given), `locator` (`<file>:<line>`, or a notes line's label) and `quote`: the Source's exact words, copied character for character. In the transcript, the line is the segment's line in the file (the first segment is line 1) and the quote is that segment's `text`, or an exact part of it, as decoded text (not the JSON escapes); the Core records the segment's speaker. A candidate whose quote is not in the Source is dropped;
    - `statement`: what is now true, in the campaign language, using canon's spelling of every name;
-   - `date`: the campaign date it happened, the session end unless the Source dates it;
+   - `date`: the campaign date it happened, the session end unless the Source dates it. When neither the Sources nor canon date the session, use the campaign's current date (`living_world`), and never classify a candidate as an ambiguity for the date alone: the GM settles the session's interval once, with `secondchair wrap <session> --start … --end …`. Say so once in your reply;
    - `entities`: the canon ids it is about; a name canon does not know goes in `new_names` instead, spelt as the Source spells it. Never put a known name in `new_names`;
    - `known_by`: `"party"` for what the table saw or heard, and the ids of the NPCs or factions who saw it or were told;
    - `closes`: the ids of facts this played event ends, if any;
