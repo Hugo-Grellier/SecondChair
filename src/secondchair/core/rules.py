@@ -20,6 +20,7 @@ from importlib.metadata import entry_points
 from typing import Any
 
 import yaml
+from mcp.server.mcpserver import Context
 
 from secondchair.core import calls, delegation
 from secondchair.core.delegation import (
@@ -207,6 +208,7 @@ def agent_tools(ws: Workspace) -> list[Callable[..., Any]]:
         target: str,
         params: dict[str, Any],
         agent: str,
+        ctx: Context,
         job: int | None = None,
     ) -> delegation.ActionResult:
         """Propose the VTT action that fixes an open rules discrepancy (a call of kind
@@ -215,6 +217,7 @@ def agent_tools(ws: Workspace) -> list[Callable[..., Any]]:
         automatically: the GM approves or rejects it. `agent`: your name; `job`: the job you
         run, if any."""
         with delegation._for_agent():
+            job = delegation.session_job(ws, ctx, job)
             return propose_fix(ws, discrepancy, op, target, params, agent, job)
 
     return [fix_discrepancy]
