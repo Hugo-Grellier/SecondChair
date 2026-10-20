@@ -246,7 +246,7 @@ def set_hold(
         raise DelegationError("A hold relayed by an agent must quote the GM's words.")
     with locked(ws):
         table = _read_yaml(ws.root / TABLE_FILE)
-        cell = table.get(moment, {}).get(responsibility)
+        cell = (table.get(moment) or {}).get(responsibility)
         if not isinstance(cell, dict):
             raise WorkspaceError(f"{ws.root / TABLE_FILE}: no {moment} / {responsibility} cell.")
         cell["hold"] = hold
@@ -491,6 +491,8 @@ def approve(
                 f"Entry {entry_id} is irreversible: approve it from an authenticated Surface "
                 "(the CLI in an interactive terminal)."
             )
+        if entry.get("cites"):  # canon may have changed since it was proposed
+            _check_cites(ws, entry["cites"])
         try:
             _apply(ws, entry, "after")
         except DelegationError as e:
@@ -815,17 +817,18 @@ def _disclose(ws: Workspace, disclosure: dict) -> None:
 
     if not disclosure.get("cites"):
         return
-    held = {k["fact"] for k in index.search_knowledge(ws, [index.PARTY]) if k["mode"] == "knows"}
+    known = {k["fact"] for k in index.search_knowledge(ws, [index.PARTY]) if k["mode"] == "knows"}
     locator = f"{LOG_DIR}/{disclosure['id']:06d}.yaml"
+    date, session = capture.time(ws)["current_date"], current_session(ws)
     for fact in dict.fromkeys(disclosure["cites"]):
-        if fact in held:
+        if fact in known:
             continue
         record = {
             "id": f"k-{secrets.token_hex(4)}",
             "knower": index.PARTY,
             "fact": fact,
             "mode": "knows",
-            "date": capture.time(ws)["current_date"],
+            "date": date,
             "event": None,
             "rank": "played",  # shown at the table, quoted by the disclosure's entry
             "origin": {
@@ -833,7 +836,7 @@ def _disclose(ws: Workspace, disclosure: dict) -> None:
                 "quote": f"{disclosure['tool']} {disclosure['target']}",
                 "locator": locator,
             },
-            "session": current_session(ws),
+            "session": session,
         }
         mark = {
             **{k: disclosure[k] for k in ("kind", "moment", "moment_seq", "tool")},
