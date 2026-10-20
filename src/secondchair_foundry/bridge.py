@@ -142,6 +142,10 @@ class Bridge:
     def bind(self, world: str, campaign: str | None) -> str:
         """Check the world against the workspace's binding (PKG-09, ARC-18), binding an unbound
         world to an unbound workspace on first contact."""
+        with delegation.locked(self.ws):  # read, check and write as one (#211)
+            return self._bind(world, campaign)
+
+    def _bind(self, world: str, campaign: str | None) -> str:
         binding = (
             yaml.safe_load(self.binding_path.read_text()) if self.binding_path.exists() else None
         )

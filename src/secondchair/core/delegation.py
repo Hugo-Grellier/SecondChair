@@ -1382,16 +1382,18 @@ _held = threading.local()
 
 
 @contextmanager
-def locked(ws: Workspace) -> Generator[None]:
+def locked(ws: Workspace | Path) -> Generator[None]:
     """One writer at a time across `serve` and the CLI; reentrant within a thread, since an
-    action reads the index, which may log hand edits.
+    action reads the index, which may log hand edits. A bare root for a workspace that does not
+    load yet (an upgrade).
     ponytail: one workspace-wide lock; finer locks if agents ever queue behind it."""
     held: set[Path] = _held.__dict__.setdefault("roots", set())
-    root = ws.root.resolve()
+    base = ws if isinstance(ws, Path) else ws.root
+    root = base.resolve()
     if root in held:
         yield
         return
-    lock = ws.root / STATE_DIR / "delegation.lock"
+    lock = base / STATE_DIR / "delegation.lock"
     lock.parent.mkdir(exist_ok=True)
     with lock.open("w") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
