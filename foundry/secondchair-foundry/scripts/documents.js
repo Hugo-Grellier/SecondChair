@@ -12,6 +12,7 @@ import {
   reconcile,
   sha,
   summary,
+  withOurs,
   withoutPlayed,
 } from "./scenes.js";
 
@@ -107,17 +108,41 @@ function cleaned(value, clean) {
   return value;
 }
 
+/** Foundry's update operators: `-=key` deletes, `==key` replaces. Never prep's. */
+const OPERATOR = /^(-=|==)/;
+
 /** `value` with dotted keys expanded as Foundry would, then its ownership keys dropped at every
- * depth, embedded documents included (`pages.0.ownership` too).
+ * depth, embedded documents included (`pages.0.ownership` too); an update operator at any depth
+ * is refused.
  * @param {any} value @param {(data: Data) => Data} expand @returns {any} */
 function unowned(value, expand) {
   if (Array.isArray(value)) return value.map((v) => unowned(v, expand));
   if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(expand(value))
-      .filter(([k]) => !OWNERSHIP.test(k))
-      .map(([k, v]) => [k, unowned(v, expand)]),
-  );
+  const entries = Object.entries(expand(value)).filter(([k]) => !OWNERSHIP.test(k));
+  const operator = entries.find(([k]) => OPERATOR.test(k));
+  if (operator) throw new Error(`No update operator (${operator[0]}) in prep.`);
+  return Object.fromEntries(entries.map(([k, v]) => [k, unowned(v, expand)]));
+}
+
+/** The module's identity flags, which only reconciliation writes: prep may not forge them. */
+export const RESERVED = [
+  "scene",
+  "document",
+  "created",
+  "spec",
+  "shape",
+  "local",
+  "source",
+  "base",
+  "key",
+];
+
+/** `fields` with only the module's own flags, its identity flags left out.
+ * @param {Data} fields @returns {Data} */
+function ownFlags(fields) {
+  if (!fields || typeof fields !== "object" || !("flags" in fields)) return fields;
+  const mine = Object.entries(fields.flags?.[MODULE] ?? {}).filter(([k]) => !RESERVED.includes(k));
+  return { ...fields, flags: mine.length ? { [MODULE]: Object.fromEntries(mine) } : {} };
 }
 
 /**
@@ -129,13 +154,14 @@ function unowned(value, expand) {
  * @param {{markdown(text: string): string, clean(html: string): string, expand(data: Data): Data}} html
  */
 export function written(type, data, { markdown, clean, expand }) {
-  const rest = cleaned(unowned(data, expand), clean);
+  const rest = ownFlags(cleaned(unowned(data, expand), clean));
   const [field] = EMBEDDED[type] ?? [];
   if (field && field in rest && !Array.isArray(rest[field])) {
     throw new Error(`\`${field}\` must be a list of ${EMBEDDED[type][1]} documents.`);
   }
   if (!field || !rest[field]) return rest;
-  rest[field] = rest[field].map((/** @type {Data} */ e) => {
+  rest[field] = rest[field].map((/** @type {Data} */ entry) => {
+    const e = ownFlags(entry);
     const md = e.text?.markdown;
     if (type !== "JournalEntry" || typeof md !== "string") return e;
     const { markdown: _, ...text } = e.text;
@@ -151,8 +177,8 @@ export const BEHAVIORS = [
   "displayScrollingText",
   "pauseGame",
   "suppressWeather",
+  "modifyMovementCost",
   "teleportToken",
-  "toggleBehavior",
 ];
 
 /** A Scene's embedded collections: what it places only arrives as an item. */
@@ -169,14 +195,12 @@ export const SCENE_EMBEDDED = [
   "walls",
 ];
 
-/** Foundry's update operators: `-=key` deletes, `==key` replaces. Never prep's in a scene. */
-const OPERATOR = /^(-=|==)/;
-
 /**
  * A desired scene under a prepared document's guards: no ownership at any depth, every HTML
- * string sanitized (a Note's text, a Tile's or Drawing's text); no update operator, and no
- * embedded collection in the scene itself; only the module's own flags on an item; a Region's
- * behaviours a list of the allowed types only. Refused as a whole: prep never writes one.
+ * string sanitized (a Note's text, a Tile's or Drawing's text); no update operator at any depth,
+ * and no embedded collection in the scene itself; only the module's own flags, its identity ones
+ * left out; no token actor delta; a Region's behaviours a list of the allowed types only. Refused
+ * as a whole: prep never writes one.
  * @param {import("./scenes.js").Desired} desired
  * @param {{clean(html: string): string, expand(data: Data): Data}} html
  * @returns {import("./scenes.js").Desired}
@@ -184,10 +208,11 @@ const OPERATOR = /^(-=|==)/;
 export function guardedScene(desired, { clean, expand }) {
   /** @param {string} what @param {Data} data */
   const guard = (what, data) => {
-    const safe = cleaned(unowned(data, expand), clean);
-    const operator = Object.keys(safe).find((k) => OPERATOR.test(k));
-    if (operator) throw new Error(`${what}: no update operator (${operator}) in prep.`);
-    return safe;
+    try {
+      return ownFlags(cleaned(unowned(data, expand), clean));
+    } catch (err) {
+      throw new Error(`${what}: ${/** @type {Error} */ (err).message}`);
+    }
   };
   const scene = guard("_scene", desired.scene);
   const placed = Object.keys(scene).filter((k) => SCENE_EMBEDDED.includes(k));
@@ -195,7 +220,9 @@ export function guardedScene(desired, { clean, expand }) {
     throw new Error(`_scene: place ${placed.join(", ")} as items, not in the scene.`);
   const items = desired.items.map((item) => {
     const data = guard(item.key, item.data);
-    if (data.flags) data.flags = data.flags[MODULE] ? { [MODULE]: data.flags[MODULE] } : {};
+    // A token's actor delta is play state: prep makes a token from its actor, unchanged.
+    if (item.type === "Token" && "delta" in data)
+      throw new Error(`${item.key}: no \`delta\` in prep.`);
     if ("behaviors" in data) {
       const list = data.behaviors;
       const plain = (/** @type {any} */ b) => b && typeof b === "object" && !Array.isArray(b);
@@ -246,7 +273,7 @@ export async function realiseDocument(key, desired, world) {
       let target = null;
       if (action.action === "create") {
         const made = base ? await world.fromBase(type, base, data) : data;
-        const { flags } = ours({
+        const flags = withOurs(made, {
           document: key,
           spec,
           shape: JSON.stringify(data),
@@ -255,7 +282,7 @@ export async function realiseDocument(key, desired, world) {
         target = await world.createDocument(type, {
           ...made,
           ownership: { default: 0 }, // the GM's only, whatever its base, until publish_journal
-          flags: { ...made.flags, ...flags },
+          flags,
         });
         realised = target;
         created[key] = true;
@@ -300,6 +327,21 @@ const INDEXED = [
   "system.traits.value",
 ];
 
+/** A path relative to Foundry's data, or why not: no scheme or URL (`https:`, `data:`, `//`),
+ * no leading `/`, no `..` segment, so a read never reaches outside the GM's install.
+ * @param {unknown} path @returns {string} */
+export function dataPath(path) {
+  const text = String(path ?? "");
+  const segments = text.split(/[/\\]/);
+  if (/^[a-z][\w+.-]*:/i.test(text) || /^[/\\]/.test(text) || segments.includes("..")) {
+    throw new Error(`"${text}" is not a path in Foundry's data: give a relative one.`);
+  }
+  return text;
+}
+
+/** The sources browse_files reads: the user data and Foundry's own public files. */
+const SOURCES = ["data", "public"];
+
 /** The most entries one generic read returns, so an MCP reply stays small. */
 export const LIMIT = 100;
 
@@ -326,7 +368,8 @@ export function genericReads({ browse, packs, documents, imageSize }) {
   return {
     async browse_files({ path = "", source = "data", extensions = null }) {
       const options = Array.isArray(extensions) ? { extensions } : {};
-      const { dirs = [], files = [] } = await browse(String(source), String(path), options);
+      if (!SOURCES.includes(String(source))) throw new Error(`Source "${source}": data or public.`);
+      const { dirs = [], files = [] } = await browse(String(source), dataPath(path), options);
       const more = Math.max(0, dirs.length - LIMIT) + Math.max(0, files.length - LIMIT);
       return { dirs: cut(dirs), files: cut(files), ...(more && { more }) };
     },
@@ -358,7 +401,7 @@ export function genericReads({ browse, packs, documents, imageSize }) {
     },
     async image_size({ path }) {
       if (typeof path !== "string" || !path) throw new Error("image_size needs a `path`.");
-      const { width, height } = await imageSize(path);
+      const { width, height } = await imageSize(dataPath(path));
       return { width, height };
     },
     async list_world_documents({ type, query = "" }) {

@@ -154,10 +154,13 @@ With no GM client the desired state waits: every connection starts by sending al
 A Token whose `actor` prep changed is rebound to the new Actor on update. A copy the GM pasted carries the same key: only one object per key is prep's, the others are the GM's.
 
 A desired scene gets a [prepared document's guards](#prepared-world-documents-arc-07-arc-10): `prepare_scene` refuses an `ownership` key anywhere in the scene or an item's data. By allowlist, it also refuses:
-- an update operator key (`-=…`, `==…`) in the scene or an item;
+- an update operator key (`-=…`, `==…`) at any depth of the scene or an item;
 - an embedded collection in the scene itself (`drawings`, `levels`, `lights`, `notes`, `regions`, `sounds`, `templates`, `tiles`, `tokens`, `walls`, dotted or not): what a scene places arrives only as an item;
 - an item's `flags` of any namespace but `secondchair-foundry`;
-- a Region's `behaviors` that is not a list of objects (or is given as dotted keys), or holds a behaviour whose type is not one of `adjustDarknessLevel`, `displayScrollingText`, `pauseGame`, `suppressWeather`, `teleportToken`, `toggleBehavior` (any other, such as `executeScript`, `executeMacro` or a module's, could run code in every client).
+- a Region's `behaviors` that is not a list of objects (or is given as dotted keys), or holds a behaviour whose type is not one of `adjustDarknessLevel`, `displayScrollingText`, `modifyMovementCost`, `pauseGame`, `suppressWeather`, `teleportToken` (any other, such as `executeScript`, `executeMacro`, a module's, or `toggleBehavior`, which enables any behaviour by UUID, could run code in every client);
+- a Token's `delta`: a token is made from its actor.
+
+In the scene, its items and a [prepared document](#prepared-world-documents-arc-07-arc-10) (its embedded documents included), flags are prep's only in the `secondchair-foundry` namespace, and never its identity flags, which reconciliation writes (`scene`, `document`, `created`, `spec`, `shape`, `local`, `source`, `base`, `key`): `prepare_scene` and `prepare_document` refuse the others, and refuse an update operator at any depth; the module drops them, and refuses an operator too.
 
 The module, after expanding dotted keys, drops the ownership keys and an item's foreign flags namespaces, sanitizes every HTML string (a Note's, a Tile's or Drawing's text), and refuses the rest as a whole scene.
 
@@ -246,7 +249,7 @@ While a live session is open, in every mode of play, the PF2e adapter emits a `p
 
 What only the VTT knows, asked by the Core: `{"type": "read", "id", "op", "params"}`, answered `{"type": "reply", "id", "ok": true, "result": …}`, or with `ok: false` and an `error`. A read changes nothing, so it is neither queued nor recorded with the handled requests. The library answers its own generic reads (ARC-07), then the adapter's `reads[op](params, {language})`, and refuses one neither knows. With no GM client, or no reply within 15 seconds, the read fails with a message for the agent.
 
-The generic reads, answered by `secondchair-foundry` whatever the system, each bounded to 100 entries so a reply stays small; the Core's tools of the same names (prep) forward them, for an agent to find the maps, sounds, tokens and creatures of the GM's install:
+The generic reads, answered by `secondchair-foundry` whatever the system, each bounded to 100 entries so a reply stays small; a `path` is relative to Foundry's data (no scheme or URL such as `https:`, `data:`, `blob:`, `file:` or `//`, no leading `/`, no `..` segment) and `browse_files` reads `data` or `public` only, refused by the Core's tool and again by the module; the Core's tools of the same names (prep) forward them, for an agent to find the maps, sounds, tokens and creatures of the GM's install:
 
 | `op` | `params` | `result` |
 |---|---|---|

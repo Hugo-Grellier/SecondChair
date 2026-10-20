@@ -113,6 +113,10 @@ def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F
             },
             "executeScript",
         ),
+        (
+            {**CAVE, "items": [{"key": "g", "type": "Token", "data": {"delta": {"name": "x"}}}]},
+            "delta",
+        ),
         *(
             ({**CAVE, "items": [{"key": "r", "type": "Region", "data": data}]}, error)
             for data, error in [
@@ -124,6 +128,10 @@ def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F
                 ({"==behaviors": []}, "operator"),
                 ({"flags": {"pf2e": {}}}, "pf2e"),
                 ({"flags.core.sheetClass": "x"}, "core"),
+                ({"flags": {"secondchair-foundry": {"key": "boss"}}}, "reconciliation"),
+                ({"flags.secondchair-foundry.spec": "s"}, "reconciliation"),
+                ({"behaviors": [{"type": "toggleBehavior"}]}, "toggleBehavior"),
+                ({"behaviors": [{"type": "pauseGame", "system": {"-=once": None}}]}, "operator"),
             ]
         ),
         *(
@@ -133,6 +141,9 @@ def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F
                 ({"walls.0.c": [0, 0, 1, 1]}, "as items"),
                 ({"levels": [{}]}, "as items"),
                 ({"-=regions": None}, "operator"),
+                ({"grid": {"==size": 100}}, "operator"),
+                ({"flags": {"secondchair-foundry": {"scene": "x"}}}, "reconciliation"),
+                ({"flags": {"core": {}}}, "core"),
             ]
         ),
     ],
@@ -150,8 +161,9 @@ def test_a_scene_never_sets_ownership_nor_runs_a_script(
 
 
 def test_a_scene_may_place_an_allowed_region_behaviour(ws: Workspace) -> None:  # noqa: F811
-    region = {"key": "r", "type": "Region", "data": {"behaviors": [{"type": "pauseGame"}]}}
-    flags = {"flags": {"secondchair-foundry": {}}}
+    behaviors = [{"type": "pauseGame"}, {"type": "modifyMovementCost"}]
+    region = {"key": "r", "type": "Region", "data": {"behaviors": behaviors}}
+    flags = {"flags": {"secondchair-foundry": {"note": "mine"}}}
     tile = {"key": "t", "type": "Tile", "data": flags}
     arguments = {"key": "cave", **CAVE, "items": [region, tile], "agent": "claude-prep"}
     assert not call(ws, "prepare_scene", arguments).is_error

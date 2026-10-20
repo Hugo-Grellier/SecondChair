@@ -80,6 +80,23 @@ def test_prep_writes_a_document_desired_state(ws: Workspace) -> None:  # noqa: F
             {"type": "Actor", "data": {"name": "x", "flags": {"m": {"==ownership": {}}}}},
             "ownership",
         ),
+        ({"type": "Actor", "data": {"name": "x", "system": {"-=hp": None}}}, "operator"),
+        ({"type": "Actor", "data": {"name": "x", "flags": {"pf2e": {}}}}, "pf2e"),
+        (
+            {"type": "Actor", "data": {"name": "x", "flags.secondchair-foundry.document": "y"}},
+            "reconciliation",
+        ),
+        (
+            {"type": "JournalEntry", "data": {"name": "x", "pages": [{"flags": {"core": {}}}]}},
+            "core",
+        ),
+        (
+            {
+                "type": "JournalEntry",
+                "data": {"name": "x", "pages": [{"flags": {"secondchair-foundry": {"key": "k"}}}]},
+            },
+            "reconciliation",
+        ),
         (
             {"type": "JournalEntry", "data": {"name": "x", "pages": [{"ownership": {}}]}},
             "publish_journal",
@@ -201,3 +218,28 @@ def test_an_image_size_is_asked_of_the_gm_client(bridge: str, token: str) -> Non
         thread.join(timeout=10)
 
     assert answered["reply"].structured_content == {"width": 4200, "height": 2800}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "https://evil.example/x.png",
+        "data:image/png;base64,AAAA",
+        "blob:abc",
+        "file:///etc/passwd",
+        "//evil.example/x.png",
+        "/etc/passwd",
+        "maps/../../x.png",
+        "maps\\..\\x.png",
+    ],
+)
+@pytest.mark.parametrize("tool", ["image_size", "browse_files"])
+def test_a_read_path_outside_foundry_data_is_refused_before_asking(
+    ws: Workspace,  # noqa: F811
+    tool: str,
+    path: str,
+) -> None:
+    result = call(ws, tool, {"path": path})
+
+    assert result.is_error
+    assert "relative" in result.content[0].text

@@ -8,6 +8,7 @@ A prepared scene or world document is a desired state in the workspace, realised
 import hashlib
 import json
 import re
+from collections.abc import Iterator
 from typing import Any, Literal, TypedDict
 
 import yaml
@@ -27,16 +28,18 @@ EMBEDDED = ("pages", "sounds", "items", "results")  # embedded documents, each r
 UUID = re.compile(r"^(?:Compendium\.[\w-]+\.[\w-]+\.)?(\w+)\.[A-Za-z0-9]+$")
 ITEM_TYPES = ("Token", "Wall", "AmbientLight", "AmbientSound", "Note", "Tile", "Drawing", "Region")
 MODULE = "secondchair-foundry"  # the only flags namespace prep may write on a placed object
-# The Region behaviour types prep may place: any other (executeScript, executeMacro, a module's)
-# could run code in every client.
+# The Region behaviour types prep may place: any other (executeScript, executeMacro, a module's,
+# toggleBehavior, which enables any behaviour by UUID) could run code in every client.
 BEHAVIORS = (
     "adjustDarknessLevel",
     "displayScrollingText",
     "pauseGame",
     "suppressWeather",
+    "modifyMovementCost",
     "teleportToken",
-    "toggleBehavior",
 )
+# The module's identity flags, which only reconciliation writes: prep may not forge them.
+RESERVED = ("scene", "document", "created", "spec", "shape", "local", "source", "base", "key")
 # A Scene's embedded collections: what a scene places only arrives as an item.
 SCENE_EMBEDDED = (
     *("drawings", "levels", "lights", "notes", "regions", "sounds", "templates", "tiles"),
@@ -123,9 +126,10 @@ def prepare_scene(
     fields; a Token also takes `actor`, the UUID of the Actor (world or compendium) it is made
     from. `choices` are the GM's calls by object key
     (`_scene` for the scene itself): `keep` the VTT's version of a conflict, `overwrite` it, or
-    `recreate` an object deleted in play. Never set `ownership` nor another module's `flags`; a
+    `recreate` an object deleted in play. Never set `ownership`, an update operator (`-=`, `==`),
+    another module's `flags` or the module's own identity flags, nor a Token's `delta`; a
     Region's `behaviors` are of the types adjustDarknessLevel, displayScrollingText, pauseGame,
-    suppressWeather, teleportToken, toggleBehavior only; HTML is sanitized. Writing the same
+    suppressWeather, modifyMovementCost, teleportToken only; HTML is sanitized. Writing the same
     state again changes nothing."""
     desired: dict[str, Any] = {"scene": scene, "items": items}
     if choices:
@@ -157,26 +161,48 @@ def _check(key: str, desired: dict[str, Any]) -> None:
             raise ValueError(f"{k}: an item has only key, type, actor and data.")
         if "actor" in item and (item["type"] != "Token" or not isinstance(item["actor"], str)):
             raise ValueError(f"{k}: only a Token takes an `actor`, an Actor's UUID.")
-        _check_placed(k, item["data"])
-    if operator := next((o for o in desired["scene"] if str(o).startswith(("-=", "=="))), None):
-        raise ValueError(f"_scene: no update operator ({operator}) in prep.")
-    if placed := sorted({str(f).split(".")[0] for f in desired["scene"]} & set(SCENE_EMBEDDED)):
-        raise ValueError(f"_scene: place {', '.join(placed)} as items, not in the scene.")
     if _sets_ownership([desired["scene"], *(i["data"] for i in desired["items"])]):
         raise ValueError("`ownership` is not prep's: who sees a scene is the GM's call in Foundry.")
+    for item in desired["items"]:
+        _check_fields(item["key"], item["data"])
+        _check_placed(item["key"], item["data"])
+        if item["type"] == "Token" and any(p[0] == "delta" for p in _paths(item["data"])):
+            raise ValueError(f"{item['key']}: no `delta` in prep: a token is its actor's.")
+    _check_fields("_scene", desired["scene"])
+    if placed := sorted({str(f).split(".")[0] for f in desired["scene"]} & set(SCENE_EMBEDDED)):
+        raise ValueError(f"_scene: place {', '.join(placed)} as items, not in the scene.")
+
+
+def _paths(value: object, prefix: tuple[str, ...] = ()) -> Iterator[tuple[str, ...]]:
+    """Every field path in `value`, dotted keys split as Foundry expands them, a list's entries
+    under their index."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            path = (*prefix, *str(k).split("."))
+            yield path
+            yield from _paths(v, path)
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            yield from _paths(v, (*prefix, str(i)))
+
+
+def _check_fields(what: str, data: dict[str, Any]) -> None:
+    """Refuse, at any depth of a document's or a placed object's fields, what only Foundry or
+    reconciliation writes: an update operator (`-=`, `==`), flags of another namespace than the
+    module's, the module's own identity flags. An embedded document's flags are checked too."""
+    for path in _paths(data):
+        if operator := next((s for s in path if s.startswith(("-=", "=="))), None):
+            raise ValueError(f"{what}: no update operator ({operator}) in prep.")
+        at = 2 if len(path) > 2 and path[0] in EMBEDDED else 0
+        if len(path) > at + 1 and path[at] == "flags":
+            if path[at + 1] != MODULE:
+                raise ValueError(f"{what}: flags of {path[at + 1]} are not prep's.")
+            if len(path) > at + 2 and path[at + 2] in RESERVED:
+                raise ValueError(f"{what}: the module's `{path[at + 2]}` flag is reconciliation's.")
 
 
 def _check_placed(key: str, data: dict[str, Any]) -> None:
-    """Refuse in a placed object's data what only the GM may write: an update operator, flags of
-    another namespace than the module's, a Region behaviour of a type not allowed."""
-    if operator := next((o for o in data if str(o).startswith(("-=", "=="))), None):
-        raise ValueError(f"{key}: no update operator ({operator}) in prep.")
-    flags = data.get("flags", {})
-    if not isinstance(flags, dict):
-        raise ValueError(f"{key}: `flags` must map namespaces to their flags.")
-    dotted = {str(f).split(".")[1] for f in data if str(f).startswith("flags.")}
-    if foreign := sorted((set(flags) | dotted) - {MODULE}):
-        raise ValueError(f"{key}: flags of {', '.join(foreign)} are not prep's.")
+    """Refuse a Region's behaviours unless they are a list of the types prep may place."""
     if any(str(f).startswith("behaviors.") for f in data) or not (
         isinstance(data.get("behaviors", []), list)
         and all(isinstance(b, dict) for b in data.get("behaviors", []))
@@ -220,8 +246,9 @@ def prepare_document(
     `@prepared:<key>` stands for that prepared document's Foundry id (a Token's `actor`: its
     UUID), and `@prepared:<playlist key>/<sound name>` for that sound's id (a Scene's
     `playlistSound`). `choice` is the GM's call on a conflict: `keep` the VTT's version,
-    `overwrite` it, or `recreate` a document deleted in Foundry. Writing the same state again
-    changes nothing."""
+    `overwrite` it, or `recreate` a document deleted in Foundry. Never set `ownership`, an update
+    operator (`-=`, `==`), another module's `flags` or the module's own identity flags. Writing
+    the same state again changes nothing."""
     desired: dict[str, Any] = {"type": type}
     if base is not None:
         desired["base"] = base
@@ -251,6 +278,7 @@ def _check_document(key: str, desired: dict[str, Any]) -> None:
             "`ownership` is not prep's: a prepared document is the GM's only, and only "
             "`publish_journal` shows a journal to the players."
         )
+    _check_fields(key, data)
     if base is None and not (isinstance(data.get("name"), str) and data["name"]):
         raise ValueError("Without a `base`, the document needs a `name` in `data`.")
     found = UUID.match(base) if isinstance(base, str) else None
@@ -273,6 +301,18 @@ def _sets_ownership(value: object) -> bool:
     )
 
 
+def _data_path(path: str) -> str:
+    """`path` if it is relative to Foundry's data: no scheme or URL (`https:`, `data:`, `//`), no
+    leading `/`, no `..` segment, so a read never reaches outside the GM's install."""
+    if (
+        re.match(r"^[a-z][\w+.-]*:", path, re.IGNORECASE)
+        or path.startswith(("/", "\\"))
+        or ".." in re.split(r"[/\\]", path)
+    ):
+        raise ValueError(f"{path!r} is not a path in Foundry's data: give a relative one.")
+    return path
+
+
 def browse_files(
     path: str = "", source: str = "data", extensions: list[str] | None = None
 ) -> dict[str, Any]:
@@ -283,7 +323,9 @@ def browse_files(
     only those files, such as `[".webp", ".jpg", ".png", ".webm"]` for maps or
     `[".ogg", ".mp3"]` for sounds. Long listings are cut short, with `more` saying how many were
     left out."""
-    params: dict[str, Any] = {"path": path, "source": source, "extensions": extensions}
+    if source not in ("data", "public"):
+        raise ValueError(f"Source {source!r}: `data` or `public`.")
+    params = {"path": _data_path(path), "source": source, "extensions": extensions}
     return vtt.read("browse_files", params)
 
 
@@ -292,7 +334,9 @@ def image_size(path: str) -> dict[str, Any]:
     `path` as `browse_files` gives it. Set a scene's `width` and `height` from its map's, and its
     `grid.size` so the map's squares fall on the grid (a map drawn at 140 pixels a square takes
     `grid: {size: 140}`)."""
-    return vtt.read("image_size", {"path": path})
+    if not path:
+        raise ValueError("Give the image's path.")
+    return vtt.read("image_size", {"path": _data_path(path)})
 
 
 def search_compendium(query: str, type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:

@@ -215,6 +215,13 @@ const embedded = (scene, type, id) =>
  * @param {Data} fields */
 export const ours = (fields) => ({ flags: { [MODULE]: fields } });
 
+/** `data`'s flags with ours added, its own flags in our namespace kept, ours winning.
+ * @param {Data} data @param {Data} fields */
+export const withOurs = (data, fields) => ({
+  ...data.flags,
+  [MODULE]: { ...data.flags?.[MODULE], ...fields },
+});
+
 /**
  * Realise one desired scene: create it, or reconcile it with what the VTT holds now.
  * @param {string} key  the scene's key in the workspace
@@ -236,7 +243,7 @@ export async function realise(key, desired, { findScene, createScene, tokenData,
   if (!scene) {
     // With levels, the map goes into the default level the new scene comes with.
     const { levels: _, ...fields } = headWritten(head, null, levels);
-    scene = await createScene({ ...fields, ...ours({ scene: key, created: {} }) });
+    scene = await createScene({ ...fields, flags: withOurs(fields, { scene: key, created: {} }) });
     if (levels) await scene.update(headWritten(head, scene.toObject(), levels));
     actions.push({ action: "create", key: "_scene", type: "Scene" });
   } else {
@@ -294,10 +301,8 @@ export async function realise(key, desired, { findScene, createScene, tokenData,
       let doc;
       if (action.action === "create") {
         const data = type === "Token" && item.actor ? await tokenData(item) : item.data;
-        const { flags } = ours({ key: k, spec, shape: JSON.stringify(item.data) });
-        [doc] = await scene.createEmbeddedDocuments(type, [
-          { ...data, flags: { ...data.flags, ...flags } },
-        ]);
+        const flags = withOurs(data, { key: k, spec, shape: JSON.stringify(item.data) });
+        [doc] = await scene.createEmbeddedDocuments(type, [{ ...data, flags }]);
         created[k] = true;
       } else if (action.action === "update") {
         /** @type {Data} */

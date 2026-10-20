@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  dataPath,
   finder,
   genericReads,
   guardedScene,
@@ -464,12 +465,14 @@ test("every HTML string is sanitized, whatever field it is in", async () => {
 test("ownership is dropped at any depth, and an embedded field must be a list", async () => {
   const w = world();
   const desired = handout();
-  /** @type {any} */ (desired.data).flags = { x: { "-=ownership": null, deep: { ownership: 2 } } };
+  /** @type {any} */ (desired.data).flags = {
+    [MODULE]: { "-=ownership": null, deep: { ownership: 2 } },
+  };
   /** @type {any} */ (desired.data.pages[0]).text.ownership = { default: 2 };
   await realiseChecked(w, desired);
   const [journal] = w.docs;
   assert.doesNotMatch(JSON.stringify(journal.source.pages), /ownership/);
-  assert.deepEqual(journal.source.flags.x, { deep: {} });
+  assert.deepEqual(journal.source.flags[MODULE].deep, {});
   assert.deepEqual(journal.source.ownership, { default: 0 });
 
   const dotted = { type: "JournalEntry", data: { name: "Map", "pages.0.ownership.default": 2 } };
@@ -535,4 +538,88 @@ test("a desired scene gets a document's guards: no ownership, clean HTML, no scr
     { name: "Cave", "-=regions": null },
   ])
     assert.throws(() => guardedScene({ scene, items: [] }, deps), /as items|operator/);
+});
+
+test("a read path stays in Foundry's data: no URL, scheme, absolute path or ..", async () => {
+  for (const ok of ["", "maps", "modules/pf2e-beginner-box/assets/map.webp", "a..b/c.webp"])
+    assert.equal(dataPath(ok), ok);
+  const reads = genericReads({
+    browse: async () => ({ dirs: [], files: [] }),
+    packs: () => [],
+    documents: () => null,
+    imageSize: async () => ({ width: 1, height: 1 }),
+  });
+  for (const bad of [
+    "https://evil.example/x.png",
+    "http:x.png",
+    "data:image/png;base64,AAAA",
+    "blob:abc",
+    "file:///etc/passwd",
+    "//evil.example/x.png",
+    "/etc/passwd",
+    "\\server\\x.png",
+    "maps/../../x.png",
+    "..",
+    "maps\\..\\x.png",
+  ]) {
+    await assert.rejects(reads.image_size({ path: bad }), /relative/, bad);
+    await assert.rejects(reads.browse_files({ path: bad }), /relative/, bad);
+  }
+  await assert.rejects(reads.browse_files({ path: "maps", source: "s3" }), /data or public/);
+});
+
+test("prep keeps only the module's flags, never its identity ones, nor any update operator", async () => {
+  const w = world();
+  const desired = handout();
+  /** @type {any} */ (desired.data).flags = {
+    pf2e: { x: 1 },
+    [MODULE]: { note: "mine", document: "other", spec: "s", shape: "{}", local: "l" },
+  };
+  /** @type {any} */ (desired.data.pages[0]).flags = { core: { x: 1 }, [MODULE]: { key: "k" } };
+  await realiseChecked(w, desired);
+  const [journal] = w.docs;
+  assert.equal(journal.source.flags.pf2e, undefined);
+  assert.equal(journal.source.flags[MODULE].note, "mine");
+  assert.equal(journal.source.flags[MODULE].document, "ransom"); // reconciliation's, not prep's
+  assert.deepEqual(journal.source.pages[0].flags, {});
+
+  for (const data of [
+    { name: "x", system: { "-=hp": null } },
+    { name: "x", pages: [{ name: "p", text: { "==content": "" } }] },
+  ]) {
+    const other = world();
+    await assert.rejects(
+      realiseDocument("x", { type: "JournalEntry", data }, other.deps),
+      /operator/,
+    );
+  }
+
+  const { deps } = world();
+  const scene = (/** @type {any} */ items, head = {}) => ({ scene: { name: "C", ...head }, items });
+  const guarded = guardedScene(
+    scene(
+      [{ key: "t", type: "Tile", data: { flags: { [MODULE]: { key: "x", spec: "s", a: 1 } } } }],
+      {
+        flags: { core: {}, [MODULE]: { scene: "forged" } },
+      },
+    ),
+    deps,
+  );
+  assert.deepEqual(guarded.scene.flags, {});
+  assert.deepEqual(guarded.items[0].data.flags, { [MODULE]: { a: 1 } });
+  assert.throws(
+    () =>
+      guardedScene(scene([{ key: "t", type: "Tile", data: { texture: { "-=src": null } } }]), deps),
+    /operator/,
+  );
+  assert.throws(
+    () => guardedScene(scene([{ key: "g", type: "Token", data: { delta: { name: "x" } } }]), deps),
+    /delta/,
+  );
+  for (const type of ["modifyMovementCost", "pauseGame"]) {
+    const region = { key: "r", type: "Region", data: { behaviors: [{ type }] } };
+    assert.equal(guardedScene(scene([region]), deps).items[0].data.behaviors[0].type, type);
+  }
+  const toggle = { key: "r", type: "Region", data: { behaviors: [{ type: "toggleBehavior" }] } };
+  assert.throws(() => guardedScene(scene([toggle]), deps), /toggleBehavior/);
 });
