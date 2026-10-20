@@ -106,6 +106,30 @@ function placeable(token) {
   return token.object;
 }
 
+/** One of a token's spells, by id or slug. @param {Doc} token @param {string} key */
+function spellOf(token, key) {
+  const spell = (token.actor.itemTypes?.spell ?? []).find(
+    (/** @type {Doc} */ s) => s.id === key || s.slug === key,
+  );
+  if (!spell) throw new Error(`${token.actor.name} has no spell "${key}".`);
+  return spell;
+}
+
+/** One of a token's actions or feats, by slug. @param {Doc} token @param {string} slug */
+function abilityOf(token, slug) {
+  const { action = [], feat = [] } = token.actor.itemTypes ?? {};
+  const item = [...action, ...feat].find((/** @type {Doc} */ i) => i.slug === slug);
+  if (!item) throw new Error(`${token.actor.name} has no action or feat "${slug}".`);
+  return item;
+}
+
+/** The slugs of a token's items of one type. @param {Doc} token @param {string} type @returns {string[]} */
+const slugs = (token, type) =>
+  (token.actor.itemTypes?.[type] ?? []).map((/** @type {Doc} */ i) => String(i.slug));
+
+/** Reactive Strike, and its pre-remaster name. */
+const REACTIVE = ["reactive-strike", "attack-of-opportunity"];
+
 /** Where the executor's observations go, once the library starts capture. */
 /** @type {import("./executor.js").Env["emit"]} */
 let emitted = () => {};
@@ -120,7 +144,121 @@ const combat = {
     game.combat.combatants.some((/** @type {Doc} */ c) => c.token?.uuid === token.uuid),
   state: (token) => {
     const actor = /** @type {Doc} */ (token).actor;
-    return { hp: traced.hp(actor), conditions: traced.conditions(actor) };
+    return {
+      hp: traced.hp(actor),
+      conditions: traced.conditions(actor),
+      resources: resources(actor),
+      effects: Object.fromEntries(
+        (actor.itemTypes?.effect ?? []).map((/** @type {Doc} */ e) => [e.id, e.slug]),
+      ),
+    };
+  },
+  async spell(token, key) {
+    const spell = spellOf(token, key);
+    const time = String(spell.system?.time?.value ?? "").trim();
+    return {
+      id: spell.id,
+      name: spell.name,
+      // Nothing counted to spend: a cantrip, at will, or from a wand, staff or scroll.
+      free:
+        spell.isCantrip === true ||
+        spell.atWill === true ||
+        traced.spent(
+          /** @type {Doc} */ (token).actor,
+          spell.spellcasting?.id,
+          spell.uuid,
+          spell.rank,
+        ).kind === "none",
+      variable: /^\d+ to \d+$/.test(time),
+      overlays: [...(spell.overlays?.keys() ?? [])],
+    };
+  },
+  async cast(token, key, rank, variant) {
+    const spell = spellOf(token, key);
+    const entry = spell.spellcasting;
+    if (!entry) throw new Error(`${spell.name} is in no spellcasting entry.`);
+    const castRank = rank ?? spell.rank;
+    const cast = variant ? spell.loadVariant({ overlayIds: [variant], castRank }) : spell;
+    if (!cast) throw new Error(`pf2e could not load ${spell.name}'s variant "${variant}".`);
+    await entry.cast(cast, { rank: castRank });
+  },
+  // The resource keys of `resources` (outcomes.js): focus, a spontaneous entry's slot, a prepared
+  // spell's copies in a slot (how many are left unexpended), an innate spell's uses.
+  async setResource(token, key, value) {
+    const actor = /** @type {Doc} */ (token).actor;
+    const [id, slot, copy] = key.split(".");
+    if (key === "focus") return actor.update({ "system.resources.focus.value": value });
+    if (slot === "uses")
+      return actor.items.get(id)?.update({ "system.location.uses.value": value });
+    const entry = actor.items.get(id);
+    if (!copy) return entry?.update({ [`system.slots.${slot}.value`]: value });
+    let left = value;
+    const prepared = (entry?.system?.slots?.[slot]?.prepared ?? []).map((/** @type {Doc} */ c) => {
+      if (c?.id !== copy) return c;
+      left -= 1;
+      return { ...c, expended: left < 0 };
+    });
+    return entry?.update({ [`system.slots.${slot}.prepared`]: prepared });
+  },
+  async selfEffect(token, slug) {
+    const item = abilityOf(token, slug);
+    const uuid = item.system?.selfEffect?.uuid;
+    if (!uuid) throw new Error(`${item.name} has no self-effect.`);
+    const effect = /** @type {Doc} */ (await fromUuid(uuid));
+    if (effect?.type !== "effect") throw new Error(`${item.name}'s self-effect ${uuid} is gone.`);
+    return { uuid, slug: effect.slug };
+  },
+  post: (token, slug) => abilityOf(token, slug).toMessage(),
+  // ponytail: a bare copy, without the origin context pf2e's chat card adds; add it when an
+  // effect's duration or rule elements need the origin.
+  async addEffect(token, uuid) {
+    const effect = /** @type {Doc} */ (await fromUuid(uuid));
+    return /** @type {Doc} */ (token).actor.createEmbeddedDocuments("Item", [effect.toObject()]);
+  },
+  removeEffect: (token, id) => /** @type {Doc} */ (token).actor.items.get(id)?.delete(),
+  pixelsPerFoot: (token) => {
+    const grid = /** @type {Doc} */ (token).parent.grid;
+    return grid.size / grid.distance;
+  },
+  // As pf2e's placeRegionFromItem, at the agent's origin rather than the GM's mouse.
+  async createRegion(token, { name, area, shape }) {
+    const [region] = await /** @type {Doc} */ (token).parent.createEmbeddedDocuments("Region", [
+      {
+        name,
+        shapes: [shape],
+        highlightMode: "coverage",
+        displayMeasurements: true,
+        visibility: CONST.REGION_VISIBILITY.ALWAYS,
+        flags: { pf2e: { areaShape: area } },
+      },
+    ]);
+    if (!region?.uuid) throw new Error("The Region was not created.");
+    return String(region.uuid);
+  },
+  deleteRegion: (region) => /** @type {Doc} */ (region).delete(),
+  reactionRound(token) {
+    const combat = game.combat;
+    const turn = combat?.turns?.findIndex((/** @type {Doc} */ c) => c.token?.uuid === token.uuid);
+    const round = Number(combat?.round ?? 0) - (turn > Number(combat?.turn ?? 0) ? 1 : 0);
+    return `${combat?.id}.${round}`;
+  },
+  inReach(token, slug, target) {
+    const actor = /** @type {Doc} */ (token).actor;
+    const strike = actor.system?.actions?.find((/** @type {Doc} */ s) => s.slug === slug);
+    if (!strike) throw new Error(`${actor.name} has no strike "${slug}".`);
+    const reach = actor.getReach({ action: "attack", weapon: strike.item });
+    return placeable(token).distanceTo(placeable(target)) <= reach;
+  },
+  reactive: (token) => slugs(token, "action").some((slug) => REACTIVE.includes(slug)),
+  // As secondchair_pf2e.readers.reaction_used: any known tracker that says so (RUL-07, RUL-19).
+  trackerUsed(token) {
+    const combatant = game.combat?.combatants?.find(
+      (/** @type {Doc} */ c) => c.token?.uuid === token.uuid,
+    );
+    const checker = active("pf2e-reaction") ? combatant?.flags?.["pf2e-reaction"] : null;
+    const combater = active("pf2e-combater") ? combatant?.flags?.["pf2e-combater"] : null;
+    const sundry = active("sundry") && slugs(token, "effect").includes("effect-reaction-used");
+    return checker?.state === false || combater?.reactionUsed === true || sundry;
   },
   async strike(token, slug, target, map) {
     const actor = /** @type {Doc} */ (token).actor;

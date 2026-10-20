@@ -404,6 +404,8 @@ def act(
             raise DelegationError(_NEVER_DISCLOSES)
         level, which = strictest(entity)
         lowered = level != cell
+        if isinstance(change, VttAction) and change.hold is not None:
+            hold = change.hold if hold is None else f"{hold} {change.hold}"
         if hold is not None:
             level = min(level, "propose", key=LEVELS.index)
         if level == "manual":

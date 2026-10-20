@@ -1,5 +1,6 @@
-// SecondChair's own executor for GM creatures' turns (RUL-09): strikes, system actions and saves,
-// each one call to pf2e's document methods, never a chat-card button (RUL-05). Agents act only for
+// SecondChair's own executor for GM creatures' turns (RUL-09): strikes, system actions, saves,
+// spells, self-effects, area Regions and Reactive Strike, each one call to pf2e's document methods,
+// never a chat-card button (RUL-05, RUL-06, RUL-07). Agents act only for
 // GM creatures, in encounters (RUL-03), never for a PC (RUL-04). A follow-up condition is applied
 // only if the GM's modules did not apply it while the call settled; an ambiguous one is traced for
 // a discrepancy, never applied (RUL-10). Free of Foundry globals, so it runs under `node --test`;
@@ -12,7 +13,12 @@
 import { canonical } from "../../secondchair-foundry/scripts/scenes.js";
 
 /** @typedef {import("../../secondchair-foundry/scripts/actions.js").Fields} Fields */
-/** @typedef {{hp: {value: number, temp: number}, conditions: Record<string, number | null>}} State */
+/**
+ * A token's state: HP and conditions, and in the adapter its spell resources (outcomes.js keys)
+ * and its effects (id to slug), which an undo puts back too.
+ * @typedef {{hp: {value: number, temp: number}, conditions: Record<string, number | null>,
+ *   resources?: Record<string, number>, effects?: Record<string, string>}} State
+ */
 /** @typedef {{uuid: string, actor?: {uuid: string} | null} & Record<string, unknown>} Token */
 
 /**
@@ -31,6 +37,28 @@ import { canonical } from "../../secondchair-foundry/scripts/scenes.js";
  * @property {(token: Token, hp: State["hp"]) => Promise<unknown>} setHp
  * @property {(token: Token, slug: string, value: number | null | undefined) => Promise<unknown>} setCondition
  *   set a condition's value, null for a condition with none, undefined to remove it
+ * @property {(token: Token, spell: string) => Promise<{id: string, name: string, free: boolean, variable: boolean, overlays: string[]}>} spell
+ *   one of the token's spells, by id or slug: whether casting it spends nothing (a cantrip, at
+ *   will), whether its cost is variable ("1 to 3"), and the ids of its overlay variants
+ * @property {(token: Token, spell: string, rank: number | null, variant: string | null) => Promise<unknown>} cast
+ *   cast it through its spellcasting entry, spending its resource, at `rank` (its own if null)
+ * @property {(token: Token, key: string, value: number) => Promise<unknown>} setResource
+ * @property {(token: Token, item: string) => Promise<{uuid: string, slug: string}>} selfEffect
+ *   the self-effect of one of the token's actions or feats, by slug
+ * @property {(token: Token, item: string) => Promise<unknown>} post  post that item to the chat
+ * @property {(token: Token, effect: string) => Promise<unknown>} addEffect  an Effect item, by UUID
+ * @property {(token: Token, id: string) => Promise<unknown>} removeEffect
+ * @property {(token: Token) => number} pixelsPerFoot  on the token's scene
+ * @property {(token: Token, data: {name: string, area: string, shape: Record<string, unknown>}) => Promise<string>} createRegion
+ *   create an area Region on the token's scene, answering its UUID
+ * @property {(region: unknown) => Promise<unknown>} deleteRegion
+ * @property {(token: Token) => string} reactionRound  its reaction's round: the combat and the
+ *   round its last turn started in, since a creature gets its reaction back on its turn
+ * @property {(token: Token) => boolean} reactive  whether it has Reactive Strike
+ * @property {(token: Token, strike: string, target: Token) => boolean} inReach  whether the
+ *   target is within the reach of that strike
+ * @property {(token: Token) => boolean} trackerUsed  whether a known reaction tracker says its
+ *   reaction is used this round
  * @property {() => Promise<unknown>} settle  wait for the GM's modules to react to a call
  * @property {(event: import("../../secondchair-foundry/scripts/capture.js").Event) => void} emit
  *   an observation, through the library's durable capture
@@ -48,6 +76,27 @@ export const FOLLOW_UPS = {
 };
 
 const SAVES = ["fortitude", "reflex", "will"];
+
+/** Reactive Strike's triggers within reach, the closed list agents fire it on (RUL-07). */
+export const TRIGGERS = ["leaves-reach", "manipulate", "move", "ranged-attack"];
+
+/**
+ * An area Region's shape, in scene pixels, as pf2e's own shapeDataFromEffectArea draws it, from
+ * the origin (x, y), `direction` in degrees. ponytail: burst, cone and line; emanation (from the
+ * creature, not a chosen origin), cube and ring wait for a need.
+ * @param {string} area @param {number} feet @param {number} x @param {number} y
+ * @param {number} direction @param {number} perFoot
+ */
+export function areaShape(area, feet, x, y, direction, perFoot) {
+  const distance = feet * perFoot;
+  if (area === "burst") return { type: "circle", x, y, radius: distance };
+  if (area === "cone")
+    return { type: "cone", x, y, radius: distance, angle: 90, rotation: direction };
+  if (area === "line") {
+    return { type: "line", x, y, length: distance, width: 5 * perFoot, rotation: direction };
+  }
+  throw new Error(`area is burst, cone or line, not "${area}".`);
+}
 
 /** @param {Env} env */
 export function createExecutor(env) {
@@ -98,7 +147,10 @@ export function createExecutor(env) {
     const back = [];
     for (const uuid of uuids) {
       const token = await tokenOf(uuid);
-      if (canonical(env.state(token)) !== canonical(settled[uuid])) {
+      // Only what was logged: an entry logged before resources and effects were tracked.
+      const now = /** @type {Record<string, unknown>} */ (env.state(token));
+      const logged = Object.fromEntries(Object.keys(settled[uuid]).map((k) => [k, now[k]]));
+      if (canonical(logged) !== canonical(settled[uuid])) {
         throw new Error(`${uuid} changed since: nothing was done.`);
       }
       back.push([token, was[uuid]]);
@@ -106,6 +158,13 @@ export function createExecutor(env) {
     for (const [token, before] of back) {
       if (canonical(env.state(token).hp) !== canonical(before.hp)) {
         await env.setHp(token, before.hp);
+      }
+      for (const [key, value] of Object.entries(before.resources ?? {})) {
+        if (env.state(token).resources?.[key] !== value) await env.setResource(token, key, value);
+      }
+      const had = before.effects;
+      for (const id of had ? Object.keys(env.state(token).effects ?? {}) : []) {
+        if (had && !Object.hasOwn(had, id)) await env.removeEffect(token, id);
       }
       // Twice: pf2e's own rules can add a condition on the way (losing dying leaves wounded).
       for (let pass = 0; pass < 2; pass++) {
@@ -164,30 +223,157 @@ export function createExecutor(env) {
     return [{ token: target.uuid, condition: slug, value, result }];
   }
 
+  /**
+   * `creature` strikes the token `params.target` names at MAP step `map`: attack, then damage
+   * applied on a hit unless a module did (RUL-10).
+   * @param {Token} creature @param {Fields} params @param {number} map
+   */
+  async function hit(creature, params, map) {
+    const victim = await tokenOf(params.target);
+    const before = snapshot([creature, victim]);
+    const struck = await env.strike(creature, String(params.strike), victim, map);
+    /** Whether the executor applied the damage, or found a module had (RUL-10). */
+    let applied = null;
+    if (struck.apply) {
+      await env.settle();
+      const hp = canonical(env.state(victim).hp) === canonical(before[victim.uuid].hp);
+      if (hp) await struck.apply();
+      applied = hp ? "applied" : "already";
+    }
+    const { degree, damage } = struck;
+    return {
+      before: { state: before },
+      after: { state: snapshot([creature, victim]), degree, damage, applied },
+    };
+  }
+
+  /** The adapter's reaction counter: the round each GM creature last reacted in (RUL-07). */
+  /** @type {Map<string, string>} */
+  const reacted = new Map();
+
   /** @type {Record<string, (target: string, params: Fields, expect: Fields | null) => Promise<{before: Fields, after: Fields}>>} */
   const ops = {
     /** A GM creature strikes a token: attack, then damage applied on a hit. */
     async strike(target, params, expect) {
       if (expect) return restore(params, expect);
       const creature = await acting(target);
-      const victim = await tokenOf(params.target);
       const map = Number(params.map ?? 0);
       if (![0, 1, 2].includes(map)) throw new Error("map is 0, 1 or 2: the attack's MAP step.");
-      const before = snapshot([creature, victim]);
-      const struck = await env.strike(creature, String(params.strike), victim, map);
-      /** Whether the executor applied the damage, or found a module had (RUL-10). */
-      let applied = null;
-      if (struck.apply) {
-        await env.settle();
-        const hp = canonical(env.state(victim).hp) === canonical(before[victim.uuid].hp);
-        if (hp) await struck.apply();
-        applied = hp ? "applied" : "already";
+      return hit(creature, params, map);
+    },
+    /**
+     * Reactive Strike on a listed trigger, once per round: refused when the adapter's counter or
+     * any known reaction tracker says the creature's reaction is used. Free of MAP. The undo frees
+     * the reaction again. ponytail: the counter lives in the GM client; a reload forgets it, and
+     * the trackers still speak.
+     */
+    async reaction(target, params, expect) {
+      if (expect) {
+        const done = await restore(params, expect);
+        if (reacted.get(target) === expect.round) reacted.delete(target);
+        return done;
       }
-      const { degree, damage } = struck;
-      return {
-        before: { state: before },
-        after: { state: snapshot([creature, victim]), degree, damage, applied },
-      };
+      const creature = await acting(target);
+      const trigger = String(params.trigger);
+      if (!TRIGGERS.includes(trigger)) {
+        throw new Error(
+          `Agents fire Reactive Strike on ${TRIGGERS.join(", ")} only; every other reaction is ` +
+            "the GM's (RUL-07, RUL-08).",
+        );
+      }
+      if (!env.reactive(creature)) throw new Error(`${target} has no Reactive Strike.`);
+      const victim = await tokenOf(params.target);
+      if (!env.inReach(creature, String(params.strike), victim)) {
+        throw new Error(`${params.target} is not within the reach of ${params.strike} (RUL-07).`);
+      }
+      const round = env.reactionRound(creature);
+      if (reacted.get(target) === round || env.trackerUsed(creature)) {
+        throw new Error(`${target} already used its reaction this round (RUL-07).`);
+      }
+      const done = await hit(creature, params, 0);
+      reacted.set(target, round);
+      return { before: done.before, after: { ...done.after, trigger, round } };
+    },
+    /**
+     * A GM creature casts one of its spells, spending its slot, focus point or innate use, at
+     * `rank` (heightened) and as the overlay `variant`. A variable-cost spell with no overlay is
+     * the GM's: an agent only proposes its cost (`actions`), cast once the GM approves (RUL-08).
+     */
+    async cast_spell(target, params, expect) {
+      if (expect) return restore(params, expect);
+      const creature = await acting(target);
+      const rank = params.rank == null ? null : Number(params.rank);
+      if (rank !== null && !(Number.isInteger(rank) && rank >= 1 && rank <= 10)) {
+        throw new Error("rank is a whole number from 1 to 10.");
+      }
+      const variant = params.variant == null ? null : String(params.variant);
+      const spell = await env.spell(creature, String(params.spell));
+      if (variant !== null && !spell.overlays.includes(variant)) {
+        const known = spell.overlays.join(", ") || "none";
+        throw new Error(`${spell.name} has no variant "${variant}"; its variants: ${known}.`);
+      }
+      const actions = params.actions == null ? null : Number(params.actions);
+      if (spell.variable && !spell.overlays.length && actions === null) {
+        throw new Error(
+          `${spell.name} has a variable cost and no overlay: an agent proposes its cost ` +
+            "(actions) and the GM resolves it (RUL-08).",
+        );
+      }
+      const before = snapshot([creature]);
+      await env.cast(creature, spell.id, rank, variant);
+      const after = snapshot([creature]);
+      const was = before[creature.uuid].resources ?? {};
+      const now = after[creature.uuid].resources ?? {};
+      const spent = Object.keys(was).filter((key) => (now[key] ?? 0) < was[key]);
+      if (!spell.free && !spent.length) {
+        throw new Error(`${spell.name} was not cast: pf2e found no slot, focus point or use left.`);
+      }
+      return { before: { state: before }, after: { state: after, spent, actions } };
+    },
+    /**
+     * A GM creature uses one of its actions or feats that has a self-effect: the item goes to the
+     * chat, then the adapter applies the effect itself, unless a module already did (RUL-06,
+     * RUL-10).
+     */
+    async self_effect(target, params, expect) {
+      if (expect) return restore(params, expect);
+      const creature = await acting(target);
+      const item = String(params.item);
+      const effect = await env.selfEffect(creature, item);
+      const before = snapshot([creature]);
+      await env.post(creature, item);
+      await env.settle();
+      const has = Object.values(env.state(creature).effects ?? {}).includes(effect.slug);
+      if (!has) await env.addEffect(creature, effect.uuid);
+      const follow_ups = [
+        { token: creature.uuid, effect: effect.slug, result: has ? "already" : "applied" },
+      ];
+      return { before: { state: before }, after: { state: snapshot([creature]), follow_ups } };
+    },
+    /**
+     * A GM creature places an area Region on its scene from an origin the agent chose (RUL-06).
+     * The undo deletes it, refused when it is gone already.
+     */
+    async place_area(target, params, expect) {
+      if (expect) {
+        const region = await env.resolve(String(expect.region));
+        if (!region) throw new Error(`${expect.region} changed since: nothing was done.`);
+        await env.deleteRegion(region);
+        return { before: expect, after: params };
+      }
+      const creature = await acting(target);
+      const [feet, x, y, direction] = [params.size, params.x, params.y, params.direction ?? 0].map(
+        Number,
+      );
+      if (!(feet > 0 && feet % 5 === 0)) throw new Error("size is a positive multiple of 5 feet.");
+      if (![x, y, direction].every(Number.isFinite)) {
+        throw new Error("x and y are the origin's scene pixels; direction is in degrees.");
+      }
+      const area = String(params.area);
+      const shape = areaShape(area, feet, x, y, direction, env.pixelsPerFoot(creature));
+      const name = String(params.name ?? `${area} ${feet} ft`);
+      const region = await env.createRegion(creature, { name, area, shape });
+      return { before: { region: null }, after: { region, area, shape } };
     },
     /**
      * A GM creature uses a system action against a token. ponytail: a target is required, since
