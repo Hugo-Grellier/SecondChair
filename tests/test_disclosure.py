@@ -12,6 +12,7 @@ import yaml
 from mcp import Client
 from test_canon import call, entity, fact
 from test_delegation import gm, log
+from test_knowledge import learn
 
 from secondchair.cli import main
 from secondchair.core import delegation, index, knowledge, vtt, workspace
@@ -186,6 +187,59 @@ def test_a_disclosure_citing_an_unknown_or_never_true_fact_is_refused(
     assert result.is_error
     assert "unknown fact ids" in result.content[0].text
     assert foundry.docs[TOKEN] == {"hidden": True}
+
+
+# Which knower bounds a disclosure (CAN-16): none when the GM's approval is the gate; an acting
+# NPC must know every fact it cites.
+
+
+def say(ws: Workspace, npc: str, cites: list[str]) -> Any:
+    line = "The gauge never moves."
+    return call(ws, "speak", token=TOKEN, line=line, cites=cites, entity=npc, agent="claude-live")
+
+
+def test_a_disclosure_may_cite_a_fact_the_party_does_not_know_yet(
+    ws: Workspace, foundry: FakeVtt, clue: str
+) -> None:
+    assert clue not in knowledge.known(ws, index.PARTY)
+
+    assert reveal(ws, [clue]).structured_content["status"] == "pending"
+
+
+@pytest.fixture
+def keeper(ws: Workspace) -> tuple[str, str]:
+    """A clue the keeper knows, recorded in prep; then session 1 starts."""
+    gauge = entity(ws, "Dry gauge")
+    found = fact(ws, "The dry gauge stays at zero while the bell rings.", entities=[gauge])
+    npc = entity(ws, "Keeper Ilsa")
+    learn(ws, npc, found)
+    delegation.start_session(ws)
+    return npc, found
+
+
+def test_an_npc_discloses_only_what_it_knows(
+    ws: Workspace, foundry: FakeVtt, keeper: tuple[str, str]
+) -> None:
+    npc, clue = keeper
+    gauge = next(e["id"] for e in index.search_entities(ws) if e["names"] == ["Dry gauge"])
+
+    refused = say(ws, gauge, [clue])
+
+    assert refused.is_error
+    assert f"{gauge} does not know ['{clue}']" in refused.content[0].text
+    assert say(ws, npc, [clue]).structured_content["status"] == "pending"
+
+
+def test_an_npc_disclosure_is_checked_again_at_approval(
+    ws: Workspace, foundry: FakeVtt, keeper: tuple[str, str]
+) -> None:
+    npc, clue = keeper
+    say(ws, npc, [clue])
+    for record in (ws.root / "canon/knowledge").glob("*.md"):
+        record.unlink()  # a hand edit: the keeper forgets
+
+    with pytest.raises(DelegationError, match="does not know"):
+        delegation.approve(ws, log(ws)[-1]["id"], "cli", authenticated=True)
 
 
 def tool_names(ws: Workspace) -> set[str]:

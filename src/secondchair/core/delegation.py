@@ -418,7 +418,7 @@ def act(
             effect = {"op": change.op, "target": change.target, "before": None}
             effect["after"] = change.params
             if change.cites is not None:
-                effect["cites"] = _check_cites(ws, change.cites)
+                effect["cites"] = _check_cites(ws, change.cites, entity)
         elif isinstance(change, Change):
             path = _target(ws, change.path)
             effect = {"target": change.path, "before": path.read_text() if path.exists() else None}
@@ -494,7 +494,7 @@ def approve(
                 "(the CLI in an interactive terminal)."
             )
         if entry.get("cites"):  # canon may have changed since it was proposed
-            _check_cites(ws, entry["cites"])
+            _check_cites(ws, entry["cites"], entry.get("entity"))
         try:
             _apply(ws, entry, "after")
         except DelegationError as e:
@@ -787,9 +787,11 @@ def _call_if_ceiling(
 # Disclosures (CAN-16, CAN-17): what the players get to see marks its facts known by the party.
 
 
-def _check_cites(ws: Workspace, cites: list[str]) -> list[str]:
-    """A disclosure's cited facts: each in canon, true, and free of canaries; and a current
-    date to learn them on. Callers hold the lock."""
+def _check_cites(ws: Workspace, cites: list[str], entity: str | None = None) -> list[str]:
+    """A disclosure's cited facts: each in canon, true, free of canaries and, when an NPC
+    discloses (`entity`, the acting entity), known by it; and a current date to learn them on.
+    No other knower bounds a disclosure: the GM's approval, or a lifted hold, is the gate
+    (CAN-16). Callers hold the lock."""
     from secondchair.core import capture, index, knowledge
 
     if not isinstance(cites, list) or not all(isinstance(c, str) for c in cites):
@@ -804,6 +806,9 @@ def _check_cites(ws: Workspace, cites: list[str]) -> list[str]:
         c for c in cites if c in facts and knowledge.CANARY.search(facts[c]["statement"])
     ]:
         reasons.append(f"facts carrying a canary {canaries}")
+    held = knowledge.known(ws, entity) if entity is not None else facts
+    if unheld := [c for c in cites if c in facts and c not in held]:
+        reasons.append(f"{entity} does not know {unheld}")
     if capture.time(ws)["current_date"] is None:
         reasons.append("no current campaign date to learn them on (time.yaml)")
     if reasons:
