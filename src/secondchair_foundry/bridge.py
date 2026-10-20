@@ -18,7 +18,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from secondchair.core import PROTOCOL_VERSION, delegation, observations, vtt
 from secondchair.core.machine import foundry_token
-from secondchair.core.vtt import VttError
+from secondchair.core.vtt import CeilingRefusal, VttError
 from secondchair.core.workspace import Workspace
 
 PATH = "/foundry"
@@ -203,7 +203,9 @@ class Bridge:
         ack = {"type": "ack", "id": str(id_), "ok": problem is None}
         await socket.send_json(ack if problem is None else ack | {"error": problem})
 
-    def perform(self, op: str, target: str, params: dict, expect: dict | None) -> tuple[dict, dict]:
+    def perform(
+        self, op: str, target: str, params: dict, expect: dict | None, level: str | None
+    ) -> tuple[dict, dict]:
         """Have the GM client take one action (the Core's `vtt.perform`). Called from a worker
         thread, never from the event loop, which it waits on."""
         socket, loop = self.gm, self.loop
@@ -216,6 +218,7 @@ class Bridge:
             "target": target,
             "params": params,
             "expect": expect,
+            "level": level,
         }
         future = asyncio.run_coroutine_threadsafe(self._request(socket, request), loop)
         try:
@@ -232,6 +235,8 @@ class Bridge:
             or not isinstance(before, dict)
             or not isinstance(after, dict)
         ):
+            if reply.get("reason") == "ceiling":
+                raise CeilingRefusal(str(reply.get("error")))
             raise VttError(
                 str(reply.get("error") or f"The GM client sent a malformed reply: {reply}")
             )

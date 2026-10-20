@@ -12,9 +12,9 @@
       "description": "Unique id given by the connector when it captures the event; the Core keeps an id once per session, so a resent observation is never recorded twice."
     },
     "session": {
-      "type": "integer",
+      "type": ["integer", "null"],
       "minimum": 1,
-      "description": "The live session the event was captured in (moment.yaml's session)."
+      "description": "The live session the event was captured in (moment.yaml's session); null for a kind recorded in every moment, such as a ceiling change (DEL-19a), captured outside a live session."
     },
     "at": {
       "type": "string",

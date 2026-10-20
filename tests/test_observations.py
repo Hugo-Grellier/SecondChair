@@ -105,6 +105,33 @@ def test_a_reload_mid_session_loses_no_observation(
         jsonschema.validate(o, SCHEMA)
 
 
+def test_a_ceiling_change_is_recorded_in_every_moment(
+    bridge: str,  # noqa: F811
+    token: str,  # noqa: F811
+    workspace: Path,  # noqa: F811
+) -> None:
+    """DEL-19a: each change of the VTT's ceiling is an observation, in a live session or not."""
+    ws = wsmod.load(workspace)
+    change = {"user": "gm1", "before": "act-then-review", "after": "propose"}
+    ceiling = envelope("c1") | {"kind": "ceiling", "visibility": "gm", "scene": None}
+    ceiling |= {"actor": None, "payload": change}
+    with connect(bridge) as gm:
+        gm.send(json.dumps(hello(token)))
+        receive(gm, "welcome")
+        assert receive(gm, "session")["session"] is None
+        assert send(gm, ceiling | {"session": None})["ok"]  # in prep
+        delegation.change_moment(ws, "live-session")
+        assert receive(gm, "session")["session"] == 1
+        assert send(gm, ceiling | {"id": "c2"})["ok"]
+
+    outside = workspace / observations.OUTSIDE
+    [kept] = [json.loads(line) for line in outside.read_text().splitlines()]
+    jsonschema.validate(kept, SCHEMA)
+    assert (kept["id"], kept["session"], kept["payload"]) == ("c1", None, change)
+    assert [o["id"] for o in lines(workspace)] == ["c2"]
+    assert observations.find(ws, observations.locator(kept)) == kept
+
+
 @pytest.fixture
 def played(tmp_path: Path) -> Workspace:
     """A workspace whose session 1 recorded a public, a GM-only and a blind observation."""

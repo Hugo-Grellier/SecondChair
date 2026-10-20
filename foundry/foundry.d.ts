@@ -8,7 +8,9 @@ interface FoundrySettingConfig {
   config: boolean;
   type: StringConstructor | NumberConstructor | BooleanConstructor;
   default: unknown;
+  choices?: Record<string, string>;
   requiresReload?: boolean;
+  onChange?: (value: unknown, options: object, userId?: string) => unknown;
 }
 
 declare const game: {

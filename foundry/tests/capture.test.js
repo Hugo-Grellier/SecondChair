@@ -41,6 +41,23 @@ test("nothing is captured outside a live session", () => {
   assert.deepEqual(capture.pending(), []);
 });
 
+test("a ceiling change is captured in every moment, with session null outside a live one", () => {
+  const capture = createCapture({ store: storage() });
+  /** @type {import("../secondchair-foundry/scripts/capture.js").Event} */
+  const ceiling = {
+    kind: "ceiling",
+    visibility: "gm",
+    payload: { user: "gm1", before: "act-then-review", after: "propose" },
+    anytime: true,
+  };
+  const outside = capture.observe(ceiling);
+  assert.ok(validEnvelope(outside), JSON.stringify(validEnvelope.errors));
+  assert.equal(outside?.session, null);
+  assert.equal(outside && "anytime" in outside, false);
+  capture.setSession(2);
+  assert.equal(capture.observe(ceiling)?.session, 2);
+});
+
 test("an observation is a valid envelope tagged with the session", () => {
   const capture = createCapture({ store: storage() });
   capture.setSession(3);

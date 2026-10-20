@@ -21,8 +21,11 @@ FIELDS = ("id", "session", "at", "scene", "actor", "kind", "visibility", "payloa
 _lock = threading.Lock()
 
 
-def path(session: int) -> str:
-    return f"{DIR}/{session:06d}.jsonl"
+OUTSIDE = f"{DIR}/outside-sessions.jsonl"  # session null: captured outside a live session
+
+
+def path(session: int | None) -> str:
+    return OUTSIDE if session is None else f"{DIR}/{session:06d}.jsonl"
 
 
 def locator(envelope: dict) -> str:
@@ -36,8 +39,8 @@ def problem(envelope: object) -> str | None:
     e = envelope
     if not (isinstance(e["id"], str) and 0 < len(e["id"]) <= 200):
         return "id must be a non-empty string."
-    if type(e["session"]) is not int or e["session"] < 1:
-        return "session must be a positive integer."
+    if e["session"] is not None and (type(e["session"]) is not int or e["session"] < 1):
+        return "session must be a positive integer, or null outside a live session."
     try:
         if datetime.fromisoformat(e["at"]).tzinfo is None:
             return "at needs a UTC offset."
@@ -62,7 +65,7 @@ def record(ws: Workspace, envelope: object) -> str | None:
         return reason
     assert isinstance(envelope, dict)
     opened = delegation.last_session(ws)
-    if envelope["session"] > opened:
+    if envelope["session"] is not None and envelope["session"] > opened:
         return f"session {envelope['session']} has not been opened (the last is {opened})."
     with _lock:
         if find(ws, locator(envelope)) is not None:

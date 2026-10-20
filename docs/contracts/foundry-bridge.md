@@ -55,16 +55,26 @@ While the socket stays open, no other GM client can connect; when it closes, the
 A delegated action that acts in the VTT returns a `VttAction` ([tool-registration.md](tool-registration.md)). The Core checks the level and, when the action is to be taken, has the bridge send the GM client a **request**; the module takes it and answers with a **reply**:
 
 ```json
-{"type": "request", "id": "9f1c…", "op": "move_token", "target": "Scene.s1.Token.t1", "params": {"x": 300, "y": 200}, "expect": null}
+{"type": "request", "id": "9f1c…", "op": "move_token", "target": "Scene.s1.Token.t1", "params": {"x": 300, "y": 200}, "expect": null, "level": "act-then-review"}
 {"type": "reply", "id": "9f1c…", "ok": true, "before": {"x": 100, "y": 200}, "after": {"x": 300, "y": 200}}
 {"type": "reply", "id": "9f1c…", "ok": false, "error": "Scene.s1.Token.t1 changed since: nothing was done."}
 ```
 
 - `target` is the Foundry UUID of the document acted on; `params` the fields to set; `before` and `after` the fields the module read before and after, which the Core logs.
+- `level` is the delegation level the Core takes the action at: the entry's effective level when it acts or the GM approves (an approved proposal is at `propose`), null for the GM's undo. The module checks it against the ceiling (below).
 - `expect`, when not null, holds the fields the document must still have: an **undo** sends the logged `before` as `params` and the logged `after` as `expect`, so a token the GM moved by hand since is not moved back.
 - **Generic operations**, taken by `secondchair-foundry` itself: `move_token` (a Token's `x`, `y`) and `set_door` (a Wall's `ds`: 0 closed, 1 open, 2 locked). Any other `op` is a **mechanical action**, handed to the system adapter that registered it through `game.modules.get("secondchair-foundry").api.registerAdapter({ops: {<op>: async (doc, params, expect) => ({before, after})}})`. With no adapter, the module refuses it (ARC-09).
 - **Idempotent write queue** (transplanted from v3, BVE-02): the module records each request id on the GM user before and after taking it, so a replayed id gets its first reply back and is never applied twice, even after a reload; a request a reload interrupted is answered with an error asking the GM to check the VTT. Requests are taken one at a time.
 - A **failed action** is one the VTT did not take: no GM client connected, a refusal (`ok: false`), or no reply within 15 seconds. The Core logs it with status `failed` and the error, and the agent gets the error. Nothing is retried.
+
+### The ceiling (DEL-19, DEL-19a, DEL-20)
+
+The module enforces its own **ceiling**, whatever the Core asks: one maximum delegation level for every action reaching this world. It is the world setting **Delegation ceiling** of `secondchair-foundry` (`manual`, `propose`, `act-then-review`, `autonomous`), `act-then-review` on a fresh world, so no base profile exceeds it and *autonomous* takes raising it in Foundry on purpose.
+
+- A request whose `level` is above the ceiling, or not a level, is refused before anything is read: `{"type": "reply", "id": …, "ok": false, "error": "Refused by this world's delegation ceiling (propose): …", "reason": "ceiling"}`. A `null` level, the GM's undo, is not bounded. The ceiling is read at each request, so a change applies at once.
+- The Core logs the refusal as a failed action and writes a **call** on the GM, `kind: ceiling_refusal`, in `calls/` ([workspace-layout.md](workspace-layout.md)).
+- Only a GM user changes it: Foundry keeps world settings to users with the *Modify configuration settings* permission, and the module refuses the change in the client of a user who is not a GM, even when that permission was granted to players. A change by a non-GM user that still lands is put back by the active GM client.
+- Each change is an **observation** (below) of kind `ceiling`, visibility `gm`, payload `{"user": <Foundry user id>, "before": …, "after": …}`, captured by the active GM client in every moment: tagged with the live session when one is open, else with `session: null`.
 
 The GM's approval or undo of a VTT action from the CLI needs the GM client, which only the `serve` process holds: the CLI relays it to `POST /gm` on the served Core ([tool-registration.md](tool-registration.md)).
 
@@ -79,6 +89,6 @@ While a live session is open, the module captures what happens at the table as *
 ```
 
 - **Session**: the Core sends `session` right after `welcome` and whenever `secondchair session start|end` opens or ends one (it looks at `moment.yaml` every second): the live session id, or null. The module captures only while it is not null, and tags every envelope with it.
-- **Generic kinds**, captured by `secondchair-foundry`: `chat` (every chat message: author, speaker, text, flavor, whisper recipients' names, rolls' formula and total), `combat` (`start`, `round`, `turn`, `end`, with the combatant), `scene` (`activate`). A system adapter's kinds are prefixed by its system id and their payload schemas ship with it.
+- **Generic kinds**, captured by `secondchair-foundry`: `chat` (every chat message: author, speaker, text, flavor, whisper recipients' names, rolls' formula and total), `combat` (`start`, `round`, `turn`, `end`, with the combatant), `scene` (`activate`), and `ceiling` (above), the one kind also captured outside a live session. A system adapter's kinds are prefixed by its system id and their payload schemas ship with it.
 - **Visibility** (ARC-16): `players` when the whole table saw it; `gm` when it was not shown to the table (GM-only, a whisper even to a player, a hidden combatant's turn); `blind` for a blind roll. Only `players` attests what the party knows: the Core refuses a party knowledge record whose origin quotes a `gm` or `blind` observation (CAP-08: a whisper or a blind roll becomes a call held for the wrap).
-- **Durable capture** (transplanted from v3, BVE-02): the module keeps each envelope in the browser's local storage before sending it, and drops it only on its `ack`. Whatever is held (sent before a reload, or captured while the Core was unreachable) is resent on the next welcome. The Core appends each envelope to `observations/<session>.jsonl` in the workspace, once per id, before acknowledging it, so a resent envelope is never recorded twice. An envelope the Core cannot take (malformed, or for a session not yet opened) is acknowledged with `ok: false` and an `error`, and the module drops it.
+- **Durable capture** (transplanted from v3, BVE-02): the module keeps each envelope in the browser's local storage before sending it, and drops it only on its `ack`. Whatever is held (sent before a reload, or captured while the Core was unreachable) is resent on the next welcome. The Core appends each envelope to `observations/<session>.jsonl` in the workspace (`observations/outside-sessions.jsonl` for `session: null`), once per id, before acknowledging it, so a resent envelope is never recorded twice. An envelope the Core cannot take (malformed, or for a session not yet opened) is acknowledged with `ok: false` and an `error`, and the module drops it.
