@@ -313,12 +313,12 @@ def _fact(calendar: Calendar, relations: set[str], front: dict, body: str) -> di
     if front.get("never_true") and (front.get("valid_from") or front.get("valid_to")):
         raise CanonError("a never-true fact (a belief, CAN-15) has no validity")
     state = front.get("state")
-    if state is not None and (
-        not isinstance(state, dict)
-        or set(state) != {"of", "key", "value"}
-        or state["of"] not in front["entities"]
-    ):
-        raise CanonError("state must have exactly of (one of its entities), key and value")
+    if state is not None:
+        from secondchair.core import world  # it builds on this module
+
+        world.check_state(calendar, state)  # a hand edit too: the world-turn reads its shape
+        if state["of"] not in front["entities"]:
+            raise CanonError("a state fact's of is one of its entities")
     return {**front, "statement": body}
 
 

@@ -11,6 +11,7 @@ import yaml
 
 from secondchair import runner, transcribe
 from secondchair.core import calls, canon, delegation, index, jobs, machine, workspace, world
+from secondchair.core.calendar import CalendarError
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.server import GM_PATH, LOOPBACK, MCP_PATH, SERVE_FILE, serve
@@ -579,6 +580,7 @@ def main(argv: list[str] | None = None) -> int:
         CanonError,
         runner.RunnerError,
         transcribe.TranscriptionError,
+        CalendarError,
         OSError,
     ) as e:
         print(f"secondchair: {e}", file=sys.stderr)

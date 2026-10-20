@@ -524,3 +524,40 @@ def test_a_state_fact_must_have_a_shape_the_world_turn_reads(ws: Workspace) -> N
         state_fact(ws, tolls, "mood", 1)
     with pytest.raises(index.CanonError, match="rule effect"):
         fact(ws, "x", {"kind": "rule", "fact": "f-1", "key": "k"})
+
+
+def test_a_front_ruled_at_the_played_rank_keeps_ticking(ws: Workspace) -> None:
+    me, carrier = entity(ws, "Toll Squeeze"), entity(ws, "Lock Council")
+    rule = {"carrier": carrier, "capacity": 4, "every": "7d", "anchor": DAY0}
+    state_fact(ws, me, "front", rule, SEEN)  # the table played the rule itself
+
+    turn(ws, "4725-01-15")
+
+    assert clock(ws, me) == 2 and queued(ws) == []
+
+
+def test_a_rescheduled_threshold_step_applies_on_its_new_date(ws: Workspace) -> None:
+    tolls, _ = front(ws, "Toll Squeeze", steps={"draft": {"clock_gte": 1}})
+    turn(ws, "4725-01-08")
+    world.undo(ws, f"{tolls}/draft", "other", "cli", authenticated=True)
+
+    with pytest.raises(DelegationError, match="needs the new date"):
+        world.decide(ws, f"{tolls}/draft", "reschedule", authenticated=True)
+    world.decide(ws, f"{tolls}/draft", "reschedule", authenticated=True, date="4725-01-20")
+    turn(ws, "4725-01-20")
+
+    assert occ(ws, f"{tolls}/draft~4725-01-20")["status"] == "applied"
+    assert world.state(ws)["fronts"][tolls]["agenda"] == {"draft": "done"}
+
+
+def test_an_unless_is_not_settled_during_a_live_session(ws: Workspace) -> None:
+    silt, _ = front(ws, "Silt Choke", unless="the bypass is open")
+    closed = fact(ws, "The bypass is closed.", valid_from=DAY0)
+    turn(ws, "4725-01-08")
+    key = f"{silt}/tick@4725-01-08"
+    job = unless_job(ws, key)
+    delegation.change_moment(ws, "live-session")
+
+    with pytest.raises(DelegationError, match="live session"):
+        world.settle_unless(ws, key, False, [closed], job)
+    assert queued(ws) == [key]

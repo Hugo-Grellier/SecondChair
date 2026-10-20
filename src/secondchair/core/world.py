@@ -24,7 +24,7 @@ from collections import Counter
 from typing import Any
 
 from secondchair.core import calls, delegation, index
-from secondchair.core.calendar import CalendarError
+from secondchair.core.calendar import Calendar, CalendarError
 from secondchair.core.delegation import (
     OCCURRENCES_DIR,
     WORLD_FILE,
@@ -55,12 +55,12 @@ def _effect_tool() -> Tool:
 # State facts
 
 
-def check_state(ws: Workspace, state: Any) -> tuple[dict, list[str]]:
+def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
     """A state fact's `state`, normalised, and the entity ids its value names; `CanonError` when
     its shape is not one the world-turn reads."""
     if not isinstance(state, dict) or set(state) != {"of", "key", "value"}:
         raise CanonError("state needs exactly of (an entity id), key and value.")
-    key, value, cal = state["key"], state["value"], ws.calendar
+    key, value = state["key"], state["value"]
 
     def fields(required: set[str], optional: dict[str, Any]) -> dict:
         if not isinstance(value, dict) or not required <= set(value) <= required | set(optional):
@@ -274,7 +274,8 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
             and r["rescheduled_to"] not in used
             and at(r["rescheduled_date"]) <= at(until)
         ):
-            more = {k: r[k] for k in ("ticks", "cause") if r.get(k) is not None}
+            # A successor applies on its own date: no tick cascades into it.
+            more = {"ticks": r["ticks"]} if r.get("ticks") is not None else {}
             due(
                 r["rescheduled_to"],
                 r["kind"],
@@ -472,13 +473,18 @@ def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change
         new_state = {**old["state"], "value": {**old["state"]["value"], "stage": "expired"}}
         statement = f"{names[entity]}: expired"
         knowers = old["state"]["value"]["participants"]
+
     # LW-09: played canon wins, even over a rule effect: the state it closes, or a later state
     # of the same kind the table played.
-    played = [old] if old and old["rank"] == "played" else []
+    # A state the world-turn itself wrote (at a played rule's rank) is not played canon.
+    def table(f: dict) -> bool:
+        return f["rank"] == "played" and f["origin"].get("kind") != "rule"
+
+    played = [old] if old and table(old) else []
     played += [
         f
         for f in index.search_facts(ws, entity=entity)
-        if f["rank"] == "played"
+        if table(f)
         and (f.get("state") or {}).get("key") == new_state["key"]
         and f["valid_from"]
         and index.date_key(ws.calendar, f["valid_from"]) > index.date_key(ws.calendar, date)
@@ -501,11 +507,14 @@ def _apply(
     record: dict,
     rank: tuple[str, dict] | None = None,
     approve: tuple[str, bool] | None = None,
+    job: int | None = None,
 ) -> bool:
     """Apply one occurrence through the action log, every file tagged with its key, then cascade
     a tick into the threshold steps it crosses (T5). `approve` (channel, authenticated) approves
     at once what the level held for approval: the GM accepted it. False when it stays queued
     behind a call on the GM."""
+    if rank is None and record["cites"]:  # an unless settled by a job (LW-10)
+        rank = ("agent_proposal", {"kind": "job", "job": str(record["job"])})
     rank_, origin = rank or _rule_rank(ws, record)
     try:
         changes = _effect(ws, record, rank_, origin)
@@ -514,19 +523,22 @@ def _apply(
         return False
     for change in changes:
         result = delegation.act(
-            ws, _effect_tool(), AGENT, lambda c=change: c, occurrence=record["key"]
+            ws, _effect_tool(), AGENT, lambda c=change: c, job=job, occurrence=record["key"]
         )
-        if result["status"] == "pending" and approve is not None:
-            delegation.approve(ws, result["entry"], *approve)
+        status = result["status"]
+        if status == "pending" and approve is not None:
+            status = delegation.approve(ws, result["entry"], *approve)["status"]
+        if status != "applied":  # the caller checked the level; only an override lowers it
+            raise DelegationError(f"Entry {result['entry']} for {record['key']} is {status}.")
         record["entries"].append(result["entry"])
     record["status"] = "applied"
     _save(ws, record, OCCURRENCES_DIR)
     if record["kind"] == "tick":
-        _cascade(ws, record, approve)
+        _cascade(ws, record, approve, job)
     return True
 
 
-def _cascade(ws: Workspace, tick: dict, approve: tuple[str, bool] | None) -> None:
+def _cascade(ws: Workspace, tick: dict, approve: tuple[str, bool] | None, job: int | None) -> None:
     """The threshold steps a tick crosses, dated at the tick, each once (T5): new ones, and
     those an undo returned to the queue with it."""
     s = _current(ws).get(tick["entity"], {AGENDA: []})
@@ -540,9 +552,9 @@ def _cascade(ws: Workspace, tick: dict, approve: tuple[str, bool] | None) -> Non
         if key not in known:
             occ = {"key": key, "kind": "step", "class": "rule", "entity": tick["entity"]}
             occ |= {"date": tick["date"], "rule": a["id"], "cause": tick["key"]}
-            _apply(ws, _register(ws, occ), approve=approve)
+            _apply(ws, _register(ws, occ), approve=approve, job=job)
         elif known[key]["status"] == "queued" and known[key]["cause"] == tick["key"]:
-            _apply(ws, known[key], approve=approve)
+            _apply(ws, known[key], approve=approve, job=job)
 
 
 # What agents and the GM do with a queued occurrence
@@ -558,6 +570,8 @@ def settle_unless(
     from secondchair.core import jobs
 
     with locked(ws):
+        if delegation.current_moment(ws)[0] == "live-session":
+            raise DelegationError("The world does not move during a live session (LW-05).")
         record = _find(ws, key)
         if record["kind"] != "tick" or record["class"] != "derived" or record["status"] != "queued":
             raise DelegationError(f"{key} is not a queued tick waiting on its unless.")
@@ -580,7 +594,7 @@ def settle_unless(
             _save(ws, record, OCCURRENCES_DIR)
             _ask(ws, record, "proposal", "its unless was settled as not holding; accept it")
         else:
-            _apply(ws, record, ("agent_proposal", {"kind": "job", "job": str(job)}))
+            _apply(ws, record, job=job)
         return record
 
 
@@ -599,26 +613,27 @@ def decide(
         record = _find(ws, key)
         if record["status"] != "queued":
             raise DelegationError(f"{key} is {record['status']}, not queued.")
+        if answer not in ("accept", "reject", "reschedule"):
+            raise DelegationError(f"Answer {answer!r}: expected accept, reject or reschedule.")
+        if answer == "accept" and record["class"] == "narrative":
+            raise DelegationError(
+                f"{key} is new narrative: answer its narrative-direction proposal, or reject "
+                "or reschedule it."
+            )
+        if answer == "reschedule":
+            if date is None:
+                raise DelegationError("Rescheduling needs the new date.")
+            date = ws.calendar.canonical(date)
         if record["call"] is not None:
             calls.close(ws, record["call"])
         if answer == "accept":
-            if record["class"] == "narrative":
-                raise DelegationError(
-                    f"{key} is new narrative: answer its narrative-direction proposal, or reject "
-                    "or reschedule it."
-                )
             record["call"] = None
             _apply(ws, record, approve=(channel, authenticated))
         elif answer == "reject":
             record["status"] = "rejected"
-        elif answer == "reschedule":
-            if date is None:
-                raise DelegationError("Rescheduling needs the new date.")
-            date = ws.calendar.canonical(date)
+        else:
             record |= {"status": "rescheduled", "rescheduled_date": date}
             record["rescheduled_to"] = f"{key}~{date}"
-        else:
-            raise DelegationError(f"Answer {answer!r}: expected accept, reject or reschedule.")
         _save(ws, record, OCCURRENCES_DIR)
         return _find(ws, key)
 
@@ -648,7 +663,14 @@ def undo(ws: Workspace, key: str, reason: str, channel: str, authenticated: bool
             if r["status"] == "applied" and r.get("cause") in todo and r["key"] not in todo
         ]:
             todo |= {r["key"]: r for r in more}
-        for entry in sorted((e for r in todo.values() for e in r["entries"]), reverse=True):
+        entries = sorted((e for r in todo.values() for e in r["entries"]), reverse=True)
+        moment = delegation.current_moment(ws)[1]
+        if any(delegation.read_entry(ws, e)["moment_seq"] != moment for e in entries):
+            raise DelegationError(
+                f"{key} or its cascade belongs to an earlier moment, whose log is frozen: only a "
+                "correction or a retcon can change it now."
+            )
+        for entry in entries:
             delegation.undo(ws, entry, reason, channel, authenticated)
         for r in todo.values():
             r |= {"status": "queued", "entries": []}

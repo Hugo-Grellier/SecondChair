@@ -101,7 +101,7 @@ def tools(ws: Workspace) -> list[Tool]:
                 )
             involved += [relation["subject"], relation["object"]]
         if state is not None:
-            state, refs = world.check_state(ws, state)
+            state, refs = world.check_state(ws.calendar, state)
             involved += [state["of"], *refs]
         if unknown := [e for e in involved if e not in known]:
             raise CanonError(f"Unknown entities {unknown}; create them first.")
