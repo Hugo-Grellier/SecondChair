@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import hmac
 import json
+import sys
 import uuid
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import yaml
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from secondchair.core import PROTOCOL_VERSION, vtt
+from secondchair.core import PROTOCOL_VERSION, delegation, observations, vtt
 from secondchair.core.machine import foundry_token
 from secondchair.core.vtt import VttError
 from secondchair.core.workspace import Workspace
@@ -24,6 +25,7 @@ PATH = "/foundry"
 BINDING_FILE = "foundry.yaml"
 HELLO_TIMEOUT = 10  # seconds the module has to say hello once the socket is open
 REPLY_TIMEOUT = 15  # seconds the GM client has to take an action and answer
+SESSION_POLL = 1  # seconds between two looks at the live session
 POLICY_VIOLATION = 1008
 NO_GM = (
     "No GM client is connected: open the campaign's world as GM in Foundry, with the SecondChair "
@@ -145,6 +147,7 @@ class Bridge:
             return
         self.gm = socket
         self.loop = asyncio.get_running_loop()
+        watch: asyncio.Task | None = None
         try:
             await socket.send_json(
                 {
@@ -154,21 +157,51 @@ class Bridge:
                     "campaign_language": self.ws.campaign_language,
                 }
             )
+            watch = asyncio.create_task(self._watch_session(socket))
             while True:
                 try:
-                    reply = json.loads(await socket.receive_text())
-                    waiting = self.waiting.get(reply["id"]) if reply["type"] == "reply" else None
+                    message = json.loads(await socket.receive_text())
+                    kind = message["type"]
+                    waiting = self.waiting.get(message["id"]) if kind == "reply" else None
                 except ValueError, KeyError, TypeError:
-                    continue  # not a reply the Core waits for
-                if waiting and not waiting.done():
-                    waiting.set_result(reply)
+                    continue  # not a message the Core waits for
+                if kind == "observation":
+                    await self._observe(socket, message.get("envelope"))
+                elif waiting and not waiting.done():
+                    waiting.set_result(message)
         except WebSocketDisconnect:
             pass
         finally:
+            if watch is not None:
+                watch.cancel()
             self.gm = None
             for waiting in self.waiting.values():
                 if not waiting.done():
                     waiting.set_exception(VttError(NO_GM))
+
+    async def _watch_session(self, socket: WebSocket) -> None:
+        """Tell the GM client the live session id, now and whenever `secondchair session` opens
+        or ends one, so it captures observations tagged with it (CAP-03, DEL-03)."""
+        last: object = ...
+        while True:
+            # ponytail: polls moment.yaml; events in the first second of a session are missed.
+            session = delegation.current_session(self.ws)
+            if session != last:
+                await socket.send_json({"type": "session", "session": session})
+                last = session
+            await asyncio.sleep(SESSION_POLL)
+
+    async def _observe(self, socket: WebSocket, envelope: object) -> None:
+        """Record one observation durably, then acknowledge it so the module drops its copy."""
+        try:
+            problem = await asyncio.to_thread(observations.record, self.ws, envelope)
+        except OSError as e:
+            # Not acknowledged: the module keeps it and resends it on the next connection.
+            print(f"SecondChair: observation not recorded: {e}", file=sys.stderr)
+            return
+        id_ = envelope.get("id") if isinstance(envelope, dict) else None
+        ack = {"type": "ack", "id": str(id_), "ok": problem is None}
+        await socket.send_json(ack if problem is None else ack | {"error": problem})
 
     def perform(self, op: str, target: str, params: dict, expect: dict | None) -> tuple[dict, dict]:
         """Have the GM client take one action (the Core's `vtt.perform`). Called from a worker

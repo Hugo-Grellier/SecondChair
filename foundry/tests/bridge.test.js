@@ -1,14 +1,9 @@
 // The module's half of the handshake (docs/contracts/foundry-bridge.md), against the contract's schema.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { Ajv2020 } from "ajv/dist/2020.js";
 import { connect, coreUrl, hello } from "../secondchair-foundry/scripts/bridge.js";
 
-const schema = JSON.parse(
-  readFileSync(new URL("../../docs/contracts/foundry-bridge.schema.json", import.meta.url), "utf8"),
-);
-const valid = new Ajv2020().compile(schema);
+import { validMessage as valid } from "./schema.js";
 
 /** A WebSocket stand-in recording what the module sends; the test plays the Core. */
 class FakeSocket extends EventTarget {

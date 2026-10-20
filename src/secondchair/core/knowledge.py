@@ -11,7 +11,7 @@ import re
 import secrets
 from typing import Any
 
-from secondchair.core import index
+from secondchair.core import index, observations
 from secondchair.core.index import KNOWLEDGE_DIR, MODES, PARTY, CanonError
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
@@ -88,6 +88,22 @@ def guard(
     return {c: holds[c]["mode"] for c in cites}
 
 
+def _check_seen(ws: Workspace, knower: str, origin: dict[str, str]) -> None:
+    """An origin quoting a VTT observation must resolve, and only an observation the whole
+    table saw marks a fact as known by the party (ARC-16, CAP-08)."""
+    where = origin.get("locator", "")
+    if origin.get("kind") != "observation" or not where.startswith(f"{observations.DIR}/"):
+        return
+    seen = observations.find(ws, where)
+    if seen is None:
+        raise CanonError(f"No observation at {where}.")
+    if knower == PARTY and seen["visibility"] != "players":
+        raise CanonError(
+            f"The observation {where} is {seen['visibility']}: the table did not see it, so it "
+            "never marks a fact as known by the party. Hold it as a call for the wrap."
+        )
+
+
 def _mentions(text: str, name: str) -> bool:
     # ponytail: exact, case-sensitive whole-word match; inflected or misspelt names slip through.
     return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text) is not None
@@ -109,10 +125,13 @@ def tools(ws: Workspace) -> list[Tool]:
         `knower` is "party" for the party as a whole (never one PC), or the entity id of an NPC,
         a faction, or a place: a place's knowledge is the common knowledge of everyone living
         there, a faction's is inherited by its members. A never-true fact (a belief) can only be
-        believed or suspected. `origin` as for record_fact."""
+        believed or suspected. `origin` as for record_fact; an observation captured from the
+        VTT is located `observations/<session>.jsonl#<id>`, and only one the whole table saw
+        (visibility players) can make the party know a fact."""
         rank = index.rank_of(origin, authenticated=False)
         if mode not in MODES:
             raise CanonError(f"mode must be one of {', '.join(MODES)}.")
+        _check_seen(ws, knower, origin)
         entities = {e["id"]: e for e in index.search_entities(ws)}
         facts = {f["id"]: f for f in index.search_facts(ws, include_retconned=True)}
         events = {e["id"]: e for e in index.search_events(ws)}

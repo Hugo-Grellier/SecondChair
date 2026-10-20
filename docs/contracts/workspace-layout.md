@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAP-03, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -14,6 +14,7 @@ my-campaign/
 ├── action-log/        # one YAML file per action log entry: 000001.yaml, 000002.yaml, …
 ├── jobs/              # one YAML file per job: 000001.yaml, …
 ├── calls/             # one YAML file per call on the GM: 000001.yaml, …
+├── observations/      # one JSON Lines file per live session: 000001.jsonl, …
 ├── canon/
 │   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 │   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
@@ -168,6 +169,16 @@ shown: false            # a defaulted call shown again at a break
 - **Break pile**: the calls due at the break still open (shown at every break until answered or the moment ends) and every call defaulted since the last break (shown once, then `shown: true`).
 - **Interruptions** (DEL-33, MET-06): calls with `interruption: true`, counted by the Core per live session and per responsibility (`calls.interruptions`), whatever Surface shows them.
 - Approving or rejecting a proposal answers its call.
+
+## `observations/`
+
+One JSON Lines file per live session, named by the session id on six digits: each line is one observation the VTT connector captured during that session, in the event envelope ([`event-envelope.schema.json`](event-envelope.schema.json); how it arrives: [foundry-bridge.md](foundry-bridge.md), "Observations"). The Core only appends, once per envelope id. Observations are never canon by themselves (CAP-03); capture quotes them at the wrap with the locator `observations/<session>.jsonl#<id>`.
+
+```json
+{"id": "4b1e…", "session": 1, "at": "2026-10-19T20:15:00.000Z", "scene": "Scene.s1", "actor": "Actor.a1", "kind": "chat", "visibility": "players", "payload": {"author": "Gamemaster", "speaker": "Sella", "text": "The bell rings.", "flavor": "", "whisper": [], "rolls": []}}
+```
+
+A knowledge record whose origin is an observation with such a locator is refused when the observation does not exist, and, for the party, when its visibility is not `players` (ARC-16, CAP-08).
 
 ## `canon/entities/`
 

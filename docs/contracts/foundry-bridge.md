@@ -1,6 +1,6 @@
 # Contract: the Foundry bridge and its handshake
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Messages: [`foundry-bridge.schema.json`](foundry-bridge.schema.json), validated by the Python tests and the module's `node --test`. Requirements: ARC-06, ARC-07, ARC-17, ARC-18, PKG-07, PKG-08, PKG-09, PKG-10, PKG-14.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Messages: [`foundry-bridge.schema.json`](foundry-bridge.schema.json), with observations in [`event-envelope.schema.json`](event-envelope.schema.json), validated by the Python tests and the module's `node --test`. Requirements: ARC-06, ARC-07, ARC-16, ARC-17, ARC-18, CAP-03, CAP-08, PKG-07, PKG-08, PKG-09, PKG-10, PKG-14.
 
 ## Who dials whom
 
@@ -67,3 +67,18 @@ A delegated action that acts in the VTT returns a `VttAction` ([tool-registratio
 - A **failed action** is one the VTT did not take: no GM client connected, a refusal (`ok: false`), or no reply within 15 seconds. The Core logs it with status `failed` and the error, and the agent gets the error. Nothing is retried.
 
 The GM's approval or undo of a VTT action from the CLI needs the GM client, which only the `serve` process holds: the CLI relays it to `POST /gm` on the served Core ([tool-registration.md](tool-registration.md)).
+
+### Observations (ARC-16, CAP-03, CAP-08)
+
+While a live session is open, the module captures what happens at the table as **observations**, each in the **event envelope** ([`event-envelope.schema.json`](event-envelope.schema.json)): `id`, `session`, `at`, `scene`, `actor`, `kind`, `visibility`, `payload`.
+
+```json
+{"type": "session", "session": 3}
+{"type": "observation", "envelope": {"id": "4b1e…", "session": 3, "at": "2026-10-19T20:15:00.000Z", "scene": "Scene.s1", "actor": "Actor.a1", "kind": "chat", "visibility": "players", "payload": {"author": "Gamemaster", "speaker": "Sella", "text": "The bell rings.", "flavor": "", "whisper": [], "rolls": []}}}
+{"type": "ack", "id": "4b1e…", "ok": true}
+```
+
+- **Session**: the Core sends `session` right after `welcome` and whenever `secondchair session start|end` opens or ends one (it looks at `moment.yaml` every second): the live session id, or null. The module captures only while it is not null, and tags every envelope with it.
+- **Generic kinds**, captured by `secondchair-foundry`: `chat` (every chat message: author, speaker, text, flavor, whisper recipients' names, rolls' formula and total), `combat` (`start`, `round`, `turn`, `end`, with the combatant), `scene` (`activate`). A system adapter's kinds are prefixed by its system id and their payload schemas ship with it.
+- **Visibility** (ARC-16): `players` when the whole table saw it; `gm` when it was not shown to the table (GM-only, a whisper even to a player, a hidden combatant's turn); `blind` for a blind roll. Only `players` attests what the party knows: the Core refuses a party knowledge record whose origin quotes a `gm` or `blind` observation (CAP-08: a whisper or a blind roll becomes a call held for the wrap).
+- **Durable capture** (transplanted from v3, BVE-02): the module keeps each envelope in the browser's local storage before sending it, and drops it only on its `ack`. Whatever is held (sent before a reload, or captured while the Core was unreachable) is resent on the next welcome. The Core appends each envelope to `observations/<session>.jsonl` in the workspace, once per id, before acknowledging it, so a resent envelope is never recorded twice. An envelope the Core cannot take (malformed, or for a session not yet opened) is acknowledged with `ok: false` and an `error`, and the module drops it.

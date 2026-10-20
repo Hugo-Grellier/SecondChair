@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Hugo-Grellier/SecondChair/blob/main/docs/contracts/event-envelope.schema.json",
+  "title": "Event envelope",
+  "description": "One observation captured from the VTT during a live session (ARC-16, CAP-03; docs/contracts/foundry-bridge.md). One line of observations/<session>.jsonl in the workspace.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Unique id given by the connector when it captures the event; the Core keeps an id once per session, so a resent observation is never recorded twice."
+    },
+    "session": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The live session the event was captured in (moment.yaml's session)."
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Real time the event happened, ISO 8601 with offset."
+    },
+    "scene": {
+      "type": ["string", "null"],
+      "description": "The VTT scene it happened on (a Foundry UUID), or null."
+    },
+    "actor": {
+      "type": ["string", "null"],
+      "description": "The actor it is about or spoken by (a Foundry UUID), or null."
+    },
+    "kind": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$",
+      "description": "Generic kinds: chat, combat, scene. A System extension's kinds are prefixed by its system id (pf2e.strike) and their payload schemas ship with it."
+    },
+    "visibility": {
+      "enum": ["players", "gm", "blind"],
+      "description": "Who saw it at the table: players (the whole table), gm (not shown to the table: GM-only, or whispered to some users, named in the payload), blind (hidden even from the roller). Only players attests what the party knows."
+    },
+    "payload": {
+      "type": "object",
+      "description": "The kind's content. chat: {author, speaker, text, flavor, whisper, rolls}; combat: {action, combat, round, turn, combatant}; scene: {action, name}."
+    }
+  },
+  "required": ["id", "session", "at", "scene", "actor", "kind", "visibility", "payload"],
+  "additionalProperties": false
+}
