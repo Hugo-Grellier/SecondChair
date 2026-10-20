@@ -92,11 +92,12 @@ def take(ws: Workspace, message: dict) -> dict:
                 )
         elif name == "hand_back":  # loosening, from this authenticated Surface (DEL-14)
             npc = str(message.get("entity"))
-            if not (voiced := _voiced(ws, npc)):
+            # As the Desk shows it: voiced only with both at manual, so a lone override set
+            # elsewhere is never removed from here.
+            if set(VOICED) - _voiced(ws, npc):
                 raise DelegationError(f"The GM does not voice {npc}.")
             for responsibility in VOICED:
-                if responsibility in voiced:
-                    delegation.remove_override(ws, npc, responsibility, None, CHANNEL, True)
+                delegation.remove_override(ws, npc, responsibility, None, CHANNEL, True)
         else:
             raise DelegationError(f"Unknown Desk gesture {name!r}.")
     except (DelegationError, CanonError, WorkspaceError) as e:

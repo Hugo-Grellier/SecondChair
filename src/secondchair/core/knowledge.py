@@ -122,23 +122,27 @@ def show_cue(
         "line": line,
         "knows": [
             {"id": f, "statement": holds[f]["statement"], "mode": holds[f]["mode"]}
-            for f in [*cites, *extra]
+            for f in dict.fromkeys([*cites, *extra])
         ],
         "does_not_know": [
-            {"id": f, "statement": facts[f]["statement"]} for f in does_not_know or []
+            {"id": f, "statement": facts[f]["statement"]}
+            for f in dict.fromkeys(does_not_know or [])
         ],
     }
-    # ponytail: one active cue in derived state, replaced by the next; a cue per NPC if needed.
-    written = ws.root / f"{CUE_FILE}.tmp"  # the Desk polls it: never read half written
+    # ponytail: one active cue in derived state, replaced by the next and kept until then (a
+    # stale NPC id included); a cue per NPC, cleared at the end of a moment, if needed.
+    written = ws.root / f"{CUE_FILE}.{secrets.token_hex(4)}"  # never read half written
     written.write_text(json.dumps(cue, ensure_ascii=False))
     written.replace(ws.root / CUE_FILE)
     return cue
 
 
 def active_cue(ws: Workspace) -> dict[str, Any] | None:
-    """The acting cue last shown, if any."""
-    path = ws.root / CUE_FILE
-    return json.loads(path.read_text()) if path.exists() else None
+    """The acting cue last shown, if any; none when its derived file is unreadable."""
+    try:
+        return json.loads((ws.root / CUE_FILE).read_text())
+    except OSError, ValueError:
+        return None
 
 
 def _check_seen(ws: Workspace, knower: str, origin: dict[str, str]) -> None:
