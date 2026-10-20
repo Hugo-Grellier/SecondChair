@@ -8,8 +8,8 @@ import {
   canonical,
   local,
   MODULE,
-  RESERVED,
   ours,
+  RESERVED,
   reconcile,
   sha,
   summary,
@@ -124,7 +124,6 @@ function unowned(value, expand) {
   if (operator) throw new Error(`No update operator (${operator[0]}) in prep.`);
   return Object.fromEntries(entries.map(([k, v]) => [k, unowned(v, expand)]));
 }
-
 
 /** `fields` with only the module's own flags, its identity flags left out.
  * @param {Data} fields @returns {Data} */

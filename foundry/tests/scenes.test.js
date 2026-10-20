@@ -368,6 +368,9 @@ test("before Foundry 14 the map stays the scene's background", async () => {
 });
 
 test("a base's own identity flags in our namespace are never kept", () => {
-  const flags = withOurs({ flags: { [MODULE]: { key: "forged", spec: "x", note: 1 } } }, { key: "k" });
+  const flags = withOurs(
+    { flags: { [MODULE]: { key: "forged", spec: "x", note: 1 } } },
+    { key: "k" },
+  );
   assert.deepEqual(flags[MODULE], { note: 1, key: "k" });
 });
