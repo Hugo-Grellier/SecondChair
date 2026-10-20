@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   finder,
   genericReads,
+  guardedScene,
   LIMIT,
   realiseDocument,
   resolve,
@@ -298,7 +299,16 @@ test("generic reads: files, compendium entries and world documents, bounded", as
         collection: "pf2e.pathfinder-bestiary",
         documentName: "Actor",
         getIndex: async () => [
-          { _id: "a1", name: "Goblin Warrior", type: "npc", img: "g.webp" },
+          {
+            _id: "a1",
+            name: "Goblin Warrior",
+            type: "npc",
+            img: "g.webp",
+            system: {
+              details: { level: { value: -1 } },
+              traits: { rarity: "common", value: ["goblin"] },
+            },
+          },
           { _id: "a2", name: "Ogre", type: "npc" },
         ],
       },
@@ -337,6 +347,9 @@ test("generic reads: files, compendium entries and world documents, bounded", as
       type: "npc",
       pack: "pf2e.pathfinder-bestiary",
       img: "g.webp",
+      level: -1,
+      rarity: "common",
+      traits: ["goblin"],
     },
     {
       uuid: "Compendium.pf2e.equipment-srd.Item.i1",
@@ -344,6 +357,9 @@ test("generic reads: files, compendium entries and world documents, bounded", as
       type: "weapon",
       pack: "pf2e.equipment-srd",
       img: null,
+      level: null,
+      rarity: null,
+      traits: null,
     },
   ]);
   const npcs = /** @type {any[]} */ (await reads.search_compendium({ query: "o", type: "npc" }));
@@ -457,4 +473,25 @@ test("ownership is dropped at any depth, and an embedded field must be a list", 
   const other = world();
   await assert.rejects(realiseDocument("map", dotted, other.deps), /`pages` must be a list/);
   assert.equal(other.docs.length, 0);
+});
+
+test("a desired scene gets a document's guards: no ownership, clean HTML, no script region", () => {
+  const { deps } = world();
+  const payload = '<p>Lair</p><img src="x" onerror="alert(1)">';
+  const guarded = guardedScene(
+    {
+      scene: { name: "Cave", "ownership.default": 2, navName: payload },
+      items: [
+        { key: "note", type: "Note", data: { x: 1, y: 1, text: payload, "-=ownership": null } },
+        { key: "sign", type: "Drawing", data: { text: payload, flags: { m: { ownership: 3 } } } },
+      ],
+    },
+    deps,
+  );
+  assert.deepEqual(guarded.scene, { name: "Cave", navName: '<p>Lair</p><img src="x">' });
+  assert.deepEqual(guarded.items[0].data, { x: 1, y: 1, text: '<p>Lair</p><img src="x">' });
+  assert.deepEqual(guarded.items[1].data.flags, { m: {} });
+
+  const trap = { key: "trap", type: "Region", data: { behaviors: [{ type: "executeScript" }] } };
+  assert.throws(() => guardedScene({ scene: { name: "Cave" }, items: [trap] }, deps), /script/);
 });

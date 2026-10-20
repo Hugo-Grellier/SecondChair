@@ -145,6 +145,30 @@ export function written(type, data, { markdown, clean, expand }) {
 }
 
 /**
+ * A desired scene under a prepared document's guards: no ownership at any depth, every HTML
+ * string sanitized (a Note's text, a Tile's or Drawing's text), and no Region behaviour running a
+ * script in every client, which prep may never place.
+ * @param {import("./scenes.js").Desired} desired
+ * @param {{clean(html: string): string, expand(data: Data): Data}} html
+ * @returns {import("./scenes.js").Desired}
+ */
+export function guardedScene(desired, { clean, expand }) {
+  /** @param {Data} data */
+  const guard = (data) => cleaned(unowned(data, expand), clean);
+  const items = desired.items.map((item) => {
+    const data = guard(item.data);
+    if ([data.behaviors ?? []].flat().some((/** @type {any} */ b) => b?.type === SCRIPT)) {
+      throw new Error(`${item.key}: a Region behaviour may not run a script (${SCRIPT}).`);
+    }
+    return { ...item, data };
+  });
+  return { ...desired, scene: guard(desired.scene), items };
+}
+
+/** The Region behaviour type running arbitrary code in every client. */
+const SCRIPT = "executeScript";
+
+/**
  * Realise one desired world document: create it, or reconcile it with what the VTT holds now.
  * It is found by its key in its `secondchair-foundry` flags, as a scene's objects are.
  * @param {string} key  the document's key in the workspace
@@ -222,6 +246,16 @@ export async function realiseDocument(key, desired, world) {
   };
 }
 
+/** The index fields search_compendium reads: pf2e's level (an actor's, an item's), rarity, traits. */
+const INDEXED = [
+  "type",
+  "img",
+  "system.details.level.value",
+  "system.level.value",
+  "system.traits.rarity",
+  "system.traits.value",
+];
+
 /** The most entries one generic read returns, so an MCP reply stays small. */
 export const LIMIT = 100;
 
@@ -256,7 +290,8 @@ export function genericReads({ browse, packs, documents }) {
       /** @type {Data[]} */
       const found = [];
       for (const pack of packs()) {
-        for (const entry of await pack.getIndex({ fields: ["type", "img"] })) {
+        const index = await pack.getIndex({ fields: [...INDEXED] });
+        for (const entry of index) {
           if (!matches(entry.name, String(query))) continue;
           if (type && type !== pack.documentName && type !== entry.type) continue;
           found.push({
@@ -265,6 +300,10 @@ export function genericReads({ browse, packs, documents }) {
             type: entry.type ?? pack.documentName,
             pack: pack.collection,
             img: entry.img ?? null,
+            // pf2e's, null in a system without them: prep calibrates encounters from levels.
+            level: entry.system?.details?.level?.value ?? entry.system?.level?.value ?? null,
+            rarity: entry.system?.traits?.rarity ?? null,
+            traits: entry.system?.traits?.value ?? null,
           });
           if (found.length >= max) return found;
         }

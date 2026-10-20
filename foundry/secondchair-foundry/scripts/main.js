@@ -3,7 +3,14 @@ import { aboveCeiling, CEILING, createActions, missingTranslation } from "./acti
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
 import { createDesk, deskHtml, esc } from "./desk.js";
-import { DOCUMENT_TYPES, finder, genericReads, realiseDocument, resolve } from "./documents.js";
+import {
+  DOCUMENT_TYPES,
+  finder,
+  genericReads,
+  guardedScene,
+  realiseDocument,
+  resolve,
+} from "./documents.js";
 import { MODULE, realise } from "./scenes.js";
 import { createOutbox, createRecorder, describe, keyInput } from "./traces.js";
 
@@ -538,7 +545,11 @@ function realiseOne({ id, scene, document, desired, level }) {
       const resolved = resolve(desired, finder(preparedDocument), unresolved);
       const report = document
         ? await realiseDocument(document, resolved, documentWorld)
-        : await realise(/** @type {string} */ (scene), resolved, world);
+        : await realise(
+            /** @type {string} */ (scene),
+            guardedScene(resolved, documentWorld),
+            world,
+          );
       report.errors.push(...unresolved);
       const { conflict = 0 } = report.summary;
       if (conflict || report.errors.length) {

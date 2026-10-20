@@ -153,6 +153,8 @@ With no GM client the desired state waits: every connection starts by sending al
 
 A Token whose `actor` prep changed is rebound to the new Actor on update. A copy the GM pasted carries the same key: only one object per key is prep's, the others are the GM's.
 
+A desired scene gets a [prepared document's guards](#prepared-world-documents-arc-07-arc-10): `prepare_scene` refuses an `ownership` key anywhere in the scene or an item's data, and a Region behaviour of type `executeScript` (it runs code in every client); the module drops such ownership keys, sanitizes every HTML string (a Note's, a Tile's or Drawing's text) and refuses such a behaviour too.
+
 The **play state** is never compared nor rewritten: a token's position, elevation, rotation, visibility and actor delta, a door's state, a light, sound, tile or drawing's visibility, whether a region's behaviours are disabled. So a token the GM or a player moved stays where it is when prep changes it. A retouch is judged on the fields prep wrote only. The scene itself (`_scene`) is reconciled the same way, never deleted. An object that cannot be written is reported in `errors`; the others are still realised.
 
 ### Prepared world documents (ARC-07, ARC-10)
@@ -241,7 +243,7 @@ The generic reads, answered by `secondchair-foundry` whatever the system, each b
 | `op` | `params` | `result` |
 |---|---|---|
 | `browse_files` | `{path, source, extensions}` | `{dirs, files, more?}`: Foundry's file picker browse of `path` in `source` (`data`, `public`), files filtered by `extensions` when given; `more` counts what was left out |
-| `search_compendium` | `{query, type, limit}` | `[{uuid, name, type, pack, img}]`: every pack's index entries whose name contains `query` (any case), `type` a document type (Actor, Item…) or the entry's system type (npc, loot…), at most `limit` (20 by default) |
+| `search_compendium` | `{query, type, limit}` | `[{uuid, name, type, pack, img, level, rarity, traits}]` (the last three pf2e's, from `system.details.level.value` or `system.level.value` and `system.traits`, null when absent): every pack's index entries whose name contains `query` (any case), `type` a document type (Actor, Item…) or the entry's system type (npc, loot…), at most `limit` (20 by default) |
 | `list_world_documents` | `{type, query}` | `[{uuid, id, name, prepared_key}]`: the world's documents of `type` (Actor, JournalEntry, Item, Playlist, RollTable, Scene) whose name contains `query`; `prepared_key` the key of the prepared document or scene it realises, else null |
 
 | `op` | `params` | `result` (PF2e adapter) |

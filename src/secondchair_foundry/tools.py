@@ -26,6 +26,7 @@ EMBEDDED = ("pages", "sounds", "items", "results")  # embedded documents, each r
 # A world or compendium document's UUID, its type captured: Actor.<id>, Compendium.<pack>.Actor.<id>
 UUID = re.compile(r"^(?:Compendium\.[\w-]+\.[\w-]+\.)?(\w+)\.[A-Za-z0-9]+$")
 ITEM_TYPES = ("Token", "Wall", "AmbientLight", "AmbientSound", "Note", "Tile", "Drawing", "Region")
+SCRIPT = "executeScript"  # the Region behaviour running arbitrary code, never prep's
 KEY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 type Choice = Literal["keep", "overwrite", "recreate"]
@@ -105,7 +106,8 @@ def prepare_scene(
     Drawing and Region, and the document's Foundry fields; a Token also takes `actor`, the UUID of
     the Actor (world or compendium) it is made from. `choices` are the GM's calls by object key
     (`_scene` for the scene itself): `keep` the VTT's version of a conflict, `overwrite` it, or
-    `recreate` an object deleted in play. Writing the same state again changes nothing."""
+    `recreate` an object deleted in play. Never set `ownership`, nor a Region behaviour of type
+    `executeScript`; HTML is sanitized. Writing the same state again changes nothing."""
     desired: dict[str, Any] = {"scene": scene, "items": items}
     if choices:
         desired["choices"] = choices
@@ -136,6 +138,11 @@ def _check(key: str, desired: dict[str, Any]) -> None:
             raise ValueError(f"{k}: an item has only key, type, actor and data.")
         if "actor" in item and (item["type"] != "Token" or not isinstance(item["actor"], str)):
             raise ValueError(f"{k}: only a Token takes an `actor`, an Actor's UUID.")
+        behaviors = item["data"].get("behaviors")
+        if any(isinstance(b, dict) and b.get("type") == SCRIPT for b in behaviors or []):
+            raise ValueError(f"{k}: a Region behaviour may not run a script ({SCRIPT}).")
+    if _sets_ownership([desired["scene"], *(i["data"] for i in desired["items"])]):
+        raise ValueError("`ownership` is not prep's: who sees a scene is the GM's call in Foundry.")
 
 
 def prepare_document(
@@ -237,7 +244,8 @@ def browse_files(
 
 def search_compendium(query: str, type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
     """The compendium entries of the GM's install whose name contains `query` (any case), each
-    `{uuid, name, type, pack, img}`: the UUID to make a prepared document or a token from.
+    `{uuid, name, type, pack, img, level, rarity, traits}`: the UUID to make a prepared document or
+    a token from, and pf2e's level, rarity and traits (null elsewhere) to calibrate encounters.
     `type` keeps one document type (Actor, Item, JournalEntry, Scene, Playlist, RollTable…) or
     one system type (pf2e: npc, hazard, loot, weapon, equipment…). At most `limit` entries (up
     to 100)."""

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import jsonschema
+import pytest
 import yaml
 from mcp import Client
 from test_delegation import call, log, ws  # noqa: F401  (ws is a fixture)
@@ -88,6 +89,41 @@ def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F
 
     assert result.is_error
     assert "Wallpaper" in result.content[0].text
+    assert not (ws.root / "scenes").exists()
+
+
+@pytest.mark.parametrize(
+    ("bad", "error"),
+    [
+        ({**CAVE, "scene": {**CAVE["scene"], "ownership.default": 2}}, "ownership"),
+        (
+            {**CAVE, "items": [{"key": "n", "type": "Note", "data": {"-=ownership": None}}]},
+            "ownership",
+        ),
+        (
+            {
+                **CAVE,
+                "items": [
+                    {
+                        "key": "t",
+                        "type": "Region",
+                        "data": {"behaviors": [{"type": "executeScript"}]},
+                    }
+                ],
+            },
+            "script",
+        ),
+    ],
+)
+def test_a_scene_never_sets_ownership_nor_runs_a_script(
+    ws: Workspace,  # noqa: F811
+    bad: dict,
+    error: str,
+) -> None:
+    result = call(ws, "prepare_scene", {"key": "cave", **bad, "agent": "claude-prep"})
+
+    assert result.is_error
+    assert error in result.content[0].text
     assert not (ws.root / "scenes").exists()
 
 
