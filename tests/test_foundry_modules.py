@@ -20,7 +20,10 @@ def test_the_pf2e_adapter_requires_the_library_on_foundry_14_and_pf2e_8() -> Non
     assert manifest["compatibility"]["maximum"] == "14"
     [system] = manifest["relationships"]["systems"]
     assert system["id"] == "pf2e"
-    assert (system["compatibility"]["minimum"], system["compatibility"]["maximum"]) == ("8", "8")
+    assert (system["compatibility"]["minimum"], system["compatibility"]["maximum"]) == (
+        "8",
+        "8.999",
+    )
     assert [r["id"] for r in manifest["relationships"]["requires"]] == ["secondchair-foundry"]
 
 
@@ -39,6 +42,21 @@ def test_the_manifest_is_catalogue_compliant(module: Path) -> None:
     assert manifest["download"].endswith(f"/{module.name}.zip")
     for script in manifest.get("esmodules", []):
         assert (module / script).is_file(), script
+
+
+@pytest.mark.parametrize("module", MODULES, ids=lambda p: p.name)
+def test_no_relationship_maximum_is_a_bare_major_version(module: Path) -> None:
+    """Foundry tests a dependency with isNewerVersion(installed, maximum): "8" bars 8.6.1 (#148).
+
+    Only the core maximum is read as a generation; a relationship maximum spells out its minor.
+    """
+    manifest = json.loads((module / "module.json").read_text())
+    for kind, related in manifest.get("relationships", {}).items():
+        for package in related:
+            maximum = package.get("compatibility", {}).get("maximum")
+            assert maximum is None or not maximum.isdigit(), (
+                f"{kind}/{package['id']} maximum {maximum!r}"
+            )
 
 
 @pytest.mark.parametrize("module", MODULES, ids=lambda p: p.name)
