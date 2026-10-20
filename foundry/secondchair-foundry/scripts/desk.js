@@ -14,7 +14,7 @@
 export const REASONS = ["contradiction", "rules", "tone", "other"];
 
 /** @param {unknown} text */
-const esc = (text) =>
+export const esc = (text) =>
   String(text ?? "").replace(
     /[&<>"']/g,
     (c) =>

@@ -87,8 +87,10 @@ const KEPT = 200;
  * @param {() => Adapter | null} args.adapter  the system adapter, if one registered
  * @param {() => unknown} args.ceiling  the world's ceiling setting
  * @param {() => string} args.language  the campaign language
+ * @param {(token: Doc, line: string) => Promise<string>} args.say  have a token say a line aloud
+ *   to the table: a public chat message spoken by it, whose id it returns
  */
-export function createActions({ resolve, store, adapter, ceiling, language }) {
+export function createActions({ resolve, store, adapter, ceiling, language, say }) {
   /** @type {Map<string, Promise<Reply>>} */
   const inflight = new Map();
   /** @type {Promise<unknown>} */
@@ -113,6 +115,15 @@ export function createActions({ resolve, store, adapter, ceiling, language }) {
       throw new CeilingRefusal(
         `Refused by this world's delegation ceiling (${ceiling()}): the action was asked at ${level}.`,
       );
+    }
+    if (op === "speak") {
+      // A disclosure (DEL-09): irreversible, so there is no undo to take.
+      if (expect) throw new Error("A line said aloud cannot be taken back.");
+      const doc = await resolve(target);
+      if (doc?.documentName !== "Token") throw new Error(`${target} is not a Token.`);
+      const line = params.content;
+      if (typeof line !== "string" || !line.trim()) throw new Error("speak says a `content`.");
+      return { before: { message: null }, after: { message: await say(doc, line) } };
     }
     if (!Object.hasOwn(GENERIC, op)) {
       const ops = adapter()?.ops;

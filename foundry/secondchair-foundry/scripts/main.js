@@ -2,7 +2,7 @@
 import { CEILING, createActions, missingTranslation } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
-import { createDesk, deskHtml } from "./desk.js";
+import { createDesk, deskHtml, esc } from "./desk.js";
 import { MODULE, realise } from "./scenes.js";
 import { createOutbox, createRecorder, describe, keyInput } from "./traces.js";
 
@@ -345,6 +345,17 @@ Hooks.once("ready", () => {
         adapter: () => adapter,
         // Read at each request, so a change applies at once (DEL-19).
         ceiling: () => game.settings.get(MODULE, "ceiling"),
+        // In character, as the token, to the whole table. The line is text: neither HTML nor
+        // Foundry's enrichers (@UUID[…], @Check[…], [[/r …]]), which would show or roll more.
+        say: async (token, line) => {
+          const text = esc(line).replace(/[@[]/g, (c) => `&#${c.charCodeAt(0)};`);
+          const message = await ChatMessage.create({
+            speaker: ChatMessage.getSpeaker({ token }),
+            content: `<p>${text}</p>`,
+          });
+          if (!message?.id) throw new Error("The line was not posted: nothing was said.");
+          return String(message.id);
+        },
       });
       /** The calls due now the Desk already showed. @type {Set<number>} */
       let seen = new Set();

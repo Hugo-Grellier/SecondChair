@@ -2,7 +2,8 @@
 // (ARC-08, ADR 0004). It refuses to start outside Foundry v14 + pf2e 8.x (RUL-02).
 import { visibilityOf } from "../../secondchair-foundry/scripts/capture.js";
 import { absalomDate, createAdapter, RULES_SETTINGS, unsupported } from "./adapter.js";
-import { createTracer } from "./outcomes.js";
+import { createExecutor } from "./executor.js";
+import { createTracer, DEGREES } from "./outcomes.js";
 
 /** @typedef {import("./adapter.js").Env} Env @typedef {import("./outcomes.js").Doc} Doc */
 
@@ -89,6 +90,115 @@ const traced = {
   },
 };
 
+/** How long the GM's modules get to react to an agent's call before its follow-ups (RUL-10). */
+const SETTLE_MS = 1500;
+
+/**
+ * A stand-in click that makes pf2e skip its roll dialog whatever the GM's preference: shift
+ * inverts it (eventToRollParams), and an agent's call cannot wait on a dialog.
+ * @param {"showCheckDialogs" | "showDamageDialogs"} key
+ */
+const noDialog = (key) => ({ shiftKey: game.user.settings[key], ctrlKey: false, metaKey: false });
+
+/** A token's placeable, which pf2e's roll functions take as their target. @param {Doc} token */
+function placeable(token) {
+  if (!token.object) throw new Error(`${token.uuid} is not on the scene the GM is viewing.`);
+  return token.object;
+}
+
+/** Where the executor's observations go, once the library starts capture. */
+/** @type {import("./executor.js").Env["emit"]} */
+let emitted = () => {};
+
+/** The executor's world (executor.js): pf2e's document methods, never a chat card's button. */
+/** @type {import("./executor.js").Env} */
+const combat = {
+  resolve: (uuid) => fromUuid(uuid),
+  pc: (token) => /** @type {Doc} */ (token).actor?.hasPlayerOwner === true,
+  inEncounter: (token) =>
+    game.combat?.started === true &&
+    game.combat.combatants.some((/** @type {Doc} */ c) => c.token?.uuid === token.uuid),
+  state: (token) => {
+    const actor = /** @type {Doc} */ (token).actor;
+    return { hp: traced.hp(actor), conditions: traced.conditions(actor) };
+  },
+  async strike(token, slug, target, map) {
+    const actor = /** @type {Doc} */ (token).actor;
+    const strike = actor.system?.actions?.find(
+      (/** @type {Doc} */ s) => s.type === "strike" && s.slug === slug,
+    );
+    if (!strike) throw new Error(`${actor.name} has no strike "${slug}".`);
+    const variant = strike.variants?.[map];
+    if (!variant) throw new Error(`The strike "${slug}" has no attack ${map + 1}.`);
+    const object = placeable(target);
+    const roll = await variant.roll({ target: object, event: noDialog("showCheckDialogs") });
+    if (!roll) throw new Error(`pf2e did not roll the strike "${slug}".`);
+    const degree = DEGREES[roll.degreeOfSuccess] ?? null;
+    const missed = { degree, damage: null, apply: null };
+    if (degree !== "success" && degree !== "criticalSuccess") return missed;
+    const damage = await strike[degree === "success" ? "damage" : "critical"]({
+      target: object,
+      event: noDialog("showDamageDialogs"),
+      mapIncreases: map,
+    });
+    if (!damage || typeof damage === "string") return missed;
+    const victim = /** @type {Doc} */ (target).actor;
+    return {
+      degree,
+      damage: damage.total,
+      // What the chat card's button does, on the given target rather than the GM's selection.
+      // ponytail: no origin roll options nor ephemeral effects; IWR comes from the roll itself.
+      apply: () =>
+        victim.applyDamage({
+          damage,
+          token: target,
+          item: strike.item,
+          rollOptions: new Set(victim.getSelfRollOptions?.() ?? []),
+          outcome: degree,
+        }),
+    };
+  },
+  async act(token, slug, target) {
+    const action = game.pf2e.actions.get(slug);
+    if (!action) throw new Error(`pf2e has no system action "${slug}".`);
+    const results = await action.use({
+      actors: [/** @type {Doc} */ (token).actor],
+      target: placeable(target),
+      event: noDialog("showCheckDialogs"),
+    });
+    const outcome = Array.isArray(results) ? results[0]?.outcome : null;
+    return { degree: typeof outcome === "string" ? outcome : null };
+  },
+  async rollSave(token, save, dc) {
+    const statistic = /** @type {Doc} */ (token).actor.saves?.[save];
+    if (!statistic) throw new Error(`${token.uuid}'s actor has no ${save} save.`);
+    const roll = await statistic.roll({ dc: { value: dc }, event: noDialog("showCheckDialogs") });
+    return { degree: DEGREES[roll?.degreeOfSuccess] ?? null };
+  },
+  // pf2e's inline check: its player clicks it and rolls their own save (RUL-04).
+  requestSave: (token, save, dc) =>
+    ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ token }),
+      content: `<p>@Check[${save}|dc:${dc}]</p>`,
+    }),
+  setHp: (token, hp) =>
+    /** @type {Doc} */ (token).actor.update({
+      "system.attributes.hp.value": hp.value,
+      "system.attributes.hp.temp": hp.temp,
+    }),
+  async setCondition(token, slug, value) {
+    const actor = /** @type {Doc} */ (token).actor;
+    if (value === undefined) return actor.decreaseCondition(slug, { forceRemove: true });
+    const existing = actor.getCondition(slug);
+    if (!existing) return actor.increaseCondition(slug, value === null ? {} : { value });
+    if (value !== null && existing.value !== value) {
+      return game.pf2e.ConditionManager.updateConditionValue(existing.id, actor, value);
+    }
+  },
+  settle: () => new Promise((resolve) => setTimeout(resolve, SETTLE_MS)),
+  emit: (event) => emitted(event),
+};
+
 /** The rules settings this world registers, with their values. */
 function rulesSettings() {
   return Object.fromEntries(
@@ -139,7 +249,9 @@ Hooks.once(
       return;
     }
     const adapter = createAdapter(env);
+    adapter.ops = { ...adapter.ops, ...createExecutor(combat) };
     adapter.observe = (emit) => {
+      emitted = emit;
       // Clock advances (CAL-12), as Absalom Reckoning dates, in every moment.
       Hooks.on("updateWorldTime", (/** @type {number} */ worldTime) =>
         emit({

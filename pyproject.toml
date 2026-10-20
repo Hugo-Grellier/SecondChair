@@ -36,6 +36,7 @@ pf2e = "secondchair_pf2e.checks:check"
 core = "secondchair.core.campaign:tools"
 foundry = "secondchair_foundry.tools:tools"
 pf2e = "secondchair_pf2e.calculators:tools"
+pf2e-encounters = "secondchair_pf2e.tools:tools"
 
 [dependency-groups]
 dev = [

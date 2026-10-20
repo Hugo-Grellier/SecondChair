@@ -101,6 +101,16 @@ def test_a_planted_inconsistency_is_a_discrepancy_held_for_the_break(ws: Workspa
     assert [c["id"] for c in calls.take_break(ws)] == [call["id"]]
 
 
+def test_an_ambiguous_follow_up_of_an_agent_action_is_a_discrepancy(ws: Workspace) -> None:  # noqa: F811
+    delegation.start_session(ws)
+    observations.record(ws, by_id("follow-up-applied"))
+    observations.record(ws, by_id("follow-up-ambiguous"))
+    [call] = open_calls(ws)
+    assert (call["kind"], call["check"]) == ("discrepancy", "follow_up")
+    assert "demoralize at criticalSuccess gives frightened 2" in call["message"]
+    assert "left frightened 1" in call["message"]
+
+
 def test_a_discrepancy_can_be_forced_now(ws: Workspace) -> None:  # noqa: F811
     set_cell(ws, "rules_and_combat", deadline="now")
     delegation.start_session(ws)
