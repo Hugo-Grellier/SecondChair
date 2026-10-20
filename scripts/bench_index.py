@@ -52,22 +52,21 @@ def _measure(call, paths_read: set[Path] | None = None) -> tuple[float, int]:
 
 def benchmark(
     size: int, unchanged_paths: set[Path] | None = None
-) -> tuple[int, int, int, list[tuple[float, int]]]:
+) -> tuple[int, int, set[Path], list[tuple[float, int]]]:
     with TemporaryDirectory(prefix="secondchair-index-bench-") as directory:
         root = Path(directory) / "workspace"
         ws = _workspace(size, root)
         files = [path for path in root.rglob("*") if path.is_file()]
         file_count = len(files)
         byte_count = sum(path.stat().st_size for path in files)
-        inputs = [*(root / "canon").rglob("*"), *(root / "action-log").rglob("*")]
-        input_bytes = sum(path.stat().st_size for path in inputs if path.is_file())
+        inputs = {p for d in ("canon", "action-log") for p in (root / d).rglob("*") if p.is_file()}
         cold = _measure(lambda: index.connect(ws))
         unchanged = _measure(lambda: index.connect(ws), unchanged_paths)
 
         document = next((root / index.ENTITIES_DIR).glob("*.md"))
         document.write_text(document.read_text() + "A hand edit.\n")
         edited = _measure(lambda: index.connect(ws))
-        return file_count, byte_count, input_bytes, [cold, unchanged, edited]
+        return file_count, byte_count, inputs, [cold, unchanged, edited]
 
 
 def main(sizes: list[int]) -> None:

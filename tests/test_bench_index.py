@@ -24,12 +24,6 @@ def test_benchmark_reports_columns_and_unchanged_connect_reads_all_inputs(capsys
 
     # #172 will change this when unchanged connects stop reading these inputs.
     unchanged_paths: set[Path] = set()
-    bench_index.benchmark(2, unchanged_paths)
-    root = next(path.parent for path in unchanged_paths if path.name == "workspace.yaml")
-    inputs = {
-        path
-        for directory in ("canon", "action-log")
-        for path in (root / directory).rglob("*")
-        if path.is_file()
-    }
+    _, _, inputs, _ = bench_index.benchmark(2, unchanged_paths)
+    assert inputs
     assert inputs <= unchanged_paths
