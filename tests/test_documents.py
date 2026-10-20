@@ -232,6 +232,7 @@ def test_an_image_size_is_asked_of_the_gm_client(bridge: str, token: str) -> Non
         "maps/../../x.png",
         "maps\\..\\x.png",
         "maps/%2e%2e/x.png",
+        " //evil.example/x.png",
         "https%3A//evil.example/x.png",
         "%2Fetc/passwd",
         "maps/x.png%0a",

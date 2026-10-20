@@ -319,6 +319,7 @@ def _data_path(path: str) -> str:
     for text in (path, decoded):
         if (
             re.match(r"^[a-z][\w+.-]*:", text, re.IGNORECASE)
+            or text.lstrip() != text  # the URL parser drops a leading space: " //evil"
             or text.startswith(("/", "\\"))
             or ".." in re.split(r"[/\\]", text)
             or re.search(r"[\x00-\x1f\x7f]", text)
