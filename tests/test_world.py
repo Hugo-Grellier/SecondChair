@@ -346,6 +346,38 @@ def test_more_than_six_ticks_of_one_front_are_shown_grouped_with_one_key_each(
     assert clock(ws, tolls) == 7
 
 
+def test_a_believed_or_future_state_fact_is_not_current_until_its_date(ws: Workspace) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    rumour = entity(ws, "Rumoured Raid")
+    rule = {"carrier": tolls, "capacity": 4, "every": "7d", "anchor": DAY0}
+    fact(
+        ws,
+        "A raid is coming.",
+        never_true=True,
+        state={"of": rumour, "key": "front", "value": rule},
+    )
+    flood = situation(ws, "Spring Flood", stage="available", deadline=None)
+    late = world._current(ws)[flood]["situation"]
+    act(
+        ws,
+        "correct_fact",
+        fact=late["id"],
+        statement=late["statement"],
+        entities=[],
+        origin=GM,
+        state=late["state"],
+        valid_from="4725-02-01",
+    )
+
+    turn(ws, "4725-01-15")
+
+    assert rumour not in world.state(ws)["fronts"]  # a belief never drives the world (#170)
+    assert flood not in world.state(ws)["situations"]  # it starts after the cursor
+    assert clock(ws, tolls) == 2  # ticks within one turn still see the clock they just moved
+    turn(ws, "4725-02-01")
+    assert flood in world.state(ws)["situations"]
+
+
 def test_the_clock_stops_at_its_capacity(ws: Workspace) -> None:
     tolls, _ = front(ws, "Toll Squeeze", capacity=2)
     assert len(turn(ws, "4725-03-01")) == 2

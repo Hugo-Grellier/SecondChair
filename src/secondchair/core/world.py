@@ -121,11 +121,19 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
     return {**state, "value": value}, refs
 
 
-def _current(ws: Workspace) -> dict[str, dict[str, Any]]:
-    """Entity id -> its current state facts: one per key, a list of agenda steps."""
+def _current(ws: Workspace, at: str | None = None) -> dict[str, dict[str, Any]]:
+    """Entity id -> its state facts valid on `at`, by default the cursor (#170): one per key, a
+    list of agenda steps. A belief (`never_true`) never is; before the first world-turn, the open
+    ones are."""
+    at = at or cursor(ws)
+    facts = (
+        index.search_facts(ws, at=at)
+        if at
+        else [f for f in index.search_facts(ws) if f["valid_to"] is None and not f["never_true"]]
+    )
     found: dict[str, dict[str, Any]] = {}
-    for f in index.search_facts(ws):
-        if f.get("state") is None or f["valid_to"] is not None:
+    for f in facts:
+        if f.get("state") is None:
             continue
         mine = found.setdefault(f["state"]["of"], {AGENDA: []})
         key = f["state"]["key"]
@@ -220,7 +228,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
         out.append({**occ, "rule": rule, **more})
         return out[-1]
 
-    for entity, s in sorted(_current(ws).items()):
+    for entity, s in sorted(_current(ws, until).items()):  # what starts in the window counts
         if FRONT in s and s[FRONT]["state"]["value"]["active"]:  # a pause suspends it (LW-14)
             rule = s[FRONT]["state"]["value"]
             clock = s[CLOCK]["state"]["value"] if CLOCK in s else 0
@@ -446,7 +454,7 @@ def _evolution(
 def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change]:
     """The files one occurrence writes; `_Blocked` when it no longer applies or contradicts
     played canon (LW-09)."""
-    s = _current(ws).get(record["entity"], {AGENDA: []})
+    s = _current(ws, record["date"]).get(record["entity"], {AGENDA: []})
     key, date, entity = record["key"], record["date"], record["entity"]
     names = {e["id"]: e["names"][0] for e in index.search_entities(ws)}
     if record["kind"] == "tick":
@@ -541,7 +549,7 @@ def _apply(
 def _cascade(ws: Workspace, tick: dict, approve: tuple[str, bool] | None, job: int | None) -> None:
     """The threshold steps a tick crosses, dated at the tick, each once (T5): new ones, and
     those an undo returned to the queue with it."""
-    s = _current(ws).get(tick["entity"], {AGENDA: []})
+    s = _current(ws, tick["date"]).get(tick["entity"], {AGENDA: []})
     clock = s[CLOCK]["state"]["value"] if CLOCK in s else 0
     known = {r["key"]: r for r in occurrences(ws)}
     for a in s[AGENDA]:
