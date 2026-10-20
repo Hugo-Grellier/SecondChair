@@ -610,6 +610,13 @@
             "additionalProperties": false
           }
         },
+        "turn_driver": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The turn driver the last rules context names (RUL-11), null when none is active. While one is, the GM runs GM creatures' turns through it and agents stay silent (RUL-12)."
+        },
         "cue": {
           "description": "The active NPC's acting cue (DEL-15), null until an agent shows one. Shown at every level, manual included.",
           "oneOf": [
@@ -630,8 +637,11 @@
                   "type": "string"
                 },
                 "line": {
-                  "type": "string",
-                  "description": "A line in the campaign language, its cited facts checked by the Core (CAN-16)."
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "A line in the campaign language, its cited facts checked by the Core (CAN-16). Null while a turn driver is active: agents stay silent (RUL-12)."
                 },
                 "knows": {
                   "type": "array",

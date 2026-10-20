@@ -51,6 +51,15 @@ export const RULES_SETTINGS = [
   "automation.encumbrance",
 ].map((key) => `pf2e.${key}`);
 
+/** Known turn drivers, by module id (RUL-11): a closed list, so a new one is invisible until added. */
+export const TURN_DRIVERS = ["pf2e-combater"];
+
+/**
+ * The active turn driver's module id, or null (RUL-11).
+ * @param {Record<string, string>} modules  active module id -> version
+ */
+export const turnDriver = (modules) => TURN_DRIVERS.find((id) => id in modules) ?? null;
+
 /**
  * What `set_actor` may set on an actor: the fields a discrepancy's fix touches (RUL-17).
  * ponytail: HP and focus; conditions and spell slots are items, fixed by the GM by hand.
@@ -190,9 +199,15 @@ export function createAdapter(env) {
       },
     },
     reads: {
-      /** The rules context (RUL-22). */
+      /** The rules context (RUL-22), with the active turn driver (RUL-11). */
       async rules_context() {
-        return { ...env.versions(), modules: env.modules(), settings: env.settings() };
+        const modules = env.modules();
+        return {
+          ...env.versions(),
+          modules,
+          settings: env.settings(),
+          turn_driver: turnDriver(modules),
+        };
       },
       /**
        * An official entry's name in the GM's install (CAN-20), by its stable English key (the

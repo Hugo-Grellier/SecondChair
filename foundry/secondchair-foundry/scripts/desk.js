@@ -5,8 +5,8 @@
 
 /**
  * @typedef {{id: number, kind: string, responsibility: string, deadline: string, status: string, entry: number | null, message: string | null, detail: string | null, reversible: boolean | null}} DeskCall
- * @typedef {{npc: string, name: string, goal: string, line: string, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean}} ActingCue
- * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null}} DeskState
+ * @typedef {{npc: string, name: string, goal: string, line: string | null, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean}} ActingCue
+ * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */
 
@@ -138,8 +138,7 @@ function cueHtml(cue) {
       : "<p>None.</p>";
   const [gesture, label] = cue.voiced ? ["hand_back", "Hand back"] : ["voice", "I voice this one"];
   return `<p><strong>${esc(cue.name)}</strong> · ${esc(cue.goal)}</p>
-<p><em>“${esc(cue.line)}”</em></p>
-<p>Knows:</p>
+${cue.line === null ? "" : `<p><em>“${esc(cue.line)}”</em></p>\n`}<p>Knows:</p>
 ${list(cue.knows)}
 <p>Does not know:</p>
 ${list(cue.does_not_know)}
@@ -171,7 +170,7 @@ export function deskHtml({ isGM, state, pile, ceiling }) {
 <h3>Due now</h3>
 ${callsHtml(state.calls, "Nothing due now.")}
 <h3>Acting cue</h3>
-${cueHtml(state.cue)}
+${state.turn_driver ? `<p><em>${esc(state.turn_driver)} runs the GM creatures' turns: agents stay silent.</em></p>\n` : ""}${cueHtml(state.cue)}
 ${
   pile
     ? `<h3>Held for the break</h3>

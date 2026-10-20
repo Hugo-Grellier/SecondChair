@@ -48,6 +48,12 @@ RULES_CONTEXT = "rules_context"  # recorded at the start of each moment and when
 CLOCK_TARGET = "time"  # what `set_date` acts on: the world clock, not a document
 
 
+def _driver_of(context: object) -> str | None:
+    """The turn driver a rules context names (RUL-11), if any."""
+    found = context.get("turn_driver") if isinstance(context, dict) else None
+    return found if isinstance(found, str) else None
+
+
 class Refused(Exception):
     def __init__(self, reason: str, message: str) -> None:
         super().__init__(message)
@@ -77,6 +83,7 @@ class Bridge:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.waiting: dict[str, asyncio.Future[dict]] = {}  # replies awaited, by request id
         self.rules_context: tuple[int, object] | None = None  # (moment seq, last one recorded)
+        self.turn_driver: str | None = None  # the connected client's, from its rules context
 
     @property
     def binding_path(self) -> Path:
@@ -201,6 +208,7 @@ class Bridge:
             if watch is not None:
                 watch.cancel()
             self.gm = None
+            self.turn_driver = None  # the next client's rules context says again
             if realising is not None:
                 realising.cancel()
             for waiting in self.waiting.values():
@@ -229,6 +237,7 @@ class Bridge:
                         delegation.current_moment(self.ws),
                         desk.due_now(self.ws),
                         knowledge.active_cue(self.ws),
+                        self.turn_driver,
                         len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
                     )
                 )
@@ -245,7 +254,7 @@ class Bridge:
             await asyncio.sleep(POLL)
 
     async def _send_desk(self, socket: WebSocket) -> None:
-        await socket.send_json(await asyncio.to_thread(desk.state, self.ws))
+        await socket.send_json(await asyncio.to_thread(desk.state, self.ws, self.turn_driver))
 
     async def _gesture(self, socket: WebSocket, message: dict) -> None:
         """Take a GM gesture from the Director's Desk, answer it, then refresh the Desk. In a
@@ -269,6 +278,7 @@ class Bridge:
         except TimeoutError, VttError:
             return
         if reply.get("ok") is True and isinstance(reply.get("result"), dict):
+            self.turn_driver = _driver_of(reply["result"])
             await asyncio.to_thread(self._record, RULES_CONTEXT, reply["result"])
 
     def _record(self, kind: str, payload: dict) -> None:
@@ -324,6 +334,7 @@ class Bridge:
             # A rules setting changed in Foundry: what the next moment's context is compared to.
             seq = delegation.current_moment(self.ws)[1]
             self.rules_context = (seq, envelope.get("payload"))
+            self.turn_driver = _driver_of(envelope.get("payload"))
         try:
             problem = await asyncio.to_thread(observations.record, self.ws, envelope)
         except OSError as e:

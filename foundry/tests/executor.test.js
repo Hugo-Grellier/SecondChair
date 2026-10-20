@@ -93,6 +93,8 @@ function encounter() {
     degree: "success",
     /** @type {((target: Token) => void) | null} */
     module: null,
+    /** @type {string | null} the active turn driver's module id */
+    driver: null,
   };
   /** @param {unknown} t */
   const as = (t) => /** @type {Token} */ (t);
@@ -201,6 +203,7 @@ function encounter() {
     reactive: (/** @type {unknown} */ t) => !as(t).pc,
     trackerUsed: () => world.tracker,
     settle: async () => {},
+    driver: () => world.driver,
     emit: (/** @type {Record<string, unknown>} */ event) => world.emitted.push(event),
   };
   return { world, ops: createExecutor(env) };
@@ -240,6 +243,29 @@ test("agents never act for a PC, nor outside an encounter", async () => {
   await assert.rejects(ops.use_action(SELLA, { action: "trip", target: GOBLIN }, null), /RUL-04/);
   await assert.rejects(ops.saving_throw(BANDIT, { save: "will", dc: 18 }, null), /RUL-03/);
   assert.deepEqual(world.calls, []);
+});
+
+test("with a turn driver active, every monster-turn action is refused; undo still works", async () => {
+  const { world, ops } = encounter();
+  const done = await ops.strike(GOBLIN, { strike: "dogslicer", target: SELLA, map: 0 }, null);
+  world.calls = [];
+  world.driver = "pf2e-combater";
+  const refused = /pf2e-combater runs the GM creatures' turns.*DEL-22/;
+  await assert.rejects(ops.strike(GOBLIN, { strike: "dogslicer", target: SELLA }, null), refused);
+  await assert.rejects(ops.use_action(GOBLIN, { action: "trip", target: SELLA }, null), refused);
+  await assert.rejects(ops.saving_throw(GOBLIN, { save: "will", dc: 18 }, null), refused);
+  await assert.rejects(ops.saving_throw(SELLA, { save: "will", dc: 18 }, null), refused);
+  await assert.rejects(ops.cast_spell(GOBLIN, { spell: "fear" }, null), refused);
+  await assert.rejects(ops.self_effect(GOBLIN, { item: "raise-a-shield" }, null), refused);
+  const area = { area: "burst", size: 10, x: 0, y: 0, direction: 0, name: "Fire" };
+  await assert.rejects(ops.place_area(GOBLIN, area, null), refused);
+  // Agent reactions are off too (RUL-12).
+  const reactive = { strike: "dogslicer", target: SELLA, trigger: "move" };
+  await assert.rejects(ops.reaction(GOBLIN, reactive, null), refused);
+  assert.deepEqual(world.calls, []);
+  // The GM's undo of an action taken before the driver came on is not a monster-turn action.
+  await ops.strike(GOBLIN, done.before, done.after);
+  assert.equal(world.tokens[SELLA].hp.value, 20);
 });
 
 test("a PC's save is requested from its player, a GM creature's is rolled", async () => {
