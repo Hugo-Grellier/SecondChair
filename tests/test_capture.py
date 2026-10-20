@@ -108,6 +108,43 @@ def test_a_certain_candidate_is_applied_as_played_with_who_saw_it(ws: Workspace)
     assert capture.consolidate(ws, job) == []  # nothing new
 
 
+def test_an_inferred_candidate_is_an_agent_proposal_carrying_its_quote_as_evidence(
+    ws: Workspace,
+) -> None:
+    job = wrap_job(ws)
+    submit(ws, job, GAUGE, inferred=True, translation="La jauge reste à zéro.", known_by=["party"])
+
+    [done] = capture.consolidate(ws, job)
+
+    assert done["status"] == "applied"
+    [fact] = index.search_facts(ws)
+    assert fact["rank"] == "agent_proposal"  # #167: the quote does not make it played
+    assert fact["origin"] == {
+        "kind": "job",
+        "job": str(job),
+        "quote": GAUGE,
+        "locator": "01-dry-bell.md:7",
+        "translation": "La jauge reste à zéro.",
+    }
+    [known] = index.search_knowledge(ws, ["party"])
+    assert known["origin"]["kind"] == "job"
+    index.rebuild(ws)  # replayed from the files
+    assert index.search_facts(ws)[0]["rank"] == "agent_proposal"
+
+
+def test_an_approved_inferred_question_stays_an_agent_proposal(ws: Workspace) -> None:
+    job = wrap_job(ws)
+    submit(ws, job, GAUGE, inferred=True, classification="contradiction", reason="?")
+    [held] = capture.consolidate(ws, job)
+    jobs.end(ws, job)
+
+    delegation.approve(ws, held["entries"][0], "cli", authenticated=True)
+    capture.wrap(ws, 1, authenticated=True, end="4726-01-02")
+
+    [fact] = index.search_facts(ws)
+    assert (fact["rank"], fact["origin"]["kind"]) == ("agent_proposal", "job")
+
+
 @pytest.mark.parametrize("level", ["act-then-review", "autonomous"])
 def test_a_contradiction_is_always_a_call_whatever_the_memory_level(
     ws: Workspace, level: str
