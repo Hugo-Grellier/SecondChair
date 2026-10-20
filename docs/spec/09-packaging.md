@@ -20,7 +20,7 @@ Decision: [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md); ticke
 - **PKG-08** The module authenticates with a shared token the Core generates (`secondchair token`) and keeps in the machine configuration, mode 0600. One GM connection at a time.
 - **PKG-09** The handshake checks the protocol version and that the Foundry world matches the one declared in the workspace, and refuses a mismatch.
 - **PKG-10** The Core sees and acts on Foundry only while a GM client is open, in prep as in play. Without one, VTT actions fail cleanly and the desired state waits for reconciliation.
-- **PKG-11** The install docs say that Firefox (and possibly Chrome) asks once per site before a page may open a loopback WebSocket.
+- **PKG-11** The install docs say that Firefox (and possibly Chrome) asks once per site before a page may open a loopback WebSocket. While that prompt is unanswered the module shows, after a few seconds, a non-blocking notice pointing to the prompt or the site permissions, and keeps waiting.
 
 ## Where things live
 

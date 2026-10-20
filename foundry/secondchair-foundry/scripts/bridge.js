@@ -35,6 +35,9 @@ export function hello({ token, world, campaign }) {
  * @param {(welcome: Welcome, socket: WebSocket) => void} args.onWelcome
  * @param {(refusal: Refusal) => void} args.onRefused
  * @param {() => void} args.onUnreachable  the socket closed before the Core answered
+ * @param {() => void} [args.onPending]  the socket is still not open after `pendingMs`, as while
+ *   the browser's local-network prompt waits for an answer (PKG-11); the dial goes on
+ * @param {number} [args.pendingMs]
  * @param {typeof WebSocket} [args.WebSocketImpl]
  */
 export function connect({
@@ -43,11 +46,17 @@ export function connect({
   onWelcome,
   onRefused,
   onUnreachable,
+  onPending = () => {},
+  pendingMs = 5000,
   WebSocketImpl = WebSocket,
 }) {
   const socket = new WebSocketImpl(url);
   let answered = false;
-  socket.addEventListener("open", () => socket.send(JSON.stringify(hello)));
+  const pending = setTimeout(onPending, pendingMs);
+  socket.addEventListener("open", () => {
+    clearTimeout(pending);
+    socket.send(JSON.stringify(hello));
+  });
   socket.addEventListener("message", (event) => {
     if (answered) return;
     answered = true;
@@ -56,6 +65,7 @@ export function connect({
     else onRefused(reply);
   });
   socket.addEventListener("close", () => {
+    clearTimeout(pending);
     if (!answered) onUnreachable();
     answered = true;
   });
