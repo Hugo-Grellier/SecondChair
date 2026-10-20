@@ -183,7 +183,8 @@ def test_a_standing_lifecycle_break_is_reported_once() -> None:
 
 
 def test_an_activity_is_held_only_to_the_next_condition_change_of_its_target() -> None:
-    applied = by_id("frightened-zero") | {"id": "frightened-one"}
+    applied = by_id("frightened-zero")
+    applied["id"] = "frightened-one"
     applied["payload"]["conditions"] = {"before": {}, "after": {"frightened": 1}}
     later = by_id("frightened-two")
     session = [*SESSION[:-1], applied, later]
