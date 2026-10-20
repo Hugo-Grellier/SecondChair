@@ -2,7 +2,8 @@
 
 Paizo's rule, not the PF2e system's Gregorian world clock: Calistril gains a day every 4 years,
 4800 AR included (Core Rulebook p. 419). The week is anchored on the PF2e clock, where
-1 Abadius 4726 AR is Oathday, so the table and the Core agree before 4800 AR.
+1 Abadius 4726 AR is Oathday, so the table and the Core agree from
+1 Pharast 4600 to 28 Calistril 4800 AR.
 """
 
 from secondchair.core.calendar import Calendar, LeapRule, Month

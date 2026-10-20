@@ -79,7 +79,7 @@ class GmClient:
 
     def act(self, request: dict) -> dict:
         date = request["params"]["date"]
-        if request["op"] != "set_date" or date > "4800-02-28":
+        if request["op"] != "set_date" or not "4600-03-01" <= date <= "4800-02-28":
             return {"ok": False, "error": f"Cannot set the PF2e world clock to {date}."}
         before, self.date = self.date, date
         return {"ok": True, "before": {"date": before}, "after": {"date": date}}

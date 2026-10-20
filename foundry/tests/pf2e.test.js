@@ -120,14 +120,25 @@ test("the campaign's date is pushed into the world clock, keeping the time of da
   assert.equal(absalomDate(env.clock()), "4725-02-01");
 });
 
-test("a date after 28 Calistril 4800 AR, or one the PF2e clock lacks, is refused", async () => {
+test("a date outside 1 Pharast 4600 to 28 Calistril 4800 AR, or one that does not exist, is refused", async () => {
   const { env, adapter } = foundry();
+  await adapter.ops.set_date("time", { calendar: "absalom", date: "4600-03-01" }, null);
   await adapter.ops.set_date("time", { calendar: "absalom", date: "4800-02-28" }, null);
   const before = env.worldTime;
-  for (const date of ["4800-02-29", "4800-03-01", "4801-01-01", "10000-01-01", "4600-02-29"]) {
+  for (const date of [
+    "4800-02-29",
+    "4800-03-01",
+    "4801-01-01",
+    "10000-01-01",
+    "4600-02-29",
+    "4600-02-28",
+    "4599-12-31",
+    "0001-01-01",
+    "4725-02-30",
+  ]) {
     await assert.rejects(
       adapter.ops.set_date("time", { calendar: "absalom", date }, null),
-      /28 Calistril 4800|does not exist on the PF2e world clock/,
+      /1 Pharast 4600 to 28 Calistril 4800|does not exist on the PF2e world clock/,
       date,
     );
   }
