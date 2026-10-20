@@ -116,7 +116,7 @@
         "op": {
           "type": "string",
           "minLength": 1,
-          "description": "The operation: a generic one of the library (move_token, set_door, reveal_token, publish_journal, speak) or a mechanical one, handled by the system adapter (PF2e: set_actor, set_date, strike, use_action, saving_throw)."
+          "description": "The operation: a generic one of the library (move_token, set_door, reveal_token, publish_journal, speak) or a mechanical one, handled by the system adapter (PF2e: set_actor, set_date, strike, use_action, saving_throw, cast_spell, self_effect, place_area, reaction)."
         },
         "target": {
           "type": "string",

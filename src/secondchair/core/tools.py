@@ -90,6 +90,9 @@ class VttAction:
     # A disclosure's facts: the Core checks them, then marks them known by the party once the
     # action is taken (CAN-16, CAN-17). None for an action that shows the players nothing.
     cites: list[str] | None = None
+    # Holds it at propose whatever the level, the call carrying this as its message: an action
+    # only the GM resolves, which an agent may only propose (RUL-08).
+    hold: str | None = None
 
 
 def load_tools(ws: Workspace) -> list[Tool]:

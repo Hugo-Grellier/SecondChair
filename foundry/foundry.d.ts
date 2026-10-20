@@ -143,6 +143,8 @@ interface CombatantLike {
 
 declare const canvas: { ready: boolean; mousePosition: { x: number; y: number } } | undefined;
 
+declare const CONST: { REGION_VISIBILITY: { ALWAYS: number } };
+
 declare const ui: {
   players?: { render(): unknown };
   notifications: Record<
