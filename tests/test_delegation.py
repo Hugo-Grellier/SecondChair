@@ -270,6 +270,10 @@ def test_create_entity_asks_the_agent_for_its_name(ws: Workspace) -> None:
         "library.yaml",
         "foundry.yaml",
         "sources/s-1a2b3c4d.yaml",
+        "speakers.yaml",
+        ".agents/skills/campaign-workshop/SKILL.md",
+        ".claude/skills/campaign-workshop/SKILL.md",
+        ".secondchair-skills.json",
     ],
 )
 def test_a_delegated_action_cannot_write_the_core_files(ws: Workspace, target: str) -> None:
