@@ -111,6 +111,8 @@ def _licensed(ws: Workspace, inputs: dict[str, str]) -> dict[str, str]:
 
 def _metadata_index(ws: Workspace, path: Path) -> Path:
     """A path's metadata index: its name and each file's relative path and size, no content."""
+    # ponytail: lists every file under the path, slow for a huge directory such as a home
+    # folder; cap the listing if a GM ever passes one.
     files = sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
     index = {
         "purchased_content": path.name,
