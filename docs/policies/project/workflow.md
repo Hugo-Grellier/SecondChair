@@ -28,13 +28,13 @@ On top of the base matrix: any R2 row above gets an architecture review against 
 
 ## Verification matrix
 
-Run what the change touches; run all of it before marking an R1 or R2 PR ready. CI runs the same commands (`.github/workflows/ci.yml`); `uv run pre-commit run --all-files` runs the Python, Foundry, guard and workflow rows locally with the pinned tools.
+Run what the change touches; run all of it before marking an R1 or R2 PR ready. The commands below are the ones in `.github/workflows/ci.yml`, minus its GitHub annotation flags (`--output-format=github` on `ruff check`, `--reporter=github` on `biome ci`). Locally, `uv run pre-commit run --all-files` covers the Python, Foundry, guard and workflow rows with the pinned tools; its Biome hook runs `biome check` on the changed files rather than `biome ci`, and its pytest hook runs `pytest -q`.
 
-| Area | Commands |
+| Area | CI commands |
 | --- | --- |
 | Python 3.14 and 3.15 | `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`, `uv run ty check`, `uv run pytest` |
 | Foundry modules (Node 22) | `npm ci`, `npx biome ci`, `npx tsc --project tsconfig.json`, `node --test "foundry/**/*.test.js"` |
-| S0 bench | `uv run secondchair bench s0 <empty dir> --runner fake/scripted/none` (scripted fake runner only; a real-model run is local and the GM's) |
+| S0 bench | `uv sync --locked`, `uv run secondchair bench s0 <empty dir> --runner fake/scripted/none` (scripted fake runner only; a real-model run is local and the GM's) |
 | Licensing and Source guards | `uv run python scripts/guard_no_workspace.py`, `uv run python scripts/guard_sample_campaign.py` |
 | Workflows | `uv run actionlint`, `uv run zizmor --offline .github/workflows` |
 
