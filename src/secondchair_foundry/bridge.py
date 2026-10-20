@@ -10,6 +10,7 @@ import hmac
 import json
 import sys
 import uuid
+from concurrent.futures import Future
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from secondchair.core import (
 )
 from secondchair.core.index import CanonError
 from secondchair.core.machine import foundry_token
-from secondchair.core.vtt import CeilingRefusal, VttError
+from secondchair.core.vtt import CeilingRefusal, Unanswered, VttError
 from secondchair.core.workspace import Workspace, WorkspaceError
 from secondchair_foundry import desk
 from secondchair_foundry.tools import REPORTS_DIR, SCENES_DIR, digest
@@ -380,23 +381,25 @@ class Bridge:
         try:
             reply = future.result(REPLY_TIMEOUT)
         except TimeoutError:
-            future.cancel()
-            raise VttError(
+            # Still awaited: a late reply resolves `later`, and the Core settles the action.
+            later: Future[tuple[dict, dict]] = Future()
+
+            def answered(f: Future[dict]) -> None:
+                if f.cancelled() or f.exception() is not None:  # the GM client left unanswered
+                    later.cancel()
+                    return
+                try:
+                    later.set_result(_outcome(f.result()))
+                except VttError as e:
+                    later.set_exception(e)
+
+            future.add_done_callback(answered)
+            raise Unanswered(
                 f"The GM client did not answer within {REPLY_TIMEOUT} s: check the VTT, the "
-                "action may have been taken."
+                "action may have been taken.",
+                later,
             ) from None
-        before, after = reply.get("before"), reply.get("after")
-        if (
-            reply.get("ok") is not True
-            or not isinstance(before, dict)
-            or not isinstance(after, dict)
-        ):
-            if reply.get("reason") == "ceiling":
-                raise CeilingRefusal(str(reply.get("error")))
-            raise VttError(
-                str(reply.get("error") or f"The GM client sent a malformed reply: {reply}")
-            )
-        return before, after
+        return _outcome(reply)
 
     def read(self, op: str, params: dict) -> object:
         """Ask the GM client what only the VTT knows (the Core's `vtt.read`), such as an
@@ -464,6 +467,16 @@ class Bridge:
             return await waiting
         finally:
             del self.waiting[request["id"]]
+
+
+def _outcome(reply: dict) -> tuple[dict, dict]:
+    """The `before` and `after` of the GM client's reply to an action, or its refusal."""
+    before, after = reply.get("before"), reply.get("after")
+    if reply.get("ok") is not True or not isinstance(before, dict) or not isinstance(after, dict):
+        if reply.get("reason") == "ceiling":
+            raise CeilingRefusal(str(reply.get("error")))
+        raise VttError(str(reply.get("error") or f"The GM client sent a malformed reply: {reply}"))
+    return before, after
 
 
 async def _close_quietly(socket: WebSocket) -> None:

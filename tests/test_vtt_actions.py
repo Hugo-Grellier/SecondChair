@@ -1,7 +1,11 @@
 """VTT actions through the Core (ARC-04, ARC-09): the level check, the action log and undo, with a
 stand-in for the connected GM client. End to end over the bridge: test_foundry_bridge.py."""
 
+import threading
+import time
 from collections.abc import Iterator
+from concurrent.futures import Future
+from typing import Any
 
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
@@ -202,3 +206,116 @@ def test_an_approval_refused_by_the_ceiling_is_a_call(
         ("proposal", 1, "answered"),
         ("ceiling_refusal", 1, "open"),
     ]
+
+
+def test_other_actions_go_through_while_the_vtt_takes_one(
+    ws: Workspace,  # noqa: F811
+    foundry: FakeVtt,
+) -> None:
+    """The workspace lock is not held across the GM client's round trip (#99): meanwhile the
+    action is logged with status unknown, and another agent's action is taken."""
+    seen: list[str] = []
+
+    def slow(*args: Any) -> tuple[dict, dict]:
+        if not seen:
+            seen.append(log(ws)[0]["status"])
+            other = threading.Thread(target=move, args=(ws, 500, 200))
+            other.start()
+            other.join(timeout=5)
+            seen.append("other blocked" if other.is_alive() else "other done")
+        return foundry.perform(*args)
+
+    vtt.connect(slow)
+
+    assert move(ws, 300, 200).structured_content == {"entry": 1, "status": "applied"}
+    assert seen == ["unknown", "other done"]
+    assert [e["status"] for e in log(ws)] == ["applied", "applied"]
+
+
+class Late:
+    """A GM client that answers only after the reply timeout (#99)."""
+
+    def __init__(self) -> None:
+        self.later: Future[tuple[dict, dict]] = Future()
+
+    def perform(self, *args: Any) -> tuple[dict, dict]:
+        raise vtt.Unanswered("The GM client did not answer in time.", self.later)
+
+
+@pytest.fixture
+def late() -> Iterator[Late]:
+    client = Late()
+    vtt.connect(client.perform)
+    yield client
+    vtt.connect(None)
+
+
+def settled(ws: Workspace, status: str) -> dict:  # noqa: F811
+    """Entry 1 once a late reply settled it to `status`, in its own thread."""
+    for _ in range(100):
+        if delegation.read_entry(ws, 1)["status"] == status:
+            return log(ws)[0]
+        time.sleep(0.05)
+    raise AssertionError(f"Entry 1 is {log(ws)[0]['status']}, not {status}.")
+
+
+def test_a_late_reply_settles_an_unknown_action_as_applied_and_undoable(
+    ws: Workspace,  # noqa: F811
+    late: Late,
+) -> None:
+    result = move(ws, 300, 200)
+
+    assert result.is_error
+    assert "may have been taken" in result.content[0].text
+    assert log(ws)[0]["status"] == "unknown"
+
+    late.later.set_result(({"x": 100, "y": 200}, {"x": 300, "y": 200}))
+
+    entry = settled(ws, "applied")
+    assert (entry["before"], entry["after"]) == ({"x": 100, "y": 200}, {"x": 300, "y": 200})
+    assert "error" not in entry
+    foundry = FakeVtt()
+    foundry.docs[TOKEN] = {"x": 300, "y": 200}  # the VTT took it, late
+    vtt.connect(foundry.perform)
+    delegation.undo(ws, 1, "tone", "cli", True)
+    assert foundry.docs[TOKEN] == {"x": 100, "y": 200}
+
+
+def test_a_late_refusal_settles_an_unknown_action_as_failed(
+    ws: Workspace,  # noqa: F811
+    late: Late,
+) -> None:
+    move(ws, 300, 200)
+
+    late.later.set_exception(vtt.VttError(f"{TOKEN} changed since: nothing was done."))
+
+    assert "changed since" in settled(ws, "failed")["error"]
+
+
+def test_an_approved_action_answered_late_keeps_its_approval(
+    ws: Workspace,  # noqa: F811
+    late: Late,
+) -> None:
+    set_level(ws, "prep", "vtt_operations", "propose")
+    move(ws, 300, 200)
+
+    with pytest.raises(delegation.DelegationError, match="may have been taken"):
+        delegation.approve(ws, 1, "cli", True)
+    assert log(ws)[0]["approval"]["channel"] == "cli"
+    assert [(c["kind"], c["status"]) for c in calls(ws)] == [("proposal", "answered")]
+
+    late.later.set_result(({"x": 100, "y": 200}, {"x": 300, "y": 200}))
+
+    assert settled(ws, "applied")["approval"]["channel"] == "cli"
+
+
+def test_a_gm_client_leaving_unanswered_leaves_the_action_unknown(
+    ws: Workspace,  # noqa: F811
+    late: Late,
+) -> None:
+    move(ws, 300, 200)
+
+    late.later.cancel()
+
+    time.sleep(0.2)
+    assert log(ws)[0]["status"] == "unknown"

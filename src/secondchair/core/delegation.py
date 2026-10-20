@@ -11,6 +11,7 @@ import inspect
 import secrets
 import threading
 from collections.abc import Callable, Generator
+from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -448,32 +449,29 @@ def act(
             entry.update(status="refused", refusal=refusal)
             logged = _append(ws, entry)["id"]
             raise DelegationError(f"Refused, it contradicts canon: {refusal} (entry {logged}).")
-        if entry["status"] == "applied":
-            try:
+        if entry["status"] == "applied" and "op" in entry:
+            taking = _append(ws, {**entry, "status": "unknown"})  # until the VTT answers
+        else:
+            if entry["status"] == "applied":
                 _apply(ws, entry, "after")
-            except DelegationError as e:
-                if "op" not in entry:
-                    raise
-                # A failed action (ARC-09): logged, counted, and reported to the agent.
-                failed = _append(ws, {**entry, "status": "failed", "error": str(e)})
-                _call_if_ceiling(ws, failed, e, table_moment, blocking)
-                raise DelegationError(f"Failed action, logged as entry {failed['id']}: {e}") from e
-        logged = _append(ws, entry)
-        if entry["status"] == "applied":
-            _disclose(ws, logged)
-        if entry["status"] == "pending":
-            calls.open_call(
-                ws,
-                kind="proposal",
-                responsibility=responsibility,
-                table_moment=table_moment,
-                blocking=blocking,
-                entry=logged["id"],
-                job=job,
-                message=hold,
-            )
-            logged = read_entry(ws, logged["id"])  # a safe default may have rejected it at once
-        return {"entry": logged["id"], "status": logged["status"]}
+            logged = _append(ws, entry)
+            if entry["status"] == "applied":
+                _disclose(ws, logged)
+            if entry["status"] == "pending":
+                calls.open_call(
+                    ws,
+                    kind="proposal",
+                    responsibility=responsibility,
+                    table_moment=table_moment,
+                    blocking=blocking,
+                    entry=logged["id"],
+                    job=job,
+                    message=hold,
+                )
+                logged = read_entry(ws, logged["id"])  # a safe default may have rejected it
+            return {"entry": logged["id"], "status": logged["status"]}
+    taken = _take(ws, taking, table_moment, blocking)
+    return {"entry": taken["id"], "status": taken["status"]}
 
 
 # GM interactions (DEL-27): each is its own log entry.
@@ -486,6 +484,17 @@ def approve(
     with the GM's quoted words, and from an authenticated Surface for an irreversible one."""
     if channel == "via agent" and not (quote and quote.strip()):
         raise DelegationError("An approval relayed by an agent must quote the GM's words.")
+
+    def approving(entry: dict) -> None:
+        interaction = _interaction(ws, "approve", entry_id, channel, authenticated, quote, None)
+        _answered(ws, entry_id)
+        entry["approval"] = {
+            "channel": channel,
+            "authenticated": authenticated,
+            "quote": quote,
+            "interaction": interaction["id"],
+        }
+
     with locked(ws):
         entry = _pending(ws, entry_id)
         if not entry["reversible"] and not authenticated:
@@ -495,29 +504,18 @@ def approve(
             )
         if entry.get("cites"):  # canon may have changed since it was proposed
             _check_cites(ws, entry["cites"], entry.get("entity"))
-        try:
-            _apply(ws, entry, "after")
-        except DelegationError as e:
-            if "op" not in entry:
-                raise
-            entry.update(status="failed", error=str(e))  # a failed action, as in `act`
+        if "op" in entry:
+            entry["status"] = "unknown"  # until the VTT answers
             _save(ws, entry)
-            _answered(ws, entry_id)  # the GM answered; the action failed
-            # The GM is answering now: the refusal is held for the break.
-            _call_if_ceiling(ws, entry, e, entry["moment"], False)
-            raise DelegationError(f"Failed action, entry {entry_id}: {e}") from e
-        interaction = _interaction(ws, "approve", entry_id, channel, authenticated, quote, None)
-        _answered(ws, entry_id)
-        entry["status"] = "applied"
-        entry["approval"] = {
-            "channel": channel,
-            "authenticated": authenticated,
-            "quote": quote,
-            "interaction": interaction["id"],
-        }
-        _save(ws, entry)
-        _disclose(ws, entry)
-        return entry
+        else:
+            _apply(ws, entry, "after")
+            approving(entry)
+            entry["status"] = "applied"
+            _save(ws, entry)
+            _disclose(ws, entry)
+            return entry
+    # The GM is answering now: a ceiling refusal is held for the break.
+    return _take(ws, entry, entry["moment"], False, approving)
 
 
 def reject(ws: Workspace, entry_id: int, reason: str, channel: str, authenticated: bool) -> dict:
@@ -765,13 +763,82 @@ def _withdraw(ws: Workspace, override: dict, interaction: int) -> None:
             calls._default(ws, call, interaction)
 
 
+def _take(
+    ws: Workspace,
+    entry: dict,
+    table_moment: str,
+    blocking: bool,
+    approving: Callable[[dict], None] | None = None,
+) -> dict:
+    """Have the VTT take an action logged `unknown`, outside the lock: the GM client may take a
+    while to answer, and every other action, approval and gesture would wait behind it. Its
+    outcome is recorded under the lock, with the GM's approval (`approving`) once the VTT took
+    it or may have. One the VTT did not answer in time stays unknown until it does."""
+    try:
+        before, after = vtt.perform(
+            entry["op"], entry["target"], entry["after"], entry["before"], entry["effective_level"]
+        )
+    except vtt.Unanswered as e:
+        with locked(ws):
+            if approving is not None:
+                approving(entry)
+            entry["error"] = str(e)
+            _save(ws, entry)
+        e.later.add_done_callback(functools.partial(_settle_later, ws, entry["id"]))
+        raise DelegationError(
+            f"Unknown outcome, logged as entry {entry['id']}: {e} The action may have been "
+            "taken: its entry stays unknown until the VTT answers."
+        ) from e
+    except vtt.VttError as e:
+        # A failed action (ARC-09): logged, counted, and reported to the agent.
+        with locked(ws):
+            entry.update(status="failed", error=str(e))
+            _save(ws, entry)
+            if approving is not None:
+                _answered(ws, entry["id"])  # the GM answered; the action failed
+            _call_if_ceiling(ws, entry, e, table_moment, blocking)
+        raise DelegationError(f"Failed action, logged as entry {entry['id']}: {e}") from e
+    with locked(ws):
+        if approving is not None:
+            approving(entry)
+        entry.update(status="applied", before=before, after=after)  # as the VTT reports them
+        _save(ws, entry)
+        _disclose(ws, entry)
+    return entry
+
+
+def _settle_later(ws: Workspace, entry_id: int, later: Future[tuple[dict, dict]]) -> None:
+    """Settle an unknown action once the VTT answers, in a thread of its own: the answer comes
+    on the connector's event loop, which the lock's holder may be waiting on."""
+    if not later.cancelled():  # cancelled: the VTT left unanswered, and the action stays unknown
+        threading.Thread(target=_settle, args=(ws, entry_id, later), daemon=True).start()
+
+
+def _settle(ws: Workspace, entry_id: int, later: Future[tuple[dict, dict]]) -> None:
+    with locked(ws):
+        entry = _entry(ws, entry_id, "action")
+        if entry["status"] != "unknown":
+            return
+        try:
+            entry["before"], entry["after"] = later.result()
+        except vtt.VttError as e:
+            # ponytail: a late ceiling refusal opens no call; the ceiling answers at once.
+            entry.update(status="failed", error=str(e))
+            _save(ws, entry)
+            return
+        entry.pop("error", None)
+        entry["status"] = "applied"
+        _save(ws, entry)
+        _disclose(ws, entry)
+
+
 def _call_if_ceiling(
-    ws: Workspace, entry: dict, error: DelegationError, table_moment: str, blocking: bool
+    ws: Workspace, entry: dict, error: vtt.VttError, table_moment: str, blocking: bool
 ) -> None:
     """A ceiling refusal is a failed action and a call on the GM (DEL-20). Callers hold the lock."""
     from secondchair.core import calls
 
-    if isinstance(error.__cause__, vtt.CeilingRefusal):
+    if isinstance(error, vtt.CeilingRefusal):
         calls.open_call(
             ws,
             kind="ceiling_refusal",
