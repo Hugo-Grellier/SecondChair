@@ -127,6 +127,8 @@ interface CombatantLike {
   name: string;
   hidden: boolean;
   actor: { uuid: string } | null;
+  isOwner: boolean;
+  hasPlayerOwner: boolean;
 }
 
 declare const canvas: { ready: boolean; mousePosition: { x: number; y: number } } | undefined;
