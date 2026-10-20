@@ -137,20 +137,48 @@ def routes(ws: Workspace) -> list[BaseRoute]:
 
     async def overview(_: Request) -> Response:
         moment, seq = delegation.current_moment(ws)
-        entries = delegation.read_log(ws)[0]
+        live = delegation.current_session(ws)
+        time = capture.time(ws)
+        held = [e["id"] for e in delegation.read_log(ws)[0] if e.get("status") == "pending"]
+        to_do = jobs.pending(ws)
         entities, facts, events = index.counts(ws)
+        played = delegation.last_session(ws)
+        unwrapped = (
+            played
+            if played and not live and not time["sessions"].get(played, {}).get("wrapped")
+            else None
+        )
+        handoff = f"prep/session-{played + 1}/handoff.md"
         return JSONResponse(
             {
                 "workspace": str(root),
                 "campaign_language": ws.campaign_language,
                 "moment": moment,
                 "moment_seq": seq,
-                "session": delegation.current_session(ws),
-                "current_date": capture.time(ws)["current_date"],
+                "session": live,
+                "current_date": time["current_date"],
                 "counts": {"entities": entities, "facts": facts, "events": events},
                 "open_calls": sum(c["status"] == "open" for c in calls.read_calls(ws)),
-                "pending": sum(e.get("status") == "pending" for e in entries),
-                "queued_jobs": sum(j["status"] == "queued" for j in _jobs(ws)),
+                "pending": len(held),
+                "unfinished_jobs": len(to_do),  # queued or started
+                # The GM's next steps, as `secondchair status` gives them.
+                "next": {
+                    "unwrapped_session": unwrapped,
+                    "wrap": unwrapped and command(ws, "wrap", unwrapped),
+                    "jobs": [
+                        {
+                            "id": j["id"],
+                            "status": j["status"],
+                            "playbook": j["playbook"],
+                            "ask": f'ask your agent: "start SecondChair job {j["id"]}"',
+                        }
+                        for j in to_do
+                    ],
+                    "pending_entries": held,
+                    "approve": command(ws, "approve", *held) if held else None,
+                    "next_session": played + 1,
+                    "handoff": handoff if (root / handoff).is_file() else None,
+                },
             }
         )
 

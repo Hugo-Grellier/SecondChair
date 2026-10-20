@@ -146,3 +146,26 @@ def test_the_page_is_for_browsers_and_get_only(client: TestClient) -> None:
 @pytest.mark.parametrize("endpoint", ["overview", "review", "changes", "prep", "canon", "jobs"])
 def test_every_endpoint_answers_on_a_fresh_workspace(client: TestClient, endpoint: str) -> None:
     assert client.get(f"/api/{endpoint}").status_code == 200
+
+
+def test_the_overview_gives_the_next_steps(ws: Workspace, client: TestClient) -> None:
+    root = ws.root.resolve()
+    first = client.get("/api/overview").json()["next"]
+    assert first["handoff"] is None and first["next_session"] == 1
+    assert first["unwrapped_session"] is None and first["approve"] is None
+
+    delegation.start_session(ws)
+    delegation.end_session(ws)
+    propose_entity(ws)
+    (ws.root / "prep/session-2").mkdir(parents=True)
+    (ws.root / "prep/session-2/handoff.md").write_text("# Séance 2\n")
+    found = client.get("/api/overview").json()
+    steps = found["next"]
+    assert steps["unwrapped_session"] == 1
+    assert steps["wrap"] == f"secondchair wrap 1 -w {root}"
+    (job,) = steps["jobs"]
+    assert job["ask"] == f'ask your agent: "start SecondChair job {job["id"]}"'
+    assert found["unfinished_jobs"] == 1
+    (entry,) = steps["pending_entries"]
+    assert steps["approve"] == f"secondchair approve {entry} -w {root}"
+    assert steps["handoff"] == "prep/session-2/handoff.md"

@@ -20,6 +20,7 @@
   }
 }
 * { box-sizing: border-box; }
+a { color: var(--accent); }
 body { margin: 0; background: var(--bg); color: var(--fg);
   font: 17px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
 header { position: sticky; top: 0; z-index: 1; background: var(--bg); border-bottom: 1px solid var(--line);
@@ -111,10 +112,19 @@ const render = {
   async overview() {
     const o = await api("/api/overview");
     const stat = (label, v) => `<div class="card stat"><span class="meta">${label}</span><b>${esc(v ?? "—")}</b></div>`;
-    return `<div class="grid">
+    const n = o.next, steps = [];
+    if (n.unwrapped_session) steps.push(`Session ${esc(n.unwrapped_session)} is not wrapped: what was played is not in canon yet. After its wrap job: ${commands({ wrap: n.wrap })}`);
+    for (const j of n.jobs) steps.push(`Job ${j.id} ${esc(j.status)}: ${esc(j.playbook)}${j.status === "queued" ? ` — <code>${esc(j.ask)}</code>` : ""}`);
+    if (n.approve) steps.push(`Awaiting your approval: entries ${n.pending_entries.join(", ")} (<a href="#review">To review</a>) ${commands({ approve: n.approve })}`);
+    if (o.open_calls) steps.push(`Open calls on you: ${o.open_calls} (<a href="#review">To review</a>)`);
+    if (!o.session && (n.handoff || !n.unwrapped_session)) steps.push(n.handoff
+      ? `Session ${n.next_session} is prepared: <a href="#prep" data-file="${esc(n.handoff)}">read its handoff</a>`
+      : `Session ${n.next_session} has no handoff yet: <code>ask your agent: "prepare session ${n.next_session}"</code>`);
+    const next = `<div class="card"><h2 style="margin-top:0">Next</h2>${steps.length ? `<ul>${steps.map((s) => `<li>${s}</li>`).join("")}</ul>` : "<p>Nothing waits on you.</p>"}</div>`;
+    return `${next}<div class="grid">
       ${stat("Moment", o.moment)}${stat("Live session", o.session)}${stat("Campaign date", o.current_date)}
       ${stat("Campaign language", o.campaign_language)}${stat("Pending proposals", o.pending)}${stat("Open calls", o.open_calls)}
-      ${stat("Queued jobs", o.queued_jobs)}${stat("Entities", o.counts.entities)}${stat("Facts", o.counts.facts)}${stat("Events", o.counts.events)}
+      ${stat("Jobs queued or started", o.unfinished_jobs)}${stat("Entities", o.counts.entities)}${stat("Facts", o.counts.facts)}${stat("Events", o.counts.events)}
     </div><p class="meta">Workspace <code>${esc(o.workspace)}</code></p>`;
   },
   async review() {
@@ -233,7 +243,7 @@ setInterval(() => document.visibilityState === "visible" && show(true), 5000);
 view.addEventListener("click", (ev) => {
   const t = ev.target.closest("[data-file],[data-page],[data-copy],[data-jump]");
   if (!t) return;
-  if (t.dataset.file) { ev.preventDefault(); state.file = t.dataset.file; show(); scrollTo(0, 0); }
+  if (t.dataset.file) { ev.preventDefault(); state.file = t.dataset.file; if (location.hash !== "#prep") location.hash = "prep"; else show(); scrollTo(0, 0); }
   else if (t.dataset.page) { state.page = Number(t.dataset.page); show(); }
   else if (t.dataset.copy) navigator.clipboard?.writeText(t.dataset.copy);
   else if (t.dataset.jump) { ev.preventDefault(); document.getElementById(t.dataset.jump)?.scrollIntoView(); }
