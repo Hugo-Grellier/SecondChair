@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from secondchair.core import jobs
+from secondchair.core import delegation, jobs
 from secondchair.core.workspace import Workspace
 
 # The Core's playbooks: a Claude Code plugin whose `skills/` is also the Codex skill bundle
@@ -101,14 +101,27 @@ def queue(
     )
 
 
-def prompt(job: dict) -> str:
-    """What an agent host is asked to do for a job."""
+def prompt(ws: Workspace, job: dict) -> str:
+    """What an agent host is asked to do for a job. A retried job lists the actions its earlier
+    attempts already took, so the agent continues rather than redoes them (ARC-27, #171)."""
     contract = {k: v for k, v in job.items() if k not in ("status", "attempts", "at")}
-    return (
+    text = (
         f"Run SecondChair job {job['id']} with the `{job['playbook']}` playbook (skill). Pass "
         f"`job: {job['id']}` to every SecondChair delegated action, and call `finish_job` when "
         f"the playbook is complete. The job contract:\n{json.dumps(contract, ensure_ascii=False)}"
     )
+    taken = [
+        f"- {e['id']}: {e['tool']} on {e['target']}, {e['status']}"
+        for e in delegation.read_log(ws)[0]
+        if e.get("kind") == "action" and e.get("job") == job["id"]
+    ]
+    if taken:
+        text += (
+            "\nAn earlier attempt ended without `finish_job` after taking these actions (action "
+            "log id: tool on target, status). Continue from there: do not take them again.\n"
+            + "\n".join(taken)
+        )
+    return text
 
 
 def run(
@@ -147,7 +160,7 @@ def _launch(ws: Workspace, job: dict, config: dict[str, str], hosts: dict[str, l
     if template is None:
         return f"no command template for agent host {config['host']!r}"
     values = {
-        "prompt": prompt(job),
+        "prompt": prompt(ws, job),
         "model": config["model"],
         "effort": config["effort"],
         "job": str(job["id"]),

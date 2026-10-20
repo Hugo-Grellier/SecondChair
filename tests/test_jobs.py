@@ -210,7 +210,8 @@ def test_every_block_s_playbooks_reach_the_agent_host(
     )
     queue(ws)
 
-    main(["jobs", "-w", str(ws.root), "run"])  # it never calls finish_job: only argv matters
+    # The echo host never calls finish_job, so its attempt fails and the job stays queued.
+    assert main(["jobs", "-w", str(ws.root), "run"]) == 1
 
     dirs = [f"--plugin-dir={d}" for d in runner.playbook_dirs()]
     assert json.loads(out.read_text())[1:] == dirs
@@ -409,10 +410,26 @@ def test_a_session_acting_for_a_started_job_stays_bound_to_it(ws: Workspace, mod
 
 def test_the_runner_prompt_names_the_job_and_its_contract(ws: Workspace) -> None:
     queue(ws)
-    text = runner.prompt(job(ws))
+    text = runner.prompt(ws, job(ws))
     assert re.search(r"job 1\b", text) and PLAYBOOK in text and "finish_job" in text
     contract = json.loads(text.split("\n", 1)[1])
     assert "attempts" not in contract and contract["campaign_language"] == "fr"
+
+
+def test_a_retry_prompt_lists_the_actions_earlier_attempts_took(ws: Workspace) -> None:
+    """An agent that acted, then exited without finish_job, is retried: the next one is told
+    what is already done so it does not redo it (#171)."""
+    queue(ws)
+    jobs.start(ws, 1, {"host": "h", "model": "m", "effort": "e"}, manual=False)
+    call(ws, "create_entity", {"names": ["Ada Fen"], "agent": "a", "job": 1})
+    call(ws, "create_entity", {"names": ["Bo Lin"], "agent": "gm"})
+    jobs.end(ws, 1, "h exited without calling finish_job")
+
+    text = runner.prompt(ws, job(ws))
+
+    [entry, other] = log(ws)
+    assert f"- {entry['id']}: create_entity on {entry['target']}, applied" in text
+    assert other["target"] not in text and "do not take them again" in text
 
 
 def test_a_job_carries_the_vocabulary_of_the_entities_it_is_about(ws: Workspace) -> None:
