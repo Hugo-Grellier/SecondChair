@@ -255,6 +255,13 @@ test("with a turn driver active, every monster-turn action is refused; undo stil
   await assert.rejects(ops.use_action(GOBLIN, { action: "trip", target: SELLA }, null), refused);
   await assert.rejects(ops.saving_throw(GOBLIN, { save: "will", dc: 18 }, null), refused);
   await assert.rejects(ops.saving_throw(SELLA, { save: "will", dc: 18 }, null), refused);
+  await assert.rejects(ops.cast_spell(GOBLIN, { spell: "fear" }, null), refused);
+  await assert.rejects(ops.self_effect(GOBLIN, { item: "raise-a-shield" }, null), refused);
+  const area = { area: "burst", size: 10, x: 0, y: 0, direction: 0, name: "Fire" };
+  await assert.rejects(ops.place_area(GOBLIN, area, null), refused);
+  // Agent reactions are off too (RUL-12).
+  const reactive = { strike: "dogslicer", target: SELLA, trigger: "move" };
+  await assert.rejects(ops.reaction(GOBLIN, reactive, null), refused);
   assert.deepEqual(world.calls, []);
   // The GM's undo of an action taken before the driver came on is not a monster-turn action.
   await ops.strike(GOBLIN, done.before, done.after);
