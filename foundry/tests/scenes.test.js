@@ -201,7 +201,7 @@ const cave = (overrides = {}) => ({
 
 /** @param {ReturnType<typeof world>} w @param {any} desired */
 async function realiseChecked(w, desired) {
-  const message = { type: "realise", id: "r1", scene: "cave", desired };
+  const message = { type: "realise", id: "r1", scene: "cave", desired, level: "act-then-review" };
   assert.ok(valid(message), JSON.stringify(valid.errors));
   const report = await realise("cave", desired, w.deps);
   const reply = { type: "realised", id: "r1", ok: true, report };
@@ -228,6 +228,7 @@ test("a token the GM moved by hand survives a second reconciliation", async () =
   await boss.update({ x: 700, y: 300, hidden: false }); // moved and revealed in play
 
   assert.deepEqual((await realiseChecked(w, cave())).summary, { noop: 3 });
+  /** @type {any} */
   const renamed = cave();
   renamed.items[0].data.name = "Goblin chief";
   const report = await realiseChecked(w, renamed);

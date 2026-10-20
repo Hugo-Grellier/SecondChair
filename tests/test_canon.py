@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -18,7 +19,7 @@ from mcp import Client
 
 from secondchair import cli
 from secondchair.cli import main
-from secondchair.core import workspace
+from secondchair.core import index, workspace
 from secondchair.core.server import build_server
 from secondchair.core.workspace import Workspace
 
@@ -331,6 +332,12 @@ def test_full_text_and_structured_search(ws: Workspace) -> None:
     assert read(ws, "search_facts", text='"unbalanced (quote') == []
 
 
+def test_threads_of_one_process_rebuild_the_index_at_once(ws: Workspace) -> None:
+    """The bridge rebuilds from several worker threads; they shared one temporary file (#141)."""
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(lambda _: index.rebuild(ws), range(80)))
+
+
 def test_deleting_the_derived_index_and_running_check_gives_identical_results(
     ws: Workspace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -404,6 +411,21 @@ def test_an_official_reference_stores_the_english_key_and_the_pack_only_on_colli
     # The index refuses a hand-edited file that stores a translation too.
     [path, *_] = sorted((ws.root / "canon/entities").glob("*.md"))
     path.write_text(path.read_text().replace("key: goblin", "key: Gobelin guerrière"))
+    assert main(["check", "-w", str(ws.root)]) == 1
+    assert path.name in capsys.readouterr().err
+
+
+def test_an_entity_may_carry_a_kind_and_an_entity_without_one_stays_valid(
+    ws: Workspace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    act(ws, "create_entity", names=["Ada Fen"], kind="pc")
+    entity(ws, "Mira Pell")
+    kinds = {e["names"][0]: e["kind"] for e in read(ws, "search_entities")}
+    assert kinds == {"Ada Fen": "pc", "Mira Pell": None}
+    assert "kind" in refused(ws, "create_entity", names=["Ghost"], kind="ghost")
+
+    [path] = [p for p in (ws.root / "canon/entities").glob("*.md") if "Ada" in p.read_text()]
+    path.write_text(path.read_text().replace("kind: pc", "kind: hero"))
     assert main(["check", "-w", str(ws.root)]) == 1
     assert path.name in capsys.readouterr().err
 

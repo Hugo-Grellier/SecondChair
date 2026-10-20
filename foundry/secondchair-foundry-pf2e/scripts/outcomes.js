@@ -16,10 +16,12 @@
  * @property {(actor: Doc) => Record<string, number | null>} conditions  slug -> value
  * @property {(actor: Doc) => Record<string, Record<string, unknown>>} evidence
  *   the trace readers' module flags from the actor's token and combatant (RUL-19)
+ * @property {(actor: Doc | null) => string | null} driver
+ *   the active turn driver's module id (RUL-11) when the actor is a GM creature, else null
  */
 
 /** The degree pf2e records on a check message. */
-const DEGREES = ["criticalFailure", "failure", "success", "criticalSuccess"];
+export const DEGREES = ["criticalFailure", "failure", "success", "criticalSuccess"];
 
 /** Message types whose roll is not a check. */
 const NOT_CHECKS = ["damage-roll", "damage-taken", "spell-cast", "self-effect"];
@@ -70,6 +72,11 @@ export function createTracer(env) {
 
   /** @param {Doc | null} actor */
   const flagsOf = (actor) => (actor ? env.evidence(actor) : {});
+  /** A GM creature's act while a turn driver runs: the GM's, through it (RUL-12). @param {Doc | null} actor */
+  const turnDriven = (actor) => {
+    const driver = env.driver(actor);
+    return driver ? { turn_driver: driver } : {};
+  };
 
   return {
     /** Start tracking an actor's resources, so its next cast has a before. @param {Doc} actor */
@@ -184,7 +191,7 @@ export function createTracer(env) {
         resources.set(actor.uuid, now);
       }
       payload.flags = evidence;
-      return defined(payload);
+      return defined({ ...payload, ...turnDriven(actor) });
     },
     /**
      * An actor's conditions changed: its conditions before (when seen before) and after.
@@ -195,6 +202,7 @@ export function createTracer(env) {
       const before = conditions.get(actor.uuid);
       conditions.set(actor.uuid, after);
       return {
+        ...turnDriven(actor),
         type: "condition",
         message: null,
         user,

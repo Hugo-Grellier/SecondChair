@@ -1,7 +1,7 @@
 ---
 name: propose-narrative-direction
 description: Propose what happens when a situation the party engaged in reaches its deadline, as new narrative held for the GM's approval, through SecondChair. Use when running a SecondChair job whose playbook is propose-narrative-direction.
-license: AGPL-3.0-only
+license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve).
 metadata:
   secondchair-responsibility: narrative_direction
@@ -26,6 +26,6 @@ You were given a job id. If you were not given its contract, the GM asked you to
 
 1. Call `living_world` and find the occurrence in `queued`: its situation (`entity`) and its `date`.
 2. Call `search_facts` about the situation and its participants, at the deadline's date, to know where it stands.
-3. Propose one outcome consistent with canon: an offscreen event with `record_event` dated on the deadline, closing the situation's state fact and opening the facts it leads to (record them first with `record_fact`). Use origin `{"kind": "job", "job": "<job id>"}` and pass `job` to every action. Each comes back `pending`: that is expected.
+3. Propose one outcome consistent with canon: an offscreen event with `record_event` dated on the deadline, closing the situation's state fact and opening the facts it leads to (record them first with `record_fact`). Use origin `{"kind": "job", "job": "<job id>"}` and pass `job` to every action. Each comes back `pending`: that is expected. SecondChair links them to the deadline: once the GM approves one, the deadline is applied and leaves the queue.
 4. Never make the party know anything: what reaches the party goes through disclosure.
 5. Call `finish_job` with the job id, then reply with your proposal and the pending entries, so the GM can approve, edit or reject them.

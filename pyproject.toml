@@ -3,8 +3,8 @@ name = "secondchair"
 version = "0.1.0"
 description = "Human-directed, AI-operated campaign director for tabletop GMs"
 readme = "README.md"
-license = "AGPL-3.0-only"
-license-files = ["LICENSE"]
+license = "AGPL-3.0-only AND Apache-2.0"
+license-files = ["LICENSE", "src/*/playbooks/LICENSE"]
 requires-python = ">=3.14"
 dependencies = [
     "mcp>=2.3.0",
@@ -34,9 +34,10 @@ pf2e = "secondchair_pf2e:PLAYBOOKS"
 pf2e = "secondchair_pf2e.checks:check"
 
 [project.entry-points."secondchair.tools"]
-core = "secondchair.core.campaign:tools"
-foundry = "secondchair_foundry.tools:tools"
-pf2e = "secondchair_pf2e.calculators:tools"
+core = "secondchair.core.campaign:BLOCK"
+foundry = "secondchair_foundry.tools:BLOCK"
+pf2e = "secondchair_pf2e.calculators:BLOCK"
+pf2e-encounters = "secondchair_pf2e.tools:BLOCK"
 
 [dependency-groups]
 dev = [

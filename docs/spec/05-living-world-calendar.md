@@ -33,6 +33,7 @@ The class, not the agent, decides which responsibility governs an effect.
 - **LW-10** An `unless` must be settled by citing fact ids; otherwise it becomes a call on the GM due at the next break. Safe default: the tick does not happen and stays queued.
 - **LW-11** Only the front's carrier and the named participants know an offscreen event. Anyone else learns it through a derived consequence that cites its facts.
 - **LW-12** Undoing an effect undoes its cascade (threshold steps, consequences citing it) and returns the keys to the queue. Once the moment is frozen, only a correction or a retcon changes it.
+- **LW-19** A new-narrative occurrence is linked to its narrative-direction job: every action of the job carries the occurrence. When the GM approves the proposal, the occurrence becomes applied; when the GM rejects it, the occurrence stays queued. Undoing the applied outcome returns the occurrence to the queue (LW-12). GM decision on [#111](https://github.com/Hugo-Grellier/SecondChair/issues/111), 2026-10-20.
 
 ### v3 contracts carried as Core unit tests
 
@@ -65,12 +66,12 @@ The class, not the agent, decides which responsibility governs an effect.
 ### Absalom Reckoning (PF2e System extension)
 
 - **CAL-08** Follows Paizo: one day added to the leap month every 4 years. It does not follow the PF2e system's world clock (Gregorian + 2700 years through Luxon).
-- **CAL-09** Its week is anchored so the table and the Core agree on every date before 4800 AR (1 Abadius 4726 AR is Oathday).
+- **CAL-09** Its week is anchored so the table and the Core agree on every date between 1 Pharast 4600 and 28 Calistril 4800 AR (1 Abadius 4726 AR is Oathday).
 
 ### Foundry sync
 
 - **CAL-10** Only a System extension's named calendar is synced with Foundry. A declared calendar (such as the sample campaign's) has no Foundry sync in v4.
 - **CAL-11** At session start the PF2e system adapter pushes the campaign's current date into the world clock as a prep desired state, keeping Foundry's time of day. The Core never writes the clock live.
 - **CAL-12** The adapter reads clock advances as observations.
-- **CAL-13** The adapter refuses to set a date after 28 Calistril 4800 AR (a failed action) instead of compensating for the PF2e clock's drift.
+- **CAL-13** The adapter refuses to set a date before 1 Pharast 4600 or after 28 Calistril 4800 AR (a failed action) instead of compensating for the PF2e clock's drift.
 - **CAL-14** The observed clock at session start and end proposes the session's fictional interval. The GM's notes override it. The wrap asks the GM, in its grouped round, only when both are missing or they disagree. The current date moves only through the wrap or a GM gesture.

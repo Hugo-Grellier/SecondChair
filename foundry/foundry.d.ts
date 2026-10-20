@@ -41,21 +41,22 @@ declare const game: {
   user: {
     id: string;
     isGM: boolean;
+    /** pf2e's per-user settings: whether checks and damage rolls open their dialog. */
+    settings: { showCheckDialogs: boolean; showDamageDialogs: boolean };
     getFlag(scope: string, key: string): unknown;
     setFlag(scope: string, key: string, value: unknown): Promise<unknown>;
   };
   users: {
-    activeGM: { id: string } | null;
+    activeGM: {
+      id: string;
+      /** Asks this user's client only, through a handler in `CONFIG.queries` (Foundry 13+). */
+      query(name: string, data: object, options?: { timeout?: number }): Promise<unknown>;
+    } | null;
     get(
       id: string,
     ): { name: string; isGM: boolean; getFlag(scope: string, key: string): unknown } | undefined;
   };
   world: { id: string };
-  socket: {
-    emit(event: string, data: unknown): void;
-    // Foundry passes the id of the user whose client emitted the message.
-    on(event: string, fn: (data: unknown, senderId: string) => unknown): void;
-  };
   keybindings: {
     register(
       module: string,
@@ -81,6 +82,11 @@ declare const game: {
   pf2e: {
     worldClock: { worldTime: { year: number; month: number; day: number } };
     system: { sluggify(text: string): string };
+    /** The system actions (Demoralize, Trip, …), by slug. */
+    actions: { get(slug: string): FoundryDoc };
+    ConditionManager: {
+      updateConditionValue(id: string, actor: FoundryDoc, value: number): Promise<void>;
+    };
   };
   scenes: {
     get(id: string): { uuid: string } | undefined;
@@ -136,6 +142,13 @@ interface CombatantLike {
 
 declare const canvas: { ready: boolean; mousePosition: { x: number; y: number } } | undefined;
 
+declare const CONFIG: {
+  // Foundry passes the querying user, as the server reported it, so nobody can query as another.
+  queries: Record<string, (data: unknown, context: { user: { id: string } }) => unknown>;
+};
+
+declare const CONST: { REGION_VISIBILITY: { ALWAYS: number } };
+
 declare const ui: {
   players?: { render(): unknown };
   notifications: Record<
@@ -148,7 +161,15 @@ declare const ui: {
 // biome-ignore lint/suspicious/noExplicitAny: Foundry documents, not modelled here
 type FoundryDoc = any;
 declare const Scene: { create(data: object): Promise<FoundryDoc> };
+declare const ChatMessage: {
+  create(data: object): Promise<FoundryDoc>;
+  getSpeaker(options: { token?: FoundryDoc }): object;
+};
 declare const Actor: { create(data: object): Promise<FoundryDoc> };
+
+declare namespace foundry.canvas.placeables {
+  const Token: { prototype: FoundryDoc };
+}
 
 declare namespace foundry.applications.api {
   class ApplicationV2 {

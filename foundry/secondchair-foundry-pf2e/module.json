@@ -22,7 +22,7 @@
         "compatibility": {
           "minimum": "8",
           "verified": "8.6.1",
-          "maximum": "8"
+          "maximum": "8.999"
         }
       }
     ],

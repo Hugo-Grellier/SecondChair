@@ -16,7 +16,7 @@ from secondchair_pf2e.readers import DEGREES
 KIND = "pf2e.outcome"
 
 # The kinds of rules check, what a house rule silences (RUL-24).
-CHECKS = ("modifiers", "degree", "damage", "resource", "conditions", "activity")
+CHECKS = ("modifiers", "degree", "damage", "resource", "conditions", "activity", "follow_up")
 
 # What an activity's degree does to its target (Player Core): the one real calculation the
 # activity check needs (RUL-15). ponytail: three activities; add one when a table needs it.
@@ -41,6 +41,7 @@ def check(observation: dict, earlier: Callable[[], list[dict]]) -> list[Failure]
         *resource(p),
         *conditions(p),
         *activity(observation, earlier),
+        *follow_up(p),
     ]
     if failures and (seen := readers.evidence(p)):
         failures = [(kind, f"{text} ({'; '.join(seen)})") for kind, text in failures]
@@ -250,6 +251,26 @@ def activity(observation: dict, earlier: Callable[[], list[dict]]) -> list[Failu
                 )
             )
     return found
+
+
+def follow_up(p: dict) -> list[Failure]:
+    """An agent's system action whose follow-up condition changed while the call settled, but not
+    as its degree says: the executor applied nothing, and the GM decides (RUL-10)."""
+    f = p.get("follow_up")
+    if not isinstance(f, dict) or f.get("result") != "ambiguous":
+        return []
+
+    def named(value: int | None) -> str:
+        return f["condition"] if value is None else f"{f['condition']} {value}"
+
+    left = named(f["settled"]) if "settled" in f else "none"
+    return [
+        (
+            "follow_up",
+            f"{_what(p)}: {p.get('action')} at {p.get('degree')} gives {named(f['value'])}, but "
+            f"a module left {left} while it settled; it was not applied again.",
+        )
+    ]
 
 
 def _what(p: dict) -> str:

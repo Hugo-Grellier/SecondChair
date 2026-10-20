@@ -12,15 +12,17 @@ import yaml
 from mcp import Client
 from test_canon import call, entity, fact
 from test_delegation import gm, log
+from test_knowledge import learn
 
 from secondchair.cli import main
-from secondchair.core import delegation, index, knowledge, vtt, workspace
+from secondchair.core import calls, capture, delegation, index, jobs, knowledge, vtt, workspace
 from secondchair.core.delegation import DelegationError
 from secondchair.core.server import build_server
 from secondchair.core.workspace import Workspace
 from secondchair_foundry import desk
 
 TOKEN = "Scene.s1.Token.t1"
+PLAYER = "User.u1"
 
 
 class FakeVtt:
@@ -28,10 +30,14 @@ class FakeVtt:
 
     def __init__(self) -> None:
         self.docs: dict[str, dict] = {TOKEN: {"hidden": True}}
+        self.whispered: list[tuple[str, str]] = []
 
     def perform(
         self, op: str, target: str, params: dict, expect: dict | None, level: str | None
     ) -> tuple[dict, dict]:
+        if op == "whisper":
+            self.whispered.append((target, params["content"]))
+            return {"message": None}, {"message": f"m{len(self.whispered)}"}
         assert op == "reveal_token"
         before = dict(self.docs[target])
         self.docs[target].update(params)
@@ -186,6 +192,90 @@ def test_a_disclosure_citing_an_unknown_or_never_true_fact_is_refused(
     assert result.is_error
     assert "unknown fact ids" in result.content[0].text
     assert foundry.docs[TOKEN] == {"hidden": True}
+
+
+# Which knower bounds a disclosure (CAN-16): none when the GM's approval is the gate; an acting
+# NPC must know every fact it cites.
+
+
+def say(ws: Workspace, npc: str, cites: list[str]) -> Any:
+    line = "The gauge never moves."
+    return call(ws, "speak", token=TOKEN, line=line, cites=cites, entity=npc, agent="claude-live")
+
+
+def test_a_disclosure_may_cite_a_fact_the_party_does_not_know_yet(
+    ws: Workspace, foundry: FakeVtt, clue: str
+) -> None:
+    assert clue not in knowledge.known(ws, index.PARTY)
+
+    assert reveal(ws, [clue]).structured_content["status"] == "pending"
+
+
+@pytest.fixture
+def keeper(ws: Workspace) -> tuple[str, str]:
+    """A clue the keeper knows, recorded in prep; then session 1 starts."""
+    gauge = entity(ws, "Dry gauge")
+    found = fact(ws, "The dry gauge stays at zero while the bell rings.", entities=[gauge])
+    npc = entity(ws, "Keeper Ilsa")
+    learn(ws, npc, found)
+    delegation.start_session(ws)
+    return npc, found
+
+
+def test_an_npc_discloses_only_what_it_knows(
+    ws: Workspace, foundry: FakeVtt, keeper: tuple[str, str]
+) -> None:
+    npc, clue = keeper
+    gauge = next(e["id"] for e in index.search_entities(ws) if e["names"] == ["Dry gauge"])
+
+    refused = say(ws, gauge, [clue])
+
+    assert refused.is_error
+    assert f"{gauge} does not know ['{clue}']" in refused.content[0].text
+    assert say(ws, npc, [clue]).structured_content["status"] == "pending"
+
+
+def test_an_npc_disclosure_is_checked_again_at_approval(
+    ws: Workspace, foundry: FakeVtt, keeper: tuple[str, str]
+) -> None:
+    npc, clue = keeper
+    say(ws, npc, [clue])
+    for record in (ws.root / "canon/knowledge").glob("*.md"):
+        record.unlink()  # a hand edit: the keeper forgets
+
+    with pytest.raises(DelegationError, match="does not know"):
+        delegation.approve(ws, log(ws)[-1]["id"], "cli", authenticated=True)
+
+
+def test_a_whisper_marks_nothing_known_by_the_party_and_the_wrap_asks_the_gm(
+    ws: Workspace, foundry: FakeVtt, clue: str
+) -> None:
+    set_disclosure(ws, "act-then-review")
+    lift(ws)
+
+    told = call(
+        ws, "whisper", user=PLAYER, line="The gauge is dry.", cites=[clue], agent="claude-live"
+    )
+
+    assert told.structured_content["status"] == "applied", told
+    assert foundry.whispered == [(PLAYER, "The gauge is dry.")]
+    assert knowledge.known(ws, index.PARTY) == {}  # CAP-08: one player is not the party
+    call(ws, "whisper", user="User.u2", line="Dry.", cites=[clue], agent="claude-live")
+    delegation.change_moment(ws, "between-sessions")
+    jobs.start(ws, 1, {"host": "h", "model": "m", "effort": "e"}, manual=True)
+    jobs.end(ws, 1)
+
+    [question] = capture.wrap(ws, 1, authenticated=True, end="4725-03-03")["questions"]
+    assert (question["kind"], question["responsibility"]) == ("proposal", "disclosure")
+    assert "Whispered to User.u1" in question["message"]
+    again = capture.wrap(ws, 1, authenticated=True, end="4725-03-03")["questions"]
+    assert [q["id"] for q in again] == [question["id"]]  # held once, not twice
+
+    delegation.approve(ws, question["entry"], "cli", authenticated=True)
+    assert capture.wrap(ws, 1, authenticated=True, end="4725-03-03")["settled"] is not None
+    learned = knowledge.known(ws, index.PARTY)[clue]
+    assert (learned["mode"], learned["date"]) == ("knows", "4725-03-02")
+    assert [c for c in calls.read_calls(ws) if c["status"] == "open"] == []
 
 
 def tool_names(ws: Workspace) -> set[str]:

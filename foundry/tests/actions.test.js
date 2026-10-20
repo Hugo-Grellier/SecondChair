@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  aboveCeiling,
   CEILING,
   createActions,
   missingTranslation,
@@ -23,6 +24,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
     ["Scene.s.Token.t", "Token", { x: 100, y: 200, hidden: true }],
     ["Scene.s.Wall.w", "Wall", { ds: 0 }],
     ["JournalEntry.j", "JournalEntry", { ownership: { default: 0 } }],
+    ["User.u", "User", { name: "Alice" }],
   ])) {
     docs[uuid] = {
       documentName,
@@ -43,6 +45,20 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
       },
     };
   }
+  /** @type {string[]} */
+  const said = [];
+  /** @param {unknown} _token @param {string} line */
+  const say = async (_token, line) => {
+    said.push(line);
+    return `m${said.length}`;
+  };
+  /** @type {[unknown, string][]} */
+  const told = [];
+  /** @param {unknown} user @param {string} line */
+  const tell = async (user, line) => {
+    told.push([/** @type {any} */ (user).name, line]);
+    return `w${told.length}`;
+  };
   /** @type {unknown[]} */
   let saved = [];
   const store = {
@@ -57,6 +73,8 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
     adapter: () => adapter,
     ceiling: () => ceiling,
     language: () => "fr",
+    say,
+    tell,
   });
   /** @param {object} request */
   const handle = async (request) => {
@@ -83,6 +101,8 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
   };
   return {
     docs,
+    said,
+    told,
     handle,
     read,
     store,
@@ -93,6 +113,8 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
         adapter: () => adapter,
         ceiling: () => ceiling,
         language: () => "fr",
+        say,
+        tell,
       }),
   };
 }
@@ -117,6 +139,16 @@ test("a token move replies with its before and after positions", async () => {
     after: { x: 300, y: 200 },
   });
   assert.equal(docs["Scene.s.Token.t"].x, 300);
+});
+
+test("a token move replies with where it goes, though Foundry v14 applies it after update() (#150)", async () => {
+  const { docs, handle } = world();
+  const token = docs["Scene.s.Token.t"];
+  const update = token.update;
+  // v14 routes x/y through the movement API: update() resolves with the old position still held.
+  token.update = async (changes) => void setTimeout(() => update.call(token, changes), 20);
+  const reply = await handle(move("r1", 400, 300));
+  assert.deepEqual(reply.ok && reply.after, { x: 400, y: 300 });
 });
 
 test("a replayed request id is applied once and gets the first reply", async () => {
@@ -206,6 +238,54 @@ test("a disclosure reveals a token and publishes a journal entry to the players"
   assert.equal(docs["Scene.s.Token.t"].hidden, false);
 });
 
+test("a creature speaks a line aloud, which no undo takes back", async () => {
+  const { said, handle } = world();
+  const line = { op: "speak", target: "Scene.s.Token.t", params: { content: "Die, longshanks!" } };
+  const spoken = await handle({ id: "s1", expect: null, ...line });
+  assert.deepEqual(spoken, {
+    type: "reply",
+    id: "s1",
+    ok: true,
+    before: { message: null },
+    after: { message: "m1" },
+  });
+  assert.deepEqual(said, ["Die, longshanks!"]);
+  const undo = await handle({
+    id: "s2",
+    ...line,
+    params: { message: null },
+    expect: { message: "m1" },
+  });
+  assert.equal(undo.ok, false);
+  const wall = await handle({ id: "s3", expect: null, ...line, target: "Scene.s.Wall.w" });
+  assert.match(wall.ok ? "" : wall.error, /not a Token/);
+  assert.deepEqual(said, ["Die, longshanks!"]);
+});
+
+test("a whisper reaches one player, and no undo takes it back", async () => {
+  const { told, handle } = world();
+  const line = { op: "whisper", target: "User.u", params: { content: "The gauge is dry." } };
+  const whispered = await handle({ id: "w1", expect: null, ...line });
+  assert.deepEqual(whispered, {
+    type: "reply",
+    id: "w1",
+    ok: true,
+    before: { message: null },
+    after: { message: "w1" },
+  });
+  assert.deepEqual(told, [["Alice", "The gauge is dry."]]);
+  const undo = await handle({
+    id: "w2",
+    ...line,
+    params: { message: null },
+    expect: { message: "w1" },
+  });
+  assert.equal(undo.ok, false);
+  const token = await handle({ id: "w3", expect: null, ...line, target: "Scene.s.Token.t" });
+  assert.match(token.ok ? "" : token.error, /not a User/);
+  assert.equal(told.length, 1);
+});
+
 test("a generic action refuses the wrong document or fields", async () => {
   const { handle } = world();
   for (const request of [
@@ -267,6 +347,13 @@ test("an action above the ceiling is refused as a ceiling refusal and nothing is
   assert.equal(!reply.ok && reply.reason, "ceiling");
   assert.match(reply.ok ? "" : reply.error, /ceiling \(propose\)/);
   assert.equal(docs["Scene.s.Token.t"].updates, 0);
+});
+
+test("a prepared scene is realised only at or under the ceiling, a GM's edit always", () => {
+  assert.match(aboveCeiling("propose", "act-then-review") ?? "", /ceiling \(propose\)/);
+  assert.equal(aboveCeiling("propose", "propose"), null);
+  assert.equal(aboveCeiling("manual", null), null); // a hand edit or an undo has no level
+  assert.match(aboveCeiling("propose", "nonsense") ?? "", /ceiling/);
 });
 
 test("an action at or under the ceiling, and the GM's undo, are taken", async () => {

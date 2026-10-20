@@ -14,7 +14,7 @@
    `https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry-pf2e/module.json`,
    and enable it. It targets Foundry v14 with the pf2e system 8.x and stays off on any other pair. A French campaign also needs the official translation module **pf2-fr** enabled: without it SecondChair refuses to connect and says so.
 
-**Your browser may ask once before connecting.** Firefox, and recent Chrome versions, ask for each site whether it may connect to services on your own computer (the "local network" or "apps and services on this device" prompt). Allow it for your Foundry site. If you refused it, the module reports that it cannot reach the Core: allow the site in the browser's site permissions, then reload.
+**Your browser may ask once before connecting.** Firefox, and recent Chrome versions, ask for each site whether it may connect to services on your own computer (the "local network" or "apps and services on this device" prompt). Allow it for your Foundry site. While the prompt waits for an answer, the module cannot connect; after a few seconds it shows a notice pointing to the prompt. If you refused it, the module reports that it cannot reach the Core: allow the site in the browser's site permissions, then reload.
 
 **Delegation ceiling.** In the same settings, the GM sets the most any SecondChair agent may do in this world, whatever the campaign's delegation table says. It starts at *act then review*; an action above it is refused and becomes a call for you. Only a GM can change it, and each change is recorded.
 

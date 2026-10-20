@@ -8,7 +8,9 @@ scored with no LLM judge:
 - entity recall and precision against the gold set's named entities, by an exact shared name;
 - leaks: a canary in any entity (names, aliases, player-facing description) and every leak of
   canon knowledge (`s0.leaks`);
-- narrative direction, from the log's actions (`s0.narrative_direction`).
+- narrative direction, from the log's actions (`s0.narrative_direction`);
+- the fact probes passed, from the agent's stored reply (`s0.score_answers`), and the continuity
+  errors: refused contradictions, rejections and undos for `contradiction`, failed probes.
 
 Only the two invariants gate (MET-05a): a run passes when it has no leak and no narrative breach.
 Every metric is reported per table as median and min-max over the runs (BEN-04).
@@ -27,8 +29,17 @@ from secondchair.core import delegation, index, jobs, knowledge, workspace
 from secondchair.core.workspace import STATE_DIR
 
 TABLES = ("delegated", "baseline")
-METRICS = ("gm_effort", "entity_recall", "entity_precision", "leaks", "narrative_direction")
+METRICS = (
+    "gm_effort",
+    "entity_recall",
+    "entity_precision",
+    "leaks",
+    "narrative_direction",
+    "fact_probes",
+    "continuity_errors",
+)
 META_FILE = "bench.yaml"
+REPLY_FILE = "probes-reply.txt"  # the agent's reply to the fact probes, beside the workspace
 GOLD_FILE = "gold.yaml"
 
 
@@ -55,6 +66,9 @@ def score_run(stored: Path, gold: dict) -> dict:
         leaks = canaries + s0.leaks(ws, gold)
         actions = [e for e in entries if e.get("kind") == "action"]
         narrative = s0.narrative_direction(ws, actions)
+        reply = stored.parent / REPLY_FILE
+        answers = s0.parse_answers(reply.read_text()) if reply.is_file() else {}
+        probes = s0.score_answers(ws, gold, answers, s0.FACT_PROBES)
     labels = {n: label for label, e in gold["entities"].items() for n in e["names"]}
     named = [e for e in entities if e["names"]]
     matching = [e for e in named if labels.keys() & set(e["names"])]
@@ -65,6 +79,9 @@ def score_run(stored: Path, gold: dict) -> dict:
         "entity_precision": len(matching) / len(named) if named else 0.0,
         "leaks": leaks,
         "narrative_direction": narrative,
+        "fact_probes": sum(probes["probes"].values()),
+        "continuity_errors": probes["continuity_errors"]["total"],
+        "probes": probes["probes"],
     }
 
 

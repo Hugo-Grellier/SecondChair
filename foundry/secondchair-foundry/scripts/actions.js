@@ -74,6 +74,20 @@ export const CEILING = {
   default: "act-then-review",
 };
 
+/**
+ * Why the ceiling refuses what the Core asks at `level` (DEL-19, DEL-19a), or null.
+ * level null: the GM's own undo or edit, which the ceiling does not bound. Anything unknown is refused.
+ * @param {unknown} ceiling  the world's ceiling setting
+ * @param {string | null} level
+ */
+export function aboveCeiling(ceiling, level) {
+  if (level === null) return null;
+  const max = LEVELS.indexOf(String(ceiling));
+  const rank = LEVELS.indexOf(level);
+  if (max >= 0 && rank >= 0 && rank <= max) return null;
+  return `Refused by this world's delegation ceiling (${ceiling}): it was asked at ${level}.`;
+}
+
 /** Refused by the ceiling: a failed action and a call on the GM (DEL-20). */
 class CeilingRefusal extends Error {}
 
@@ -87,8 +101,12 @@ const KEPT = 200;
  * @param {() => Adapter | null} args.adapter  the system adapter, if one registered
  * @param {() => unknown} args.ceiling  the world's ceiling setting
  * @param {() => string} args.language  the campaign language
+ * @param {(token: Doc, line: string) => Promise<string>} args.say  have a token say a line aloud
+ *   to the table: a public chat message spoken by it, whose id it returns
+ * @param {(user: Doc, line: string) => Promise<string>} args.tell  whisper a line to one user:
+ *   a chat message only that user (and the GM) sees, whose id it returns
  */
-export function createActions({ resolve, store, adapter, ceiling, language }) {
+export function createActions({ resolve, store, adapter, ceiling, language, say, tell }) {
   /** @type {Map<string, Promise<Reply>>} */
   const inflight = new Map();
   /** @type {Promise<unknown>} */
@@ -106,13 +124,18 @@ export function createActions({ resolve, store, adapter, ceiling, language }) {
 
   /** @param {Request} request @returns {Promise<{before: Fields, after: Fields}>} */
   async function act({ op, target, params, expect, level }) {
-    // level null: the GM's own undo, which the ceiling does not bound. Anything unknown is refused.
-    const max = LEVELS.indexOf(String(ceiling()));
-    const rank = level === null ? -1 : LEVELS.indexOf(level);
-    if (level !== null && (max < 0 || rank < 0 || rank > max)) {
-      throw new CeilingRefusal(
-        `Refused by this world's delegation ceiling (${ceiling()}): the action was asked at ${level}.`,
-      );
+    const refusal = aboveCeiling(ceiling(), level);
+    if (refusal) throw new CeilingRefusal(refusal);
+    if (op === "speak" || op === "whisper") {
+      // A disclosure (DEL-09): irreversible, so there is no undo to take.
+      if (expect) throw new Error("A line once said cannot be taken back.");
+      const to = op === "speak" ? "Token" : "User";
+      const doc = await resolve(target);
+      if (doc?.documentName !== to) throw new Error(`${target} is not a ${to}.`);
+      const line = params.content;
+      if (typeof line !== "string" || !line.trim()) throw new Error(`${op} says a \`content\`.`);
+      const message = await (op === "speak" ? say : tell)(doc, line);
+      return { before: { message: null }, after: { message } };
     }
     if (!Object.hasOwn(GENERIC, op)) {
       const ops = adapter()?.ops;
@@ -140,7 +163,9 @@ export function createActions({ resolve, store, adapter, ceiling, language }) {
       throw new Error(`${target} changed since: nothing was done.`);
     }
     await doc.update(params);
-    return { before, after: pick() };
+    // Not read back: on Foundry v14 a token's x/y still hold the old position when update()
+    // resolves, the movement API applies it later (#150).
+    return { before, after: { ...before, ...params } };
   }
 
   /**

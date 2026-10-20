@@ -1,6 +1,6 @@
 # Contract: tool registration and the Core's MCP endpoint
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-10, DEL-14, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-29, PKG-05, PKG-06, PKG-19, ARC-10.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-10, DEL-14, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-29, PKG-05, PKG-06, PKG-19, ARC-10, DEL-23, RUL-03, RUL-04, RUL-05, RUL-06, RUL-07, RUL-08, RUL-09, RUL-12, DEL-22.
 
 ## The MCP endpoint
 
@@ -15,13 +15,13 @@ The Core is the only MCP server agents see (ARC-03). A block (System extension, 
 ```toml
 # the block's pyproject.toml
 [project.entry-points."secondchair.tools"]
-pf2e = "secondchair_pf2e.tools:tools"
+pf2e = "secondchair_pf2e.tools:BLOCK"
 ```
 
-The entry point is a function called once when `serve` starts, with the served `Workspace`, returning the block's tools:
+The entry point names a `Block`: the protocol range the block supports and a function called once when `serve` starts, with the served `Workspace`, returning the block's tools:
 
 ```python
-from secondchair.core.tools import Tool
+from secondchair.core.tools import Block, Tool
 from secondchair.core.workspace import Workspace
 
 
@@ -38,7 +38,15 @@ def tools(ws: Workspace) -> list[Tool]:
             reversible=False,
         ),
     ]
+
+
+BLOCK = Block(protocol=("0.1.0", "0.2.0"), tools=tools)
 ```
+
+| `Block` field | Type | Rule |
+|---|---|---|
+| `protocol` | pair of strings | The protocol range the block supports (ARC-17): the lowest version it supports and the first it does not, each `X.Y.Z`. `serve` refuses the block unless the Core's protocol version lies in it. |
+| `tools` | function | Called with the served `Workspace`, returns the block's `Tool`s. |
 
 | `Tool` field | Type | Rule |
 |---|---|---|
@@ -47,7 +55,7 @@ def tools(ws: Workspace) -> list[Tool]:
 | `delegated_action` | bool | `true` for a delegated action, `false` for a read. |
 | `reversible` | bool | Whether the action can be undone (DEL-25). A read declares `true`. |
 
-All three declarations are required. A registration missing one, with an unknown responsibility or a non-boolean flag, a duplicate name, or an entry point that raises, stops `serve` before it listens, with a message naming the block.
+All three declarations are required. An entry point naming no `Block`, a protocol range not holding the Core's version, a registration missing a declaration, with an unknown responsibility or a non-boolean flag, a duplicate name, or an entry point that raises, stops `serve` before it listens, with a message naming the block.
 
 ## Delegated actions
 
@@ -87,9 +95,11 @@ def move_token(token: str, x: int, y: int) -> VttAction:
 | `params` | object | The fields to set. |
 | `source` | string or null | As for `Change`. |
 | `entity` | string or null | As for `Change`. |
-| `cites` | list of strings or null | A disclosure's facts: the ids of what the players learn from it (CAN-16). The Core refuses the action when one is not in canon, is never true or carries a canary, or when `time.yaml` has no current date; it logs them as `cites`, and once the action is applied (at once, or at the GM's approval) marks each one the party does not know yet as known by the party, on the current date and in the current session (CAN-17; [knowledge](workspace-layout.md#canonknowledge)). Null (the default) for an action that shows the players nothing. |
+| `cites` | list of strings or null | A disclosure's facts: the ids of what the players learn from it (CAN-16). The Core refuses the action when one is not in canon, is never true or carries a canary, when the acting `entity` (an NPC who discloses) does not know it, or when `time.yaml` has no current date, and checks again at the GM's approval; the party need not know them beforehand; it logs them as `cites`, and once the action is applied (at once, or at the GM's approval) marks each one the party does not know yet as known by the party, on the current date and in the current session (CAN-17; [knowledge](workspace-layout.md#canonknowledge)). Null (the default) for an action that shows the players nothing. |
+| `whisper` | boolean | True for a disclosure shown to some of the table only: its `cites` mark nothing known by the party, the wrap holds each as a call on the GM instead (CAP-08). Logged as `whisper` with the live `session`. False by default. |
+| `hold` | string or null | Holds the action at propose whatever the level, the call carrying it as its `message`: an action the GM resolves, which an agent may only propose (RUL-08). Null (the default) otherwise. |
 
-The log entry of a VTT action carries `op`, and the fields the VTT reported `before` and `after` it. A VTT action the VTT did not take is a **failed action**: logged with status `failed` and its `error`, and returned to the agent as an MCP error. The Foundry connector registers `move_token` and `set_door` (VTT operations, reversible), `reveal_token` and `publish_journal` (disclosure, irreversible, each with `cites`), and `prepare_scene` (prep, reversible), which writes a scene's desired state, with its read `scene_report` ([foundry-bridge.md](foundry-bridge.md#prepared-scenes-arc-10-bve-02)). Its read `official_name(key, pack)` (under memory) returns the name official game content has in the GM's install, in the campaign language, with the official reference to store on a new entity; `name` is null when the entry has no translation (CAN-20, CAN-21; [foundry-bridge.md](foundry-bridge.md#reads-can-20-rul-22)).
+The log entry of a VTT action carries `op`, and the fields the VTT reported `before` and `after` it. A VTT action the VTT did not take is a **failed action**: logged with status `failed` and its `error`, and returned to the agent as an MCP error. The Foundry connector registers `move_token` and `set_door` (VTT operations, reversible), `reveal_token`, `publish_journal`, `speak(token, line, cites, entity)` and `whisper(user, line, cites)` (disclosure, irreversible, each with `cites`; `speak` has a creature say a line aloud to the table; `whisper` tells one player, a Foundry User, which marks no fact known by the party: the wrap asks the GM, CAP-08), and `prepare_scene` (prep, reversible), which writes a scene's desired state, with its read `scene_report` ([foundry-bridge.md](foundry-bridge.md#prepared-scenes-arc-10-bve-02)). Its read `official_name(key, pack)` (under memory) returns the name official game content has in the GM's install, in the campaign language, with the official reference to store on a new entity; `name` is null when the entry has no translation (CAN-20, CAN-21; [foundry-bridge.md](foundry-bridge.md#reads-can-20-rul-22)).
 
 The Core adds a required `agent` string argument to every delegated action's MCP input schema: the agent's name, recorded for traceability only (ARC-22). It also adds an optional `job` integer: the job the agent is running (see below), and an optional `blocking` boolean (default false): whether the table waits on this action to go on with the current turn or scene, which makes its proposal due now rather than at the next break (DEL-30; a job's actions block as the job does). A block's `fn` must not have an `agent`, `job` or `blocking` parameter. On each call the Core reads the current moment and the delegation table, then:
 
@@ -109,12 +119,14 @@ The Core can hold an action at propose whatever the level: the wrap does so for 
 
 A delegated action's `fn` that finds its change would contradict canon raises `secondchair.core.tools.Contradiction(path, message)`. The Core writes nothing, logs the action with `status: refused` and the message as `refusal` (a continuity error, MET-01), and returns an MCP error.
 
+The PF2e System extension (`secondchair_pf2e.tools`) registers a GM creature's turn in an encounter, under rules and combat and reversible, each one VTT action the PF2e adapter's executor takes ([foundry-bridge.md](foundry-bridge.md#the-executor-rul-0310)): `strike(creature, strike, target, attack, entity)`, `use_action(creature, action, target, entity)`, `saving_throw(target, save, dc, entity)`, `cast_spell(creature, spell, rank, variant, actions, entity)`, `use_self_effect(creature, item, entity)`, `place_area(creature, area, size, x, y, direction, name, entity)` and `reactive_strike(creature, strike, target, trigger, entity)`, the tokens named by their Foundry UUIDs and `entity` being the acting creature's canon id. `cast_spell` with `actions` (the cost an agent proposes for a variable-cost spell with no overlay, which the adapter refuses without it) is held at propose whatever the level, with `hold`: the GM resolves it (RUL-08). The adapter refuses them outside a started combat, and `strike` and `use_action` for a PC (RUL-03, RUL-04): a failed action. While a known turn driver is active it refuses every one of them for every creature, also a failed action: the GM runs turns through the driver, and SecondChair observes and checks them as the GM's acts (RUL-12, DEL-22). `saving_throw` on a PC rolls nothing: its player is asked to roll. A strike and the line its creature shouts are two actions, `strike` under rules and combat and `speak` under disclosure, each checked on its own (DEL-23).
+
 The Core's own delegated actions are all under memory and reversible: `create_entity`, `record_fact`, `correct_fact`, `record_event` and `record_knowledge` ([workspace layout](workspace-layout.md#canonfacts)).
 The mystery graph adds `record_mystery`, under prep and reversible ([workspace layout](workspace-layout.md#canonmysteries)).
 
 ## Rules checks and discrepancies
 
-A System extension registers its rules checks (RUL-14) through the entry point group `secondchair.rules_checks`: a function `(observation, earlier) -> [(check, text)]`, where `earlier()` returns the observation's live session in capture order. The PF2e System extension registers `secondchair_pf2e.checks:check`, which tests each `pf2e.outcome` observation ([`pf2e-outcome.schema.json`](pf2e-outcome.schema.json)) against its own trace, with the kinds of check `modifiers`, `degree`, `damage`, `resource`, `conditions` and `activity`, reading third-party flags through its trace readers (`secondchair_pf2e.readers`, RUL-19). The Core runs every checker on each observation it records for the first time; a checker that raises is reported on stderr and checks nothing. A failed check is a **discrepancy**: a call on the GM ([workspace layout](workspace-layout.md#calls)), unless a house rule silences its kind.
+A System extension registers its rules checks (RUL-14) through the entry point group `secondchair.rules_checks`: a function `(observation, earlier) -> [(check, text)]`, where `earlier()` returns the observation's live session in capture order. The PF2e System extension registers `secondchair_pf2e.checks:check`, which tests each `pf2e.outcome` observation ([`pf2e-outcome.schema.json`](pf2e-outcome.schema.json)) against its own trace, with the kinds of check `modifiers`, `degree`, `damage`, `resource`, `conditions`, `activity` and `follow_up` (an agent action's ambiguous follow-up, RUL-10), reading third-party flags through its trace readers (`secondchair_pf2e.readers`, RUL-19). The Core runs every checker on each observation it records for the first time; a checker that raises is reported on stderr and checks nothing. A failed check is a **discrepancy**: a call on the GM ([workspace layout](workspace-layout.md#calls)), unless a house rule silences its kind.
 
 `fix_discrepancy(discrepancy, op, target, params, agent, job)` is served by the Core outside block registration, with the `_meta` of a delegated action under rules_and_combat: it proposes the VTT action that fixes an open discrepancy (such as the PF2e adapter's `set_actor`), which the Core holds at propose whatever the level, the proposal's call carrying the discrepancy as its message; the discrepancy's call is answered. Fixing is never automatic (RUL-17).
 
@@ -163,7 +175,7 @@ metadata:
   secondchair-expected-output: One canon entity per named person, place, …
 ```
 
-Each block ships its playbooks in one directory that is both a Claude Code plugin (`.claude-plugin/`, the plugin and its marketplace named alike) and, through its `skills/` directory, a Codex skill bundle (PKG-19), registered under the `secondchair.playbooks` entry point group as the directory's path. Playbook names are unique across blocks. The Core's live in `src/secondchair/playbooks/` (`secondchair`): `rebuild-entities-from-a-bible` (memory, standard), `wrap-a-session` (memory, standard; inputs `session` and the optional `notes`) and `world-turn` (living world, fast; inputs `until` and the optional `since`). The Foundry connector's VTT playbooks ship with it (ARC-10) in `src/secondchair_foundry/playbooks/` (`secondchair-foundry`): `realise-a-scene` (prep, standard; inputs `brief` and `scene`), which writes a scene's desired state and reads back its reconciliation report. The PF2e System extension's rules playbooks live in `src/secondchair_pf2e/playbooks/` (`secondchair-pf2e`): `calibrate-encounters` (prep, standard; inputs `adventure`, `party` and `encounters`), which prepares each listed encounter as a scene calibrated with `encounter_xp` and checks the treasure against `treasure_budget`.
+Each block ships its playbooks in one directory that is both a Claude Code plugin (`.claude-plugin/`, the plugin and its marketplace named alike) and, through its `skills/` directory, a Codex skill bundle (PKG-19), registered under the `secondchair.playbooks` entry point group as the directory's path. Playbook names are unique across blocks. The Core's live in `src/secondchair/playbooks/` (`secondchair`): `rebuild-entities-from-a-bible` (memory, standard; it creates the bible's entities, then records its facts with `record_fact`, citing the bible paragraph, with a relation where the Core list fits), `answer-probes` (memory, standard; input `probes`, a file of questions and answer shapes), which answers probes from canon in the GM view and replies with one JSON object of structured answers in workspace entity ids, as the bench asks them, `wrap-a-session` (memory, standard; inputs `session` and the optional `notes`) and `world-turn` (living world, fast; inputs `until` and the optional `since`). The Foundry connector's VTT playbooks ship with it (ARC-10) in `src/secondchair_foundry/playbooks/` (`secondchair-foundry`): `realise-a-scene` (prep, standard; inputs `brief` and `scene`), which writes a scene's desired state and reads back its reconciliation report. The PF2e System extension's rules playbooks live in `src/secondchair_pf2e/playbooks/` (`secondchair-pf2e`): `calibrate-encounters` (prep, standard; inputs `adventure`, `party` and `encounters`), which prepares each listed encounter as a scene calibrated with `encounter_xp` and checks the treasure against `treasure_budget`.
 
 ## What agents see
 
@@ -185,4 +197,4 @@ The Core's own reads, all under memory: `campaign_info` returns the campaign lan
 
 ## Versioning
 
-The protocol version is semver and versions this contract and the wire contracts that follow (ARC-17a); before v4.0 a breaking change is free. The Foundry modules' version is checked at the bridge handshake ([foundry-bridge.md](foundry-bridge.md)); how a Python block declares its supported range is still open (#77).
+The protocol version is semver and versions this contract and the wire contracts that follow (ARC-17a); before v4.0 a breaking change is free. The Foundry modules' version is checked at the bridge handshake ([foundry-bridge.md](foundry-bridge.md)); a Python block declares the range it supports on its `Block`, and `serve` refuses an incompatible block at start, before it listens (#77). That range also covers the block's other entry points (connectors, rules checks, calendars, playbooks), which ship in the same distribution.

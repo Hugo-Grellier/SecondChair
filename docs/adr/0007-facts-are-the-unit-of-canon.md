@@ -14,4 +14,4 @@ Canon is made of **facts**, not entity sheets. A fact is one statement about one
 - A hand edit of the workspace bypasses the Core. The Core picks it up when it rebuilds the index and logs it at the agent-proposal rank, since it cannot tell who typed it. The GM promotes it to a GM decision in one gesture on an authenticated Surface (ADR 0003).
 - An approved agent proposal keeps the agent-proposal rank. Only play, or a GM decision in the GM's own words, ranks higher.
 - Content written for an audience (an NPC line, a disclosure) cites the ids of the facts it uses. The Core refuses it if the audience does not know a cited fact, and scans it for forbidden strings. Paraphrased leaks are not blocked; the test bench measures them.
-- A disclosure marks the facts it cites as known by the party.
+- A disclosure marks the facts it cites as known by the party, so the party is not the knower that bounds it: no knower bounds a disclosure the GM authored, whose cited facts only have to exist in canon, be true and carry no canary, the GM's authenticated approval (or a lifted hold) being the gate. When an NPC discloses, as the acting entity, it must know every fact it cites.

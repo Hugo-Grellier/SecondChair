@@ -40,7 +40,7 @@
     },
     "payload": {
       "type": "object",
-      "description": "The kind's content. chat: {author, speaker, text, flavor, whisper, rolls}; combat: {action, combat, round, turn, combatant}; scene: {action, name}; clock: {date, world_time}; rules_context: {foundry, system, system_version, modules, settings}."
+      "description": "The kind's content. chat: {author, speaker, text, flavor, whisper, rolls}; combat: {action, combat, round, turn, combatant}; scene: {action, name}; clock: {date, world_time}; rules_context: {foundry, system, system_version, modules, settings, turn_driver}."
     }
   },
   "required": ["id", "session", "at", "scene", "actor", "kind", "visibility", "payload"],

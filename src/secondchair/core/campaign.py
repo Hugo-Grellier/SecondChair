@@ -3,7 +3,7 @@
 from typing import TypedDict
 
 from secondchair.core import PROTOCOL_VERSION, canon, knowledge, library, mystery, world
-from secondchair.core.tools import Tool
+from secondchair.core.tools import Block, Tool
 from secondchair.core.workspace import Workspace
 
 
@@ -31,3 +31,7 @@ def tools(ws: Workspace) -> list[Tool]:
         *knowledge.tools(ws),
         *world.tools(ws),
     ]
+
+
+# The protocol range this block supports (ARC-17): `serve` refuses it outside the range.
+BLOCK = Block(protocol=("0.1.0", "0.2.0"), tools=tools)

@@ -1,14 +1,16 @@
 // secondchair-foundry: the active GM's browser dials the loopback Core (ADR 0010).
-import { CEILING, createActions, missingTranslation } from "./actions.js";
+import { aboveCeiling, CEILING, createActions, missingTranslation } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
-import { createDesk, deskHtml } from "./desk.js";
+import { createDesk, deskHtml, esc } from "./desk.js";
 import { MODULE, realise } from "./scenes.js";
 import { createOutbox, createRecorder, describe, keyInput } from "./traces.js";
 
 /** @typedef {import("./actions.js").Adapter} Adapter @typedef {import("./actions.js").Doc} Doc */
 
-const SOCKET = `module.${MODULE}`;
+// Players reach the active GM's client through Foundry queries, which go to that one client only.
+const TRACES = `${MODULE}.traces`;
+const ERASE = `${MODULE}.erase`;
 
 /** The Core's socket while this GM client is connected to it, else null. */
 /** @type {WebSocket | null} */
@@ -69,6 +71,19 @@ const plain = (html) =>
     .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+/**
+ * Post a line to the chat, its id returned. The line is text: neither HTML nor Foundry's
+ * enrichers (@UUID[…], @Check[…], [[/r …]]), which would show or roll more.
+ * @param {Record<string, unknown>} data  who speaks it, or to whom it is whispered
+ * @param {string} line
+ */
+async function post(data, line) {
+  const text = esc(line).replace(/[@[]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const message = await ChatMessage.create({ ...data, content: `<p>${text}</p>` });
+  if (!message?.id) throw new Error("The line was not posted: nothing was said.");
+  return String(message.id);
+}
 
 /** The generic events captured during a live session; a system adapter adds its own (ARC-16). */
 function watch() {
@@ -345,6 +360,10 @@ Hooks.once("ready", () => {
         adapter: () => adapter,
         // Read at each request, so a change applies at once (DEL-19).
         ceiling: () => game.settings.get(MODULE, "ceiling"),
+        // In character, as the token, to the whole table.
+        say: (token, line) => post({ speaker: ChatMessage.getSpeaker({ token }) }, line),
+        // To one player only: a whisper, which capture observes as not seen by the table (CAP-08).
+        tell: (user, line) => post({ whisper: [user.id] }, line),
       });
       /** The calls due now the Desk already showed. @type {Set<number>} */
       let seen = new Set();
@@ -394,6 +413,11 @@ Hooks.once("ready", () => {
     },
     onRefused: (refusal) =>
       ui.notifications.error(`SecondChair: ${refusal.message}`, { permanent: true }),
+    // Chromium holds the socket while its local-network prompt is open (PKG-11).
+    onPending: () =>
+      ui.notifications.warn(
+        "SecondChair: still waiting for the Core. If the browser asks whether this site may access apps and services on this device, allow it; if you missed the prompt, allow the site in the browser's site permissions and reload.",
+      ),
     onUnreachable: () =>
       ui.notifications.error(
         `SecondChair: cannot reach the Core at ${url}. Is \`secondchair serve\` running on this computer? If the browser asked whether this site may access local devices, allow it and reload.`,
@@ -432,10 +456,16 @@ async function worldActor(uuid) {
 /**
  * Realise a desired scene the Core sent, and report back (docs/contracts/foundry-bridge.md).
  * Reconciliation is idempotent, so a replayed request only finds nothing to do.
- * @param {{id: string, scene: string, desired: import("./scenes.js").Desired}} request
+ * The world's ceiling bounds it at the level of whoever last wrote it (DEL-19a).
+ * @param {{id: string, scene: string, desired: import("./scenes.js").Desired, level: string | null}} request
  */
-function realiseScene({ id, scene, desired }) {
+function realiseScene({ id, scene, desired, level }) {
   const run = realising.then(async () => {
+    const refusal = aboveCeiling(game.settings.get(MODULE, "ceiling"), level);
+    if (refusal) {
+      ui.notifications.warn(`SecondChair: scene "${scene}" not realised. ${refusal}`);
+      return { type: "realised", id, ok: false, error: refusal, reason: "ceiling" };
+    }
     try {
       const report = await realise(scene, desired, world);
       const { conflict = 0 } = report.summary;
@@ -497,17 +527,20 @@ async function offerErase() {
       "<p>Recording stopped. Also erase all the behaviour traces already recorded for you?</p>",
   });
   if (!erase) return;
-  if (isActiveGM()) eraseFor(game.user.id);
-  else if (game.users.activeGM) game.socket.emit(SOCKET, { type: "erase" });
+  const gm = game.users.activeGM;
+  if (isActiveGM()) erasedNotice(eraseFor(game.user.id));
+  else if (gm)
+    gm.query(ERASE, {}).then(
+      (ok) => erasedNotice(ok === true),
+      () => erasedNotice(false),
+    );
   else erasedNotice(false);
 }
 
-/** @param {string} user */
+/** @param {string} user @returns {boolean} whether the request reached the Core */
 function eraseFor(user) {
-  const ok = core !== null;
   core?.send(JSON.stringify({ type: "erase_traces", user }));
-  if (user === game.user.id) erasedNotice(ok);
-  else game.socket.emit(SOCKET, { type: "erased", user, ok });
+  return core !== null;
 }
 
 /** @param {boolean} ok */
@@ -521,9 +554,9 @@ function erasedNotice(ok) {
 
 /** Record this user's behaviour traces once they consent; the active GM also relays the table's. */
 function traces() {
-  // Players' traces reach the Core only through the active GM's client (TRC-05). Foundry hands
-  // module socket messages to every client; the others drop them unread. Who is the active GM
-  // can change, so it is asked at each send; a GM client that never dialed counts gaps.
+  // Players' traces reach the Core only through the active GM's client (TRC-05), as a Foundry
+  // query that no other client receives. Who is the active GM can change, so it is asked at each
+  // send; a GM client that never dialed, or a query that fails, counts gaps.
   const outbox = createOutbox({
     ready: () => (isActiveGM() ? core !== null : game.users.activeGM !== null),
     send: (user, records) =>
@@ -537,19 +570,23 @@ function traces() {
               records,
             }),
           )
-        : game.socket.emit(SOCKET, { type: "traces", records }),
+        : (game.users.activeGM?.query(TRACES, { records }, { timeout: 5000 }) ?? Promise.reject()),
   });
   const rec = createRecorder({ consented, flush: (records) => outbox.push(game.user.id, records) });
   recorder = rec;
   setInterval(() => rec.flush(), 1000);
 
-  // Foundry passes the sender's user id, so a player cannot send traces as someone else.
-  game.socket.on(SOCKET, (/** @type {any} */ data, /** @type {string} */ sender) => {
-    if (isActiveGM() && data?.type === "traces" && Array.isArray(data.records))
-      outbox.push(sender, data.records);
-    else if (isActiveGM() && data?.type === "erase") eraseFor(sender);
-    else if (data?.type === "erased" && data.user === game.user.id) erasedNotice(data.ok);
-  });
+  // Foundry passes the querying user, so a player cannot send or erase traces as someone else.
+  // A client that is no longer the active GM refuses, and the player counts a gap.
+  CONFIG.queries[TRACES] = (/** @type {any} */ data, { user }) => {
+    if (!isActiveGM()) throw new Error("not the active GM");
+    if (Array.isArray(data?.records)) outbox.push(user.id, data.records);
+    return true;
+  };
+  CONFIG.queries[ERASE] = (_data, { user }) => {
+    if (!isActiveGM()) throw new Error("not the active GM");
+    return eraseFor(user.id);
+  };
 
   // The checkbox follows the user signed in here; their flag follows their own consent.
   if (game.settings.get(MODULE, "traces") !== consented())

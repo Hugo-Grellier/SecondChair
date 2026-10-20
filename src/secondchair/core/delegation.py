@@ -11,6 +11,7 @@ import inspect
 import secrets
 import threading
 from collections.abc import Callable, Generator
+from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -374,6 +375,8 @@ def act(
             blocking = record.get("blocking", False)
             if record["responsibility"] in JOB_GOVERNED:
                 governing.append(record["responsibility"])
+            if record["playbook"] == "propose-narrative-direction" and occurrence is None:
+                occurrence = record["inputs"]["occurrence"]  # its answer closes it (LW-19)
         responsibility = governing[-1]
 
         def strictest(entity: str | None = None) -> tuple[str, str]:
@@ -404,6 +407,8 @@ def act(
             raise DelegationError(_NEVER_DISCLOSES)
         level, which = strictest(entity)
         lowered = level != cell
+        if isinstance(change, VttAction) and change.hold is not None:
+            hold = change.hold if hold is None else f"{hold} {change.hold}"
         if hold is not None:
             level = min(level, "propose", key=LEVELS.index)
         if level == "manual":
@@ -416,7 +421,9 @@ def act(
             effect = {"op": change.op, "target": change.target, "before": None}
             effect["after"] = change.params
             if change.cites is not None:
-                effect["cites"] = _check_cites(ws, change.cites)
+                effect["cites"] = _check_cites(ws, change.cites, entity)
+            if change.whisper:  # held for the wrap of this session (CAP-08)
+                effect.update(whisper=True, session=current_session(ws))
         elif isinstance(change, Change):
             path = _target(ws, change.path)
             effect = {"target": change.path, "before": path.read_text() if path.exists() else None}
@@ -446,32 +453,29 @@ def act(
             entry.update(status="refused", refusal=refusal)
             logged = _append(ws, entry)["id"]
             raise DelegationError(f"Refused, it contradicts canon: {refusal} (entry {logged}).")
-        if entry["status"] == "applied":
-            try:
+        if entry["status"] == "applied" and "op" in entry:
+            taking = _append(ws, {**entry, "status": "unknown"})  # until the VTT answers
+        else:
+            if entry["status"] == "applied":
                 _apply(ws, entry, "after")
-            except DelegationError as e:
-                if "op" not in entry:
-                    raise
-                # A failed action (ARC-09): logged, counted, and reported to the agent.
-                failed = _append(ws, {**entry, "status": "failed", "error": str(e)})
-                _call_if_ceiling(ws, failed, e, table_moment, blocking)
-                raise DelegationError(f"Failed action, logged as entry {failed['id']}: {e}") from e
-        logged = _append(ws, entry)
-        if entry["status"] == "applied":
-            _disclose(ws, logged)
-        if entry["status"] == "pending":
-            calls.open_call(
-                ws,
-                kind="proposal",
-                responsibility=responsibility,
-                table_moment=table_moment,
-                blocking=blocking,
-                entry=logged["id"],
-                job=job,
-                message=hold,
-            )
-            logged = read_entry(ws, logged["id"])  # a safe default may have rejected it at once
-        return {"entry": logged["id"], "status": logged["status"]}
+            logged = _append(ws, entry)
+            if entry["status"] == "applied":
+                _disclose(ws, logged)
+            if entry["status"] == "pending":
+                calls.open_call(
+                    ws,
+                    kind="proposal",
+                    responsibility=responsibility,
+                    table_moment=table_moment,
+                    blocking=blocking,
+                    entry=logged["id"],
+                    job=job,
+                    message=hold,
+                )
+                logged = read_entry(ws, logged["id"])  # a safe default may have rejected it
+            return {"entry": logged["id"], "status": logged["status"]}
+    taken = _take(ws, taking, table_moment, blocking)
+    return {"entry": taken["id"], "status": taken["status"]}
 
 
 # GM interactions (DEL-27): each is its own log entry.
@@ -484,6 +488,17 @@ def approve(
     with the GM's quoted words, and from an authenticated Surface for an irreversible one."""
     if channel == "via agent" and not (quote and quote.strip()):
         raise DelegationError("An approval relayed by an agent must quote the GM's words.")
+
+    def approving(entry: dict) -> None:
+        interaction = _interaction(ws, "approve", entry_id, channel, authenticated, quote, None)
+        _answered(ws, entry_id)
+        entry["approval"] = {
+            "channel": channel,
+            "authenticated": authenticated,
+            "quote": quote,
+            "interaction": interaction["id"],
+        }
+
     with locked(ws):
         entry = _pending(ws, entry_id)
         if not entry["reversible"] and not authenticated:
@@ -492,30 +507,20 @@ def approve(
                 "(the CLI in an interactive terminal)."
             )
         if entry.get("cites"):  # canon may have changed since it was proposed
-            _check_cites(ws, entry["cites"])
-        try:
-            _apply(ws, entry, "after")
-        except DelegationError as e:
-            if "op" not in entry:
-                raise
-            entry.update(status="failed", error=str(e))  # a failed action, as in `act`
+            _check_cites(ws, entry["cites"], entry.get("entity"))
+        if "op" in entry:
+            entry["status"] = "unknown"  # until the VTT answers
             _save(ws, entry)
-            _answered(ws, entry_id)  # the GM answered; the action failed
-            # The GM is answering now: the refusal is held for the break.
-            _call_if_ceiling(ws, entry, e, entry["moment"], False)
-            raise DelegationError(f"Failed action, entry {entry_id}: {e}") from e
-        interaction = _interaction(ws, "approve", entry_id, channel, authenticated, quote, None)
-        _answered(ws, entry_id)
-        entry["status"] = "applied"
-        entry["approval"] = {
-            "channel": channel,
-            "authenticated": authenticated,
-            "quote": quote,
-            "interaction": interaction["id"],
-        }
-        _save(ws, entry)
-        _disclose(ws, entry)
-        return entry
+        else:
+            _apply(ws, entry, "after")
+            approving(entry)
+            entry["status"] = "applied"
+            _save(ws, entry)
+            _disclose(ws, entry)
+            _narrative_answered(ws, entry)
+            return entry
+    # The GM is answering now: a ceiling refusal is held for the break.
+    return _take(ws, entry, entry["moment"], False, approving)
 
 
 def reject(ws: Workspace, entry_id: int, reason: str, channel: str, authenticated: bool) -> dict:
@@ -544,7 +549,15 @@ def undo(ws: Workspace, entry_id: int, reason: str, channel: str, authenticated:
         _interaction(ws, "undo", entry_id, channel, authenticated, None, reason)
         entry["status"] = "undone"
         _save(ws, entry)
+        _narrative_answered(ws, entry)
         return entry
+
+
+def _narrative_answered(ws: Workspace, entry: dict) -> None:
+    from secondchair.core import world  # it builds on this module
+
+    if entry.get("occurrence") is not None:
+        world.proposal_answered(ws, entry)
 
 
 def confirm(
@@ -763,13 +776,84 @@ def _withdraw(ws: Workspace, override: dict, interaction: int) -> None:
             calls._default(ws, call, interaction)
 
 
+def _take(
+    ws: Workspace,
+    entry: dict,
+    table_moment: str,
+    blocking: bool,
+    approving: Callable[[dict], None] | None = None,
+) -> dict:
+    """Have the VTT take an action logged `unknown`, outside the lock: the GM client may take a
+    while to answer, and every other action, approval and gesture would wait behind it. Its
+    outcome is recorded under the lock, with the GM's approval (`approving`) once the VTT took
+    it or may have. One the VTT did not answer in time stays unknown until it does."""
+    try:
+        before, after = vtt.perform(
+            entry["op"], entry["target"], entry["after"], entry["before"], entry["effective_level"]
+        )
+    except vtt.Unanswered as e:
+        with locked(ws):
+            if approving is not None:
+                approving(entry)
+            entry["error"] = str(e)
+            _save(ws, entry)
+        e.later.add_done_callback(functools.partial(_settle_later, ws, entry["id"]))
+        raise DelegationError(
+            f"Unknown outcome, logged as entry {entry['id']}: {e} The action may have been "
+            "taken: its entry stays unknown until the VTT answers."
+        ) from e
+    except vtt.VttError as e:
+        # A failed action (ARC-09): logged, counted, and reported to the agent.
+        with locked(ws):
+            entry.update(status="failed", error=str(e))
+            _save(ws, entry)
+            if approving is not None:
+                _answered(ws, entry["id"])  # the GM answered; the action failed
+            _call_if_ceiling(ws, entry, e, table_moment, blocking)
+        raise DelegationError(f"Failed action, logged as entry {entry['id']}: {e}") from e
+    with locked(ws):
+        if approving is not None:
+            approving(entry)
+        entry.update(status="applied", before=before, after=after)  # as the VTT reports them
+        _save(ws, entry)
+        _disclose(ws, entry)
+        if approving is not None:
+            _narrative_answered(ws, entry)
+    return entry
+
+
+def _settle_later(ws: Workspace, entry_id: int, later: Future[tuple[dict, dict]]) -> None:
+    """Settle an unknown action once the VTT answers, in a thread of its own: the answer comes
+    on the connector's event loop, which the lock's holder may be waiting on."""
+    if not later.cancelled():  # cancelled: the VTT left unanswered, and the action stays unknown
+        threading.Thread(target=_settle, args=(ws, entry_id, later), daemon=True).start()
+
+
+def _settle(ws: Workspace, entry_id: int, later: Future[tuple[dict, dict]]) -> None:
+    with locked(ws):
+        entry = _entry(ws, entry_id, "action")
+        if entry["status"] != "unknown":
+            return
+        try:
+            entry["before"], entry["after"] = later.result()
+        except vtt.VttError as e:
+            # ponytail: a late ceiling refusal opens no call; the ceiling answers at once.
+            entry.update(status="failed", error=str(e))
+            _save(ws, entry)
+            return
+        entry.pop("error", None)
+        entry["status"] = "applied"
+        _save(ws, entry)
+        _disclose(ws, entry)
+
+
 def _call_if_ceiling(
-    ws: Workspace, entry: dict, error: DelegationError, table_moment: str, blocking: bool
+    ws: Workspace, entry: dict, error: vtt.VttError, table_moment: str, blocking: bool
 ) -> None:
     """A ceiling refusal is a failed action and a call on the GM (DEL-20). Callers hold the lock."""
     from secondchair.core import calls
 
-    if isinstance(error.__cause__, vtt.CeilingRefusal):
+    if isinstance(error, vtt.CeilingRefusal):
         calls.open_call(
             ws,
             kind="ceiling_refusal",
@@ -785,9 +869,11 @@ def _call_if_ceiling(
 # Disclosures (CAN-16, CAN-17): what the players get to see marks its facts known by the party.
 
 
-def _check_cites(ws: Workspace, cites: list[str]) -> list[str]:
-    """A disclosure's cited facts: each in canon, true, and free of canaries; and a current
-    date to learn them on. Callers hold the lock."""
+def _check_cites(ws: Workspace, cites: list[str], entity: str | None = None) -> list[str]:
+    """A disclosure's cited facts: each in canon, true, free of canaries and, when an NPC
+    discloses (`entity`, the acting entity), known by it; and a current date to learn them on.
+    No other knower bounds a disclosure: the GM's approval, or a lifted hold, is the gate
+    (CAN-16). Callers hold the lock."""
     from secondchair.core import capture, index, knowledge
 
     if not isinstance(cites, list) or not all(isinstance(c, str) for c in cites):
@@ -802,6 +888,9 @@ def _check_cites(ws: Workspace, cites: list[str]) -> list[str]:
         c for c in cites if c in facts and knowledge.CANARY.search(facts[c]["statement"])
     ]:
         reasons.append(f"facts carrying a canary {canaries}")
+    held = knowledge.known(ws, entity) if entity is not None else facts
+    if unheld := [c for c in cites if c in facts and c not in held]:
+        reasons.append(f"{entity} does not know {unheld}")
     if capture.time(ws)["current_date"] is None:
         reasons.append("no current campaign date to learn them on (time.yaml)")
     if reasons:
@@ -812,48 +901,109 @@ def _check_cites(ws: Workspace, cites: list[str]) -> list[str]:
 def _disclose(ws: Workspace, disclosure: dict) -> None:
     """Mark the facts an applied disclosure cites as known by the party, on the current date and
     in the current session (null outside one): one irreversible action entry per knowledge
-    record, approved as the disclosure was (CAN-17). Callers hold the lock."""
-    from secondchair.core import capture, index
-
-    if not disclosure.get("cites"):
+    record, approved as the disclosure was (CAN-17). A whisper marks none (CAP-08:
+    `hold_whispers`). Callers hold the lock."""
+    if not disclosure.get("cites") or disclosure.get("whisper"):
         return
-    known = {k["fact"] for k in index.search_knowledge(ws, [index.PARTY]) if k["mode"] == "knows"}
-    locator = f"{LOG_DIR}/{disclosure['id']:06d}.yaml"
-    date, session = capture.time(ws)["current_date"], current_session(ws)
-    for fact in dict.fromkeys(disclosure["cites"]):
-        if fact in known:
-            continue
-        record = {
-            "id": f"k-{secrets.token_hex(4)}",
-            "knower": index.PARTY,
-            "fact": fact,
-            "mode": "knows",
-            "date": date,
-            "event": None,
-            "rank": "played",  # shown at the table, quoted by the disclosure's entry
-            "origin": {
-                "kind": "observation",
-                "quote": f"{disclosure['tool']} {disclosure['target']}",
-                "locator": locator,
-            },
-            "session": session,
-        }
-        mark = {
-            **{k: disclosure[k] for k in ("kind", "moment", "moment_seq", "tool")},
-            **{k: disclosure[k] for k in ("responsibility", "effective_level", "agent", "job")},
-            "override_lowered": False,
-            "entity": None,
-            "reversible": False,
-            "source": f"disclosure {locator}",
-            "runner_configuration": disclosure["runner_configuration"],
-            "target": f"{index.KNOWLEDGE_DIR}/{record['id']}.md",
-            "before": None,
-            "after": index.join_doc(record, ""),
-            "status": "applied",
-            "approval": disclosure["approval"],
-        }
+    known = _known_to_party(ws)
+    for fact in (f for f in dict.fromkeys(disclosure["cites"]) if f not in known):
+        mark = _party_learns(ws, disclosure, fact, current_session(ws))
         _apply(ws, mark, "after")
         _append(ws, mark)
+
+
+def hold_whispers(ws: Workspace, session: int) -> set[int]:
+    """At the wrap, each fact an applied whisper of `session` (or of no session) cited that the
+    party does not know yet becomes a call on the GM: its party knowledge record held at
+    propose, which the GM approves if the player shared it (CAP-08). A fact is held once,
+    however many whispers cited it, and never once it is no longer true. Returns the entries of
+    every such record. Callers hold the lock."""
+    from secondchair.core import calls, index
+
+    entries, _ = read_log(ws)
+    whispers = {
+        f"whisper {LOG_DIR}/{e['id']:06d}.yaml": e
+        for e in entries
+        if e.get("whisper") and e.get("session") in (session, None) and e["status"] == "applied"
+    }
+    held = [e for e in entries if e.get("source") in whispers]
+    marks = {e["id"] for e in held}
+    asked = _known_to_party(ws) | {index.split_doc(e["after"])[0]["fact"] for e in held}
+    moment, seq = current_moment(ws)
+    for source, whisper in whispers.items():
+        for fact in dict.fromkeys(whisper.get("cites") or []):
+            try:
+                _check_cites(ws, [fact])  # canon may have changed since it was whispered
+            except DelegationError:
+                continue
+            if fact in asked:
+                continue
+            asked.add(fact)
+            mark = _party_learns(ws, whisper, fact, whisper["session"])
+            mark.update(
+                moment=moment,
+                moment_seq=seq,
+                effective_level="propose",
+                source=source,
+                status="pending",
+                approval=None,
+            )
+            logged = _append(ws, mark)
+            marks.add(logged["id"])
+            calls.open_call(
+                ws,
+                kind="proposal",
+                responsibility=whisper["responsibility"],
+                table_moment=moment,
+                blocking=False,
+                entry=logged["id"],
+                message=f"Whispered to {whisper['target']}, not shown to the table (CAP-08): "
+                f"approve if the party knows {fact} now.",
+            )
+    return marks
+
+
+def _known_to_party(ws: Workspace) -> set[str]:
+    from secondchair.core import index
+
+    return {k["fact"] for k in index.search_knowledge(ws, [index.PARTY]) if k["mode"] == "knows"}
+
+
+def _party_learns(ws: Workspace, disclosure: dict, fact: str, session: int | None) -> dict:
+    """The irreversible action entry writing the party's knowledge of `fact`, learned from
+    `disclosure` on the current date, logged as the disclosure was."""
+    from secondchair.core import capture, index
+
+    locator = f"{LOG_DIR}/{disclosure['id']:06d}.yaml"
+    record = {
+        "id": f"k-{secrets.token_hex(4)}",
+        "knower": index.PARTY,
+        "fact": fact,
+        "mode": "knows",
+        "date": capture.time(ws)["current_date"],
+        "event": None,
+        "rank": "played",  # said or shown in play, quoted by the disclosure's entry
+        "origin": {
+            "kind": "observation",
+            "quote": f"{disclosure['tool']} {disclosure['target']}",
+            "locator": locator,
+        },
+        "session": session,
+    }
+    return {
+        **{k: disclosure[k] for k in ("kind", "moment", "moment_seq", "tool")},
+        **{k: disclosure[k] for k in ("responsibility", "effective_level", "agent", "job")},
+        "override_lowered": False,
+        "entity": None,
+        "reversible": False,
+        "source": f"disclosure {locator}",
+        "runner_configuration": disclosure["runner_configuration"],
+        "target": f"{index.KNOWLEDGE_DIR}/{record['id']}.md",
+        "before": None,
+        "after": index.join_doc(record, ""),
+        "status": "applied",
+        "approval": disclosure["approval"],
+    }
 
 
 # Hand edits (CAN-11): a canon file changed outside the Core.
@@ -881,6 +1031,12 @@ def core_states(entries: list[dict]) -> dict[str, str | None]:
     """Each target's content as the Core last left it, replaying writes in the order they hit
     the workspace: an action when applied (at its approval, if any), an undo, a confirmation,
     a hand edit."""
+    return {target: content for target, (_, content) in last_writes(entries).items()}
+
+
+def last_writes(entries: list[dict]) -> dict[str, tuple[dict, str | None]]:
+    """Each target's last write the log knows, as `core_states`: the entry that made it (the
+    action, the undo or confirmation interaction, the hand edit) and the content it left."""
     by_id = {e["id"]: e for e in entries}
     writes = []
     for e in entries:
@@ -888,14 +1044,14 @@ def core_states(entries: list[dict]) -> dict[str, str | None]:
             continue  # a VTT action writes no workspace file
         if e.get("kind") == "action" and e.get("status") in ("applied", "undone"):
             when = e["approval"]["interaction"] if e.get("approval") else e["id"]
-            writes.append((when, e.get("target"), e.get("after")))
+            writes.append((when, e.get("target"), e, e.get("after")))
         elif e.get("kind") == "hand_edit" or e.get("interaction") == "confirm":
-            writes.append((e["id"], e.get("target"), e.get("after")))
+            writes.append((e["id"], e.get("target"), e, e.get("after")))
         elif e.get("interaction") == "undo" and "op" not in by_id.get(e.get("entry"), {"op": 0}):
             undone = by_id[e["entry"]]
-            writes.append((e["id"], undone.get("target"), undone.get("before")))
+            writes.append((e["id"], undone.get("target"), e, undone.get("before")))
     writes.sort(key=lambda w: w[0])
-    return {target: content for _, target, content in writes if isinstance(target, str)}
+    return {target: (e, content) for _, target, e, content in writes if isinstance(target, str)}
 
 
 def log_hand_edits(ws: Workspace) -> list[dict]:

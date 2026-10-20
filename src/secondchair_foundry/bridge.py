@@ -10,6 +10,7 @@ import hmac
 import json
 import sys
 import uuid
+from concurrent.futures import Future
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from secondchair.core import (
 )
 from secondchair.core.index import CanonError
 from secondchair.core.machine import foundry_token
-from secondchair.core.vtt import CeilingRefusal, VttError
+from secondchair.core.vtt import CeilingRefusal, Unanswered, VttError
 from secondchair.core.workspace import Workspace, WorkspaceError
 from secondchair_foundry import desk
 from secondchair_foundry.tools import REPORTS_DIR, SCENES_DIR, digest
@@ -46,6 +47,12 @@ NO_GM = (
 )
 RULES_CONTEXT = "rules_context"  # recorded at the start of each moment and when it changes
 CLOCK_TARGET = "time"  # what `set_date` acts on: the world clock, not a document
+
+
+def _driver_of(context: object) -> str | None:
+    """The turn driver a rules context names (RUL-11), if any."""
+    found = context.get("turn_driver") if isinstance(context, dict) else None
+    return found if isinstance(found, str) else None
 
 
 class Refused(Exception):
@@ -77,6 +84,8 @@ class Bridge:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.waiting: dict[str, asyncio.Future[dict]] = {}  # replies awaited, by request id
         self.rules_context: tuple[int, object] | None = None  # (moment seq, last one recorded)
+        self.turn_driver: str | None = None  # the connected client's, from its rules context
+        self.ceiling_changes = 0  # ceiling observations received, to realise refused scenes again
 
     @property
     def binding_path(self) -> Path:
@@ -188,6 +197,9 @@ class Bridge:
                     continue  # not a message the Core waits for
                 if kind == "observation":
                     await self._observe(socket, message.get("envelope"))
+                    envelope = message.get("envelope")
+                    if isinstance(envelope, dict) and envelope.get("kind") == "ceiling":
+                        self.ceiling_changes += 1  # scenes it refused are sent again
                 elif kind in ("traces", "erase_traces"):
                     await self._trace(campaign, message)
                 elif kind == "gesture":  # in a task: an approval may wait on a VTT reply
@@ -201,6 +213,7 @@ class Bridge:
             if watch is not None:
                 watch.cancel()
             self.gm = None
+            self.turn_driver = None  # the next client's rules context says again
             if realising is not None:
                 realising.cancel()
             for waiting in self.waiting.values():
@@ -229,6 +242,7 @@ class Bridge:
                         delegation.current_moment(self.ws),
                         desk.due_now(self.ws),
                         knowledge.active_cue(self.ws),
+                        self.turn_driver,
                         len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
                     )
                 )
@@ -245,7 +259,7 @@ class Bridge:
             await asyncio.sleep(POLL)
 
     async def _send_desk(self, socket: WebSocket) -> None:
-        await socket.send_json(await asyncio.to_thread(desk.state, self.ws))
+        await socket.send_json(await asyncio.to_thread(desk.state, self.ws, self.turn_driver))
 
     async def _gesture(self, socket: WebSocket, message: dict) -> None:
         """Take a GM gesture from the Director's Desk, answer it, then refresh the Desk. In a
@@ -269,6 +283,7 @@ class Bridge:
         except TimeoutError, VttError:
             return
         if reply.get("ok") is True and isinstance(reply.get("result"), dict):
+            self.turn_driver = _driver_of(reply["result"])
             await asyncio.to_thread(self._record, RULES_CONTEXT, reply["result"])
 
     def _record(self, kind: str, payload: dict) -> None:
@@ -324,6 +339,7 @@ class Bridge:
             # A rules setting changed in Foundry: what the next moment's context is compared to.
             seq = delegation.current_moment(self.ws)[1]
             self.rules_context = (seq, envelope.get("payload"))
+            self.turn_driver = _driver_of(envelope.get("payload"))
         try:
             problem = await asyncio.to_thread(observations.record, self.ws, envelope)
         except OSError as e:
@@ -369,23 +385,25 @@ class Bridge:
         try:
             reply = future.result(REPLY_TIMEOUT)
         except TimeoutError:
-            future.cancel()
-            raise VttError(
+            # Still awaited: a late reply resolves `later`, and the Core settles the action.
+            later: Future[tuple[dict, dict]] = Future()
+
+            def answered(f: Future[dict]) -> None:
+                if f.cancelled() or f.exception() is not None:  # the GM client left unanswered
+                    later.cancel()
+                    return
+                try:
+                    later.set_result(_outcome(f.result()))
+                except VttError as e:
+                    later.set_exception(e)
+
+            future.add_done_callback(answered)
+            raise Unanswered(
                 f"The GM client did not answer within {REPLY_TIMEOUT} s: check the VTT, the "
-                "action may have been taken."
+                "action may have been taken.",
+                later,
             ) from None
-        before, after = reply.get("before"), reply.get("after")
-        if (
-            reply.get("ok") is not True
-            or not isinstance(before, dict)
-            or not isinstance(after, dict)
-        ):
-            if reply.get("reason") == "ceiling":
-                raise CeilingRefusal(str(reply.get("error")))
-            raise VttError(
-                str(reply.get("error") or f"The GM client sent a malformed reply: {reply}")
-            )
-        return before, after
+        return _outcome(reply)
 
     def read(self, op: str, params: dict) -> object:
         """Ask the GM client what only the VTT knows (the Core's `vtt.read`), such as an
@@ -412,6 +430,7 @@ class Bridge:
         state waits: every connection starts by realising them all, which changes nothing in a
         scene already realised. One scene at a time."""
         sent: dict[str, str] = {}  # scene key -> digest of the desired state sent
+        refused: dict[str, int] = {}  # scene key -> ceiling changes seen when it was refused
         reports = self.ws.root / REPORTS_DIR
         # ponytail: polls the scenes directory; a file watcher if many scenes make it costly.
         while True:
@@ -420,16 +439,22 @@ class Bridge:
                     text = path.read_text()
                 except FileNotFoundError:
                     continue  # removed meanwhile (an undone first preparation)
+                if refused.get(path.stem, self.ceiling_changes) != self.ceiling_changes:
+                    del refused[path.stem], sent[path.stem]  # the GM changed the ceiling since
                 if sent.get(path.stem) == digest(text):
                     continue
                 sent[path.stem] = digest(text)
+                refused.pop(path.stem, None)
                 try:
                     desired = yaml.safe_load(text)
+                    level = await asyncio.to_thread(scene_level, self.ws, path, text)
                     request = {"type": "realise", "id": uuid.uuid4().hex, "scene": path.stem}
-                    reply = await asyncio.wait_for(
-                        self._request(socket, {**request, "desired": desired}), REALISE_TIMEOUT
-                    )
-                    record = {k: reply[k] for k in ("ok", "report", "error") if k in reply}
+                    request = {**request, "desired": desired, "level": level}
+                    reply = await asyncio.wait_for(self._request(socket, request), REALISE_TIMEOUT)
+                    keep = ("ok", "report", "error", "reason")
+                    record = {k: reply[k] for k in keep if k in reply}
+                    if reply.get("reason") == "ceiling":
+                        refused[path.stem] = self.ceiling_changes
                 except yaml.YAMLError as e:
                     record = {"ok": False, "error": f"{path.name} is not valid YAML: {e}"}
                 except TimeoutError:
@@ -453,6 +478,26 @@ class Bridge:
             return await waiting
         finally:
             del self.waiting[request["id"]]
+
+
+def _outcome(reply: dict) -> tuple[dict, dict]:
+    """The `before` and `after` of the GM client's reply to an action, or its refusal."""
+    before, after = reply.get("before"), reply.get("after")
+    if reply.get("ok") is not True or not isinstance(before, dict) or not isinstance(after, dict):
+        if reply.get("reason") == "ceiling":
+            raise CeilingRefusal(str(reply.get("error")))
+        raise VttError(str(reply.get("error") or f"The GM client sent a malformed reply: {reply}"))
+    return before, after
+
+
+def scene_level(ws: Workspace, path: Path, text: str) -> str | None:
+    """The level a desired scene is realised at (DEL-19a): the effective level of the
+    `prepare_scene` entry that last wrote it, or None when the GM did, by hand or by an undo."""
+    entries, _ = delegation.read_log(ws)
+    target = path.relative_to(ws.root).as_posix()
+    writer, content = delegation.last_writes(entries).get(target, ({}, None))
+    is_prep = writer.get("kind") == "action" and content == text
+    return writer.get("effective_level") if is_prep else None
 
 
 async def _close_quietly(socket: WebSocket) -> None:

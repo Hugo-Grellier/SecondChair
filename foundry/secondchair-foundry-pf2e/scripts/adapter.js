@@ -51,6 +51,15 @@ export const RULES_SETTINGS = [
   "automation.encumbrance",
 ].map((key) => `pf2e.${key}`);
 
+/** Known turn drivers, by module id (RUL-11): a closed list, so a new one is invisible until added. */
+export const TURN_DRIVERS = ["pf2e-combater"];
+
+/**
+ * The active turn driver's module id, or null (RUL-11).
+ * @param {Record<string, string>} modules  active module id -> version
+ */
+export const turnDriver = (modules) => TURN_DRIVERS.find((id) => id in modules) ?? null;
+
 /**
  * What `set_actor` may set on an actor: the fields a discrepancy's fix touches (RUL-17).
  * ponytail: HP and focus; conditions and spell slots are items, fixed by the GM by hand.
@@ -68,9 +77,11 @@ const field = (doc, path) => path.split(".").reduce((/** @type {any} */ o, k) =>
 const YEAR_OFFSET = 2700;
 
 /**
- * The last date the PF2e clock and Absalom Reckoning agree on: Gregorian 2100 drops the 29th of
- * Calistril 4800 that Paizo's rule keeps, so the clock drifts after it (CAL-13, ADR 0014).
+ * The dates the PF2e clock and Absalom Reckoning agree on: Gregorian 1900 and 2100 lack the 29th
+ * of Calistril 4600 and 4800 that Paizo's rule keeps, so the clock is a day apart outside them
+ * (CAL-13, ADR 0014).
  */
+const FIRST_DATE = { year: 4600, month: 3, day: 1 };
 const LAST_DATE = { year: 4800, month: 2, day: 28 };
 
 /**
@@ -157,7 +168,8 @@ export function createAdapter(env) {
       },
       /**
        * Push a campaign date into the world clock, keeping its time of day (CAL-11): a whole
-       * number of days, so the hour stays. Refused after 28 Calistril 4800 AR (CAL-13).
+       * number of days, so the hour stays. Refused before 1 Pharast 4600 or after 28 Calistril 4800
+       * AR (CAL-13).
        */
       async set_date(_target, params, expect) {
         if (params.calendar !== "absalom") {
@@ -167,9 +179,9 @@ export function createAdapter(env) {
         }
         const date = parseDate(params.date);
         if (!date) throw new Error(`${String(params.date)} is not a full date, YYYY-MM-DD.`);
-        if (after(date, LAST_DATE) > 0) {
+        if (after(date, FIRST_DATE) < 0 || after(date, LAST_DATE) > 0) {
           throw new Error(
-            `${String(params.date)} is after 28 Calistril 4800 AR, where the PF2e world clock ` +
+            `${String(params.date)} is outside 1 Pharast 4600 to 28 Calistril 4800 AR, where the PF2e world clock ` +
               "drifts from Absalom Reckoning: it was not set. Set the world clock by hand.",
           );
         }
@@ -179,7 +191,6 @@ export function createAdapter(env) {
         }
         const target = dayNumber({ ...date, year: date.year - YEAR_OFFSET });
         if (target === null) {
-          // ponytail: such as 29 Calistril 4600, a leap day the Gregorian clock lacks (#80).
           throw new Error(
             `${String(params.date)} does not exist on the PF2e world clock: it was not set. Set ` +
               "the world clock by hand.",
@@ -190,9 +201,15 @@ export function createAdapter(env) {
       },
     },
     reads: {
-      /** The rules context (RUL-22). */
+      /** The rules context (RUL-22), with the active turn driver (RUL-11). */
       async rules_context() {
-        return { ...env.versions(), modules: env.modules(), settings: env.settings() };
+        const modules = env.modules();
+        return {
+          ...env.versions(),
+          modules,
+          settings: env.settings(),
+          turn_driver: turnDriver(modules),
+        };
       },
       /**
        * An official entry's name in the GM's install (CAN-20), by its stable English key (the

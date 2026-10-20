@@ -85,7 +85,7 @@ A point where held calls are shown to the GM: a pause the GM signals, or the end
 _Avoid_: pause (as the term), checkpoint
 
 **Safe default**:
-What happens to a call left unanswered at its deadline: a proposal is rejected, an exception takes no action; it is logged and shown again at the break. An irreversible action never takes effect by default.
+What happens to a call left unanswered at its deadline: a proposal is rejected, an exception takes no action; it is logged and shown again at the break. A call due at the break is shown at every break until answered and is defaulted only at the end of the moment. An irreversible action never takes effect by default.
 _Avoid_: fallback, timeout behaviour
 
 ## Building blocks
@@ -193,7 +193,7 @@ What is true in the campaign's fiction, held by the Core. Ranked by authority: p
 _Avoid_: lore, truth (as the store's name)
 
 **Entity**:
-Something the fiction talks about (an NPC, a place, a faction, an item, a PC), with a stable identity, its names and a description. It holds no truth by itself: what is true about it is stated by facts.
+Something the fiction talks about (an NPC, a place, a faction, an item, a PC), with a stable identity, its names, an optional kind (pc, npc, faction, place, item or other) and a description. It holds no truth by itself: what is true about it is stated by facts.
 _Avoid_: sheet, page, record
 
 **Fact**:

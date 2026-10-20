@@ -37,16 +37,22 @@ def decisions(ws: Workspace) -> list[dict]:
     ]
 
 
-def state(ws: Workspace) -> dict:
-    """What the Desk shows, sent by the Core whenever it changes."""
+def state(ws: Workspace, turn_driver: str | None = None) -> dict:
+    """What the Desk shows, sent by the Core whenever it changes. While a turn driver is active
+    (the last rules context names one), agents stay silent: the cue shows no agent's line
+    (RUL-12, ADR 0013)."""
     moment, _seq = delegation.current_moment(ws)
+    shown = cue(ws)
+    if shown and turn_driver:
+        shown["line"] = None
     return {
         "type": "desk",
         "moment": moment,
         "session": delegation.current_session(ws),
         "calls": due_now(ws),
         "decisions": decisions(ws),
-        "cue": cue(ws),
+        "cue": shown,
+        "turn_driver": turn_driver,
     }
 
 

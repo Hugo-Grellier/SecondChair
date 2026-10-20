@@ -1,7 +1,7 @@
 ---
 name: calibrate-encounters
 description: Prepare a Pathfinder Second Edition adventure's encounters for the party through SecondChair, each one calibrated with the PF2e calculators (threat, XP, treasure) and written as a prepared scene. Use when running a SecondChair job whose playbook is calibrate-encounters.
-license: AGPL-3.0-only
+license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve) with the PF2e System extension and a VTT connector offering prepare_scene, and read access to the adventure input.
 metadata:
   secondchair-responsibility: prep

@@ -12,5 +12,5 @@ Without behaviour traces, GM effort sees only interactions with SecondChair, so 
 ## Consequences
 
 - Player traces reach the Core through the GM's client (ADR 0010). With no GM client open they are lost, and the gap is noted in the report. There is no buffer in v4.
-- The scripted GM produces no traces, so traces count only in real play and in S4 shadow mode, where the recorded session supplies the baseline GM effort. The existing Craig sessions have none, so S4 needs a new session recorded with the module.
+- The scripted GM produces no traces, so traces count only in real play and in S4 shadow mode, where the recorded session supplies the baseline GM effort. The existing Craig sessions have none; S4 replays them anyway (GM decision, 2026-10-20, #67), so its GM effort and gold set see only the GM acts in the chat log and the transcript.
 - Raw traces never expire automatically in v4. They are deleted by the GM, or by the player for their own.

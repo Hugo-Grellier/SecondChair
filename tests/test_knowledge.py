@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 import yaml
-from test_canon import JOB, act, call, entity, fact, refused
+from test_canon import JOB, act, call, entity, fact, read, refused
 
 from secondchair.cli import main
 from secondchair.core import index, workspace
@@ -135,6 +135,14 @@ def test_knowledge_needs_a_knower_a_fact_and_when_it_was_learned(ws: Workspace) 
     assert "already" in refused(
         ws, "record_knowledge", knower=mira, fact=gate, origin=JOB, date="4725"
     )
+
+
+def test_an_individual_pc_is_never_a_knower(ws: Workspace) -> None:
+    act(ws, "create_entity", names=["Ada Fen"], kind="pc")
+    [ada] = [e["id"] for e in read(ws, "search_entities", text="Ada Fen")]
+    gate = fact(ws, "The gate is shut.")
+    assert "PC" in refused(ws, "record_knowledge", knower=ada, fact=gate, origin=JOB, date="4725")
+    learn(ws, "party", gate)
 
 
 def test_hand_written_knowledge_is_checked_against_canon(ws: Workspace) -> None:

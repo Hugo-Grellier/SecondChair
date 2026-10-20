@@ -1,7 +1,7 @@
 ---
 name: diagnose-frictions
 description: Read a moment's friction report and propose delegation table changes to the GM, without making any. Use when the GM asks for a friction diagnosis, or when running a SecondChair job whose playbook is diagnose-frictions.
-license: AGPL-3.0-only
+license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve) and read access to the campaign workspace's friction reports.
 metadata:
   secondchair-responsibility: prep
