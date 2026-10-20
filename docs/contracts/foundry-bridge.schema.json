@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/blob/main/docs/contracts/foundry-bridge.schema.json",
   "title": "Foundry bridge message",
-  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies.",
+  "description": "One message on the Core's /foundry WebSocket (docs/contracts/foundry-bridge.md): the handshake, then requests and replies, the live session and observations.",
   "oneOf": [
     {
       "title": "hello",
@@ -193,6 +193,96 @@
             "error": {
               "type": "string",
               "description": "Why the action failed, for the GM, in English."
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ok",
+            "error"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    {
+      "title": "session",
+      "description": "Core to module, right after welcome and whenever the live session opens or ends: capture observations tagged with `session` while it is not null.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "session"
+        },
+        "session": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      },
+      "required": [
+        "type",
+        "session"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "observation",
+      "description": "Module to Core: one captured event, sent at capture and resent until acknowledged.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "observation"
+        },
+        "envelope": {
+          "$ref": "event-envelope.schema.json"
+        }
+      },
+      "required": [
+        "type",
+        "envelope"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "ack",
+      "description": "Core to module: the observation `id` is recorded (ok, also when it already was) or refused for good (error); either way the module drops it.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ack"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ok": {
+              "const": true
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "ok"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ack"
+            },
+            "id": {
+              "type": "string"
+            },
+            "ok": {
+              "const": false
+            },
+            "error": {
+              "type": "string"
             }
           },
           "required": [

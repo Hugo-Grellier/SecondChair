@@ -173,6 +173,8 @@ def answer(socket: ClientConnection, docs: dict[str, dict]) -> None:
     for raw in socket:
         request = json.loads(raw)
         jsonschema.validate(request, SCHEMA)
+        if request["type"] != "request":
+            continue  # the live session
         doc = docs[request["target"]]
         before = dict(doc)
         if request["expect"] and request["expect"] != before:

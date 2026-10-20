@@ -247,7 +247,10 @@ def test_create_entity_asks_the_agent_for_its_name(ws: Workspace) -> None:
     assert tools["approve_proposal"].meta == {"secondchair/gm_interaction": True}
 
 
-@pytest.mark.parametrize("target", ["delegation.yaml", "moment.yaml", "action-log/000009.yaml"])
+@pytest.mark.parametrize(
+    "target",
+    ["delegation.yaml", "moment.yaml", "action-log/000009.yaml", "observations/000001.jsonl"],
+)
 def test_a_delegated_action_cannot_write_the_core_files(ws: Workspace, target: str) -> None:
     with pytest.raises(delegation.DelegationError, match="belongs to the Core"):
         delegation._target(ws, target)

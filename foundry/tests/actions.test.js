@@ -1,14 +1,9 @@
 // The module's side of a VTT action (docs/contracts/foundry-bridge.md, "Actions").
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { Ajv2020 } from "ajv/dist/2020.js";
 import { createActions } from "../secondchair-foundry/scripts/actions.js";
 
-const schema = JSON.parse(
-  readFileSync(new URL("../../docs/contracts/foundry-bridge.schema.json", import.meta.url), "utf8"),
-);
-const valid = new Ajv2020().compile(schema);
+import { validMessage as valid } from "./schema.js";
 
 /** @typedef {import("../secondchair-foundry/scripts/actions.js").Request} Request */
 

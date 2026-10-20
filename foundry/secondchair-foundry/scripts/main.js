@@ -1,6 +1,7 @@
 // secondchair-foundry: the active GM's browser dials the loopback Core (ADR 0010).
 import { createActions } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
+import { createCapture, visibilityOf } from "./capture.js";
 
 /** @typedef {import("./actions.js").Adapter} Adapter @typedef {import("./actions.js").Doc} Doc */
 
@@ -9,6 +10,93 @@ const MODULE = "secondchair-foundry";
 /** The system adapter, once one registered (ARC-08); without it mechanical actions fail (ARC-09). */
 /** @type {Adapter | null} */
 let adapter = null;
+
+/** Observations held in this browser until the Core acknowledges them, per world (CAP-03). */
+const capture = createCapture({
+  store: {
+    load: () => {
+      try {
+        return JSON.parse(localStorage.getItem(`${MODULE}.observations.${game.world.id}`) ?? "[]");
+      } catch {
+        return [];
+      }
+    },
+    save: (list) =>
+      localStorage.setItem(`${MODULE}.observations.${game.world.id}`, JSON.stringify(list)),
+  },
+});
+
+/** @param {string | null | undefined} id */
+const sceneUuid = (id) => (id ? game.scenes.get(id) : game.scenes.active)?.uuid ?? null;
+/** @param {string | null | undefined} id */
+const actorUuid = (id) => (id ? (game.actors.get(id)?.uuid ?? null) : null);
+/** @param {string} html */
+const plain = (html) =>
+  html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** The generic events captured during a live session; a system adapter adds its own (ARC-16). */
+function watch() {
+  Hooks.on("createChatMessage", (/** @type {ChatMessageLike} */ msg) => {
+    const whisper = msg.whisper.map((id) => game.users.get(id)).filter((u) => u !== undefined);
+    capture.observe({
+      scene: sceneUuid(msg.speaker?.scene),
+      actor: actorUuid(msg.speaker?.actor),
+      kind: "chat",
+      visibility: visibilityOf({ blind: msg.blind, whisper }),
+      payload: {
+        author: msg.author?.name ?? null,
+        speaker: msg.speaker?.alias ?? null,
+        text: plain(msg.content ?? ""),
+        flavor: plain(msg.flavor ?? ""),
+        whisper: whisper.map((u) => u.name),
+        rolls: (msg.rolls ?? []).map((r) => ({ formula: r.formula, total: r.total })),
+      },
+    });
+  });
+  // combatRound and combatTurn fire before the change, which their second argument holds.
+  /** @param {string} action @returns {(combat: CombatLike, to?: {round?: number, turn?: number}) => void} */
+  const combat = (action) => (c, to) => {
+    const round = to?.round ?? c.round;
+    const turn = to?.turn ?? c.turn;
+    const combatant = action === "end" ? null : (c.turns[turn ?? -1] ?? c.combatant);
+    capture.observe({
+      scene: sceneUuid(c.scene?.id),
+      actor: combatant?.actor?.uuid ?? null,
+      kind: "combat",
+      visibility: combatant?.hidden ? "gm" : "players",
+      payload: {
+        action,
+        combat: c.id,
+        round,
+        turn,
+        combatant: combatant?.name ?? null,
+      },
+    });
+  };
+  Hooks.on("combatStart", combat("start"));
+  Hooks.on("combatRound", combat("round"));
+  Hooks.on("combatTurn", combat("turn"));
+  Hooks.on("deleteCombat", combat("end"));
+  Hooks.on(
+    "updateScene",
+    (
+      /** @type {{uuid: string, name: string}} */ scene,
+      /** @type {{active?: boolean}} */ changes,
+    ) => {
+      if (changes.active)
+        capture.observe({
+          scene: scene.uuid,
+          actor: null,
+          kind: "scene",
+          visibility: "players",
+          payload: { action: "activate", name: scene.name },
+        });
+    },
+  );
+}
 
 Hooks.once("init", () => {
   /** @type {{api?: object}} */ (game.modules.get(MODULE)).api = {
@@ -55,6 +143,7 @@ Hooks.once("ready", () => {
     );
     return;
   }
+  watch();
   const url = coreUrl(Number(game.settings.get(MODULE, "port")));
   const campaign = String(game.settings.get(MODULE, "campaign") ?? "");
   // ponytail: no reconnection yet; reload the world to dial again.
@@ -73,14 +162,21 @@ Hooks.once("ready", () => {
       });
       socket.addEventListener("message", async (event) => {
         try {
-          const request = JSON.parse(String(event.data));
-          if (request.type === "request")
-            socket.send(JSON.stringify(await actions.handle(request)));
+          const message = JSON.parse(String(event.data));
+          if (message.type === "request")
+            socket.send(JSON.stringify(await actions.handle(message)));
+          else if (message.type === "session") capture.setSession(message.session);
+          else if (message.type === "ack") {
+            if (!message.ok) console.error("SecondChair: observation refused:", message.error);
+            capture.ack(message.id);
+          }
         } catch (error) {
           // A malformed frame or a closed socket: the Core times the request out as failed.
           console.error("SecondChair:", error);
         }
       });
+      socket.addEventListener("close", () => capture.disconnect());
+      capture.connect((message) => socket.send(JSON.stringify(message)));
       if (campaign !== welcome.campaign) {
         await game.settings.set(MODULE, "campaign", welcome.campaign);
       }

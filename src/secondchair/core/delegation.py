@@ -39,6 +39,7 @@ MOMENT_FILE = "moment.yaml"
 LOG_DIR = "action-log"
 JOBS_DIR = "jobs"
 CALLS_DIR = "calls"
+OBSERVATIONS_DIR = "observations"
 
 # The base profiles (DEL-06), in RESPONSIBILITIES order; every cell's deadline mode is auto.
 _PROFILE_LEVELS = {
@@ -91,8 +92,12 @@ def seed(root: Path) -> None:
 
 def current_session(ws: Workspace) -> int | None:
     """The open live session's id (DEL-03), None outside a live session."""
-    data = _read_yaml(ws.root / MOMENT_FILE)
-    return data.get("session", 0) if current_moment(ws)[0] == "live-session" else None
+    return last_session(ws) if current_moment(ws)[0] == "live-session" else None
+
+
+def last_session(ws: Workspace) -> int:
+    """The last live session's id, open or ended; 0 before the first."""
+    return _read_yaml(ws.root / MOMENT_FILE).get("session", 0)
 
 
 def current_moment(ws: Workspace) -> tuple[str, int]:
@@ -807,6 +812,7 @@ def _target(ws: Workspace, relative: str) -> Path:
         LOG_DIR,
         JOBS_DIR,
         CALLS_DIR,
+        OBSERVATIONS_DIR,
         STATE_DIR,
     ):
         raise DelegationError(f"{relative!r} belongs to the Core; no delegated action writes it.")
