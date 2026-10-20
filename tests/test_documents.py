@@ -66,6 +66,13 @@ def test_prep_writes_a_document_desired_state(ws: Workspace) -> None:  # noqa: F
         ({"type": "Item", "base": GOBLIN, "data": {}}, "Item"),
         ({"type": "Actor", "base": "goblin", "data": {}}, "UUID"),
         ({"type": "JournalEntry", "data": {"name": "x", "ownership": {"default": 2}}}, "ownership"),
+        ({"type": "JournalEntry", "data": {"name": "x", "ownership.default": 2}}, "ownership"),
+        ({"type": "JournalEntry", "data": {"name": "x", "-=ownership": None}}, "ownership"),
+        ({"type": "JournalEntry", "data": {"name": "x", "==ownership": {}}}, "ownership"),
+        (
+            {"type": "Playlist", "data": {"name": "x", "sounds": [{"-=ownership.default": 2}]}},
+            "ownership",
+        ),
         (
             {"type": "JournalEntry", "data": {"name": "x", "pages": [{"ownership": {}}]}},
             "publish_journal",

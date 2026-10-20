@@ -495,6 +495,8 @@ const documentWorld = {
     if (!clean) throw new Error("No HTML sanitizer in this Foundry: the page was not written.");
     return clean(html);
   },
+  // Dotted keys (`ownership.default`) expanded as Foundry's update would, before any is dropped.
+  expand: (data) => foundry.utils.expandObject(data),
   created: {
     load: () =>
       /** @type {Record<string, boolean>} */ (game.settings.get(MODULE, "prepared") ?? {}),

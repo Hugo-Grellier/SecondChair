@@ -22,7 +22,6 @@ REPORTS_DIR = f"{STATE_DIR}/scenes"  # each scene's last reconciliation report (
 DOCUMENTS_DIR = "documents"  # the desired world documents, one YAML file per document key
 DOCUMENT_REPORTS_DIR = f"{STATE_DIR}/documents"  # each document's last report (derived)
 DOCUMENT_TYPES = ("JournalEntry", "Actor", "Item", "Playlist", "RollTable")
-EMBEDDED = ("pages", "sounds", "items", "results")  # embedded documents a prepared one may give
 # A world or compendium document's UUID, its type captured: Actor.<id>, Compendium.<pack>.Actor.<id>
 UUID = re.compile(r"^(?:Compendium\.[\w-]+\.[\w-]+\.)?(\w+)\.[A-Za-z0-9]+$")
 ITEM_TYPES = ("Token", "Wall", "AmbientLight", "AmbientSound", "Note", "Tile", "Drawing", "Region")
@@ -190,8 +189,7 @@ def _check_document(key: str, desired: dict[str, Any]) -> None:
         raise ValueError(f"Type {kind!r} is not one of {', '.join(DOCUMENT_TYPES)}.")
     if not isinstance(data, dict):
         raise ValueError("`data` must hold the document's fields.")
-    embedded = [e for f in EMBEDDED for e in data.get(f) or [] if isinstance(e, dict)]
-    if any("ownership" in d for d in (data, *embedded)):
+    if _sets_ownership(data):
         raise ValueError(
             "`ownership` is not prep's: a prepared document is the GM's only, and only "
             "`publish_journal` shows a journal to the players."
@@ -201,6 +199,20 @@ def _check_document(key: str, desired: dict[str, Any]) -> None:
     found = UUID.match(base) if isinstance(base, str) else None
     if base is not None and (not found or found[1] != kind):
         raise ValueError(f"`base` {base!r}: give the UUID of a {kind}, world or compendium.")
+
+
+def _sets_ownership(value: object) -> bool:
+    """Whether a key anywhere in `value` sets who sees a document, however Foundry spells it:
+    `ownership`, `ownership.default`, `-=ownership`, `==ownership`."""
+    if isinstance(value, list):
+        return any(_sets_ownership(v) for v in value)
+    if not isinstance(value, dict):
+        return False
+    return any(
+        str(k).removeprefix("-=").removeprefix("==").split(".")[0] == "ownership"
+        or _sets_ownership(v)
+        for k, v in value.items()
+    )
 
 
 def browse_files(

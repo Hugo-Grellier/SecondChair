@@ -31,6 +31,21 @@ function merge(target, changes) {
 /** @type {Record<string, string>} */
 const FIELD = { JournalEntryPage: "pages", PlaylistSound: "sounds", Item: "items" };
 
+/** A stand-in for Foundry's expandObject: `a.b` keys become nested objects.
+ * @param {Record<string, any>} data @returns {Record<string, any>} */
+function expand(data) {
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const [path, value] of Object.entries(data)) {
+    const keys = path.split(".");
+    const last = /** @type {string} */ (keys.pop());
+    let at = out;
+    for (const k of keys) at = at[k] ??= {};
+    at[last] = value && typeof value === "object" && !Array.isArray(value) ? expand(value) : value;
+  }
+  return out;
+}
+
 let ids = 0;
 /** A stand-in for a world document, its embedded documents kept in its source.
  * @param {string} documentName @param {Record<string, any>} data */
@@ -104,6 +119,7 @@ function world() {
     },
     markdown: (/** @type {string} */ text) =>
       `<p>${text.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")}</p>`,
+    expand,
     // A stand-in for Foundry's cleanHTML: scripts and event handlers go.
     clean: (/** @type {string} */ html) =>
       html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/\s+on\w+="[^"]*"/gi, ""),
@@ -384,4 +400,44 @@ test("a page's HTML is sanitized, from Markdown or given as HTML", async () => {
     assert.doesNotMatch(text.content, /script|onerror/);
     assert.match(text.content, /<img src="x">/);
   }
+});
+
+test("ownership is dropped however its key is spelled, at the top and in pages", async () => {
+  for (const [key, value] of /** @type {[string, unknown][]} */ ([
+    ["ownership.default", 2],
+    ["-=ownership", null],
+    ["==ownership", { default: 2 }],
+    ["ownership", { default: 2 }],
+  ])) {
+    const w = world();
+    const desired = handout();
+    /** @type {any} */ (desired.data)[key] = value;
+    /** @type {any} */ (desired.data.pages[0])[key] = value;
+    await realiseChecked(w, desired);
+    const [journal] = w.docs;
+    assert.deepEqual(journal.source.ownership, { default: 0 }, key);
+    assert.deepEqual(
+      Object.keys(journal.source).filter((k) => k.includes("ownership")),
+      ["ownership"],
+    );
+    assert.ok(!Object.keys(journal.source.pages[0]).some((k) => k.includes("ownership")), key);
+  }
+});
+
+test("every HTML string is sanitized, whatever field it is in", async () => {
+  const w = world();
+  const payload = '<p>Notes</p><img src="x" onerror="alert(1)">';
+  await realiseChecked(
+    w,
+    { type: "Actor", data: { name: "Grik", system: { details: { publicNotes: payload } } } },
+    "grik",
+  );
+  const item = { name: "Idol", "system.description.value": payload };
+  await realiseChecked(w, { type: "Item", data: item }, "idol");
+  const [actor, idol] = w.docs;
+  for (const html of [
+    actor.source.system.details.publicNotes,
+    idol.source.system.description.value,
+  ])
+    assert.equal(html, '<p>Notes</p><img src="x">');
 });

@@ -45,6 +45,7 @@ export const PREPARED = "@prepared:";
  *   fromBase(type: string, base: string, data: Data): Promise<Data>,
  *   markdown(text: string): string,
  *   clean(html: string): string,
+ *   expand(data: Data): Data,
  *   created: {load(): Record<string, boolean>, save(created: Record<string, boolean>): Promise<unknown>},
  * }} World
  */
@@ -92,26 +93,43 @@ export function finder(findDocument) {
   };
 }
 
+/** A key setting who sees a document, as Foundry reads it: `ownership`, `-=ownership`, `==ownership`. */
+const OWNERSHIP = /^(-=|==)?ownership$/;
+
+/** `value` with every string holding HTML sanitized: any may land in an HTMLField.
+ * @param {any} value @param {(html: string) => string} clean @returns {any} */
+function cleaned(value, clean) {
+  if (typeof value === "string") return value.includes("<") ? clean(value) : value;
+  if (Array.isArray(value)) return value.map((v) => cleaned(v, clean));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cleaned(v, clean)]));
+  }
+  return value;
+}
+
+/** One document's fields, dotted keys expanded as Foundry would, its ownership keys dropped.
+ * @param {Data} fields @param {(data: Data) => Data} expand @returns {Data} */
+const owned = (fields, expand) =>
+  Object.fromEntries(Object.entries(expand(fields ?? {})).filter(([k]) => !OWNERSHIP.test(k)));
+
 /**
  * `data` as Foundry stores it: no `ownership` anywhere, since who sees a document is a disclosure
- * only `publish_journal` makes (DEL-09); a journal's Markdown pages turned into HTML ones, and
- * every page's HTML sanitized, so a prepared page runs no script in the GM's or a player's client.
+ * only `publish_journal` makes (DEL-09); every string holding HTML sanitized, so a prepared
+ * document runs no script in the GM's or a player's client; a journal's Markdown pages turned
+ * into HTML ones.
  * @param {string} type @param {Data} data
- * @param {{markdown(text: string): string, clean(html: string): string}} html
+ * @param {{markdown(text: string): string, clean(html: string): string, expand(data: Data): Data}} html
  */
-export function written(type, data, { markdown, clean }) {
-  const { ownership: _, ...rest } = data;
+export function written(type, data, { markdown, clean, expand }) {
+  const rest = cleaned(owned(data, expand), clean);
   const [field] = EMBEDDED[type] ?? [];
   if (!field || !Array.isArray(rest[field])) return rest;
   rest[field] = rest[field].map((/** @type {Data} */ entry) => {
-    const { ownership: __, ...e } = entry ?? {};
-    if (type !== "JournalEntry" || !e.text || typeof e.text !== "object") return e;
-    const { markdown: md, ...text } = e.text;
-    if (typeof md === "string")
-      return { type: "text", ...e, text: { ...text, content: clean(markdown(md)), format: HTML } };
-    if (typeof text.content === "string")
-      return { ...e, text: { ...text, content: clean(text.content) } };
-    return e;
+    const e = owned(entry, expand);
+    const md = e.text?.markdown;
+    if (type !== "JournalEntry" || typeof md !== "string") return e;
+    const { markdown: _, ...text } = e.text;
+    return { type: "text", ...e, text: { ...text, content: clean(markdown(md)), format: HTML } };
   });
   return rest;
 }

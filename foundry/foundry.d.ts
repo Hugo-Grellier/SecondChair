@@ -191,6 +191,7 @@ declare namespace foundry.canvas.placeables {
 declare namespace foundry.utils {
   function mergeObject<T extends object>(original: T, other: object, options?: object): T;
   const cleanHTML: ((html: string) => string) | undefined;
+  function expandObject(data: object): Record<string, unknown>;
 }
 
 declare namespace foundry.applications.ux {
