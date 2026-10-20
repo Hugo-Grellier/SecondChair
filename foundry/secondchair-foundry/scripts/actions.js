@@ -74,6 +74,20 @@ export const CEILING = {
   default: "act-then-review",
 };
 
+/**
+ * Why the ceiling refuses what the Core asks at `level` (DEL-19, DEL-19a), or null.
+ * level null: the GM's own undo or edit, which the ceiling does not bound. Anything unknown is refused.
+ * @param {unknown} ceiling  the world's ceiling setting
+ * @param {string | null} level
+ */
+export function aboveCeiling(ceiling, level) {
+  if (level === null) return null;
+  const max = LEVELS.indexOf(String(ceiling));
+  const rank = LEVELS.indexOf(level);
+  if (max >= 0 && rank >= 0 && rank <= max) return null;
+  return `Refused by this world's delegation ceiling (${ceiling}): it was asked at ${level}.`;
+}
+
 /** Refused by the ceiling: a failed action and a call on the GM (DEL-20). */
 class CeilingRefusal extends Error {}
 
@@ -110,14 +124,8 @@ export function createActions({ resolve, store, adapter, ceiling, language, say,
 
   /** @param {Request} request @returns {Promise<{before: Fields, after: Fields}>} */
   async function act({ op, target, params, expect, level }) {
-    // level null: the GM's own undo, which the ceiling does not bound. Anything unknown is refused.
-    const max = LEVELS.indexOf(String(ceiling()));
-    const rank = level === null ? -1 : LEVELS.indexOf(level);
-    if (level !== null && (max < 0 || rank < 0 || rank > max)) {
-      throw new CeilingRefusal(
-        `Refused by this world's delegation ceiling (${ceiling()}): the action was asked at ${level}.`,
-      );
-    }
+    const refusal = aboveCeiling(ceiling(), level);
+    if (refusal) throw new CeilingRefusal(refusal);
     if (op === "speak" || op === "whisper") {
       // A disclosure (DEL-09): irreversible, so there is no undo to take.
       if (expect) throw new Error("A line once said cannot be taken back.");

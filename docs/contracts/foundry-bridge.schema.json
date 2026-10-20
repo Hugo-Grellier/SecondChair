@@ -381,13 +381,24 @@
         },
         "desired": {
           "$ref": "#/$defs/desired_scene"
+        },
+        "level": {
+          "enum": [
+            "manual",
+            "propose",
+            "act-then-review",
+            "autonomous",
+            null
+          ],
+          "description": "The level the module checks against the world's ceiling (DEL-19a): the effective level of the prepare_scene entry that last wrote the desired state; null when the GM last wrote it, by hand or by an undo, which the ceiling does not bound."
         }
       },
       "required": [
         "type",
         "id",
         "scene",
-        "desired"
+        "desired",
+        "level"
       ],
       "additionalProperties": false
     },
@@ -489,6 +500,10 @@
             },
             "error": {
               "type": "string"
+            },
+            "reason": {
+              "const": "ceiling",
+              "description": "Present when the world's ceiling refused the realisation (DEL-19a): nothing was read nor written."
             }
           },
           "required": [

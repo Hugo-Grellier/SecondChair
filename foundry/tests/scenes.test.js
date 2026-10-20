@@ -201,7 +201,7 @@ const cave = (overrides = {}) => ({
 
 /** @param {ReturnType<typeof world>} w @param {any} desired */
 async function realiseChecked(w, desired) {
-  const message = { type: "realise", id: "r1", scene: "cave", desired };
+  const message = { type: "realise", id: "r1", scene: "cave", desired, level: "act-then-review" };
   assert.ok(valid(message), JSON.stringify(valid.errors));
   const report = await realise("cave", desired, w.deps);
   const reply = { type: "realised", id: "r1", ok: true, report };

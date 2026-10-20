@@ -72,6 +72,7 @@ A delegated action that acts in the VTT returns a `VttAction` ([tool-registratio
 
 The module enforces its own **ceiling**, whatever the Core asks: one maximum delegation level for every action reaching this world. It is the world setting **Delegation ceiling** of `secondchair-foundry` (`manual`, `propose`, `act-then-review`, `autonomous`), `act-then-review` on a fresh world, so no base profile exceeds it and *autonomous* takes raising it in Foundry on purpose.
 
+- It also bounds the realisation of a [prepared scene](#prepared-scenes-arc-10-bve-02), at the `level` the `realise` message carries.
 - A request whose `level` is above the ceiling, or not a level, is refused before anything is read: `{"type": "reply", "id": …, "ok": false, "error": "Refused by this world's delegation ceiling (propose): …", "reason": "ceiling"}`. A `null` level, the GM's undo, is not bounded. The ceiling is read at each request, so a change applies at once.
 - The Core logs the refusal as a failed action and writes a **call** on the GM, `kind: ceiling_refusal`, in `calls/` ([workspace-layout.md](workspace-layout.md)).
 - Only a GM user changes it: Foundry keeps world settings to users with the *Modify configuration settings* permission, and the module refuses the change in the client of a user who is not a GM, even when that permission was granted to players. A change by a non-GM user that still lands is put back by the active GM client.
@@ -128,9 +129,12 @@ Prep holds a scene as a **desired state** in the workspace, `scenes/<key>.yaml` 
 While a GM client is connected, the bridge sends it each desired scene it has not realised in this connection, then each one whose file changes (it looks every second), one at a time:
 
 ```json
-{"type": "realise", "id": "4b7e…", "scene": "goblin-cave", "desired": {"scene": {"name": "Goblin cave"}, "items": [{"key": "boss", "type": "Token", "actor": "Compendium.pf2e.pathfinder-bestiary.Actor.x", "data": {"x": 100, "y": 100, "hidden": true}}]}}
+{"type": "realise", "id": "4b7e…", "scene": "goblin-cave", "desired": {"scene": {"name": "Goblin cave"}, "items": [{"key": "boss", "type": "Token", "actor": "Compendium.pf2e.pathfinder-bestiary.Actor.x", "data": {"x": 100, "y": 100, "hidden": true}}]}, "level": "act-then-review"}
 {"type": "realised", "id": "4b7e…", "ok": true, "report": {"scene": "aB3…", "summary": {"create": 2}, "actions": [{"action": "create", "key": "_scene"}, {"action": "create", "key": "boss"}], "errors": []}}
+{"type": "realised", "id": "5c8f…", "ok": false, "error": "Refused by this world's delegation ceiling (propose): it was asked at act-then-review.", "reason": "ceiling"}
 ```
+
+The **ceiling** bounds a realisation (DEL-19a), checked when the scene is realised, since the GM may also edit the file. `level` is the effective level of the `prepare_scene` entry that last wrote the desired state, or null when the GM wrote it last, by hand or by an undo, which the ceiling does not bound. Above the ceiling the module refuses it before reading anything, with `reason: "ceiling"`, and warns the GM. A refused realisation is not an action: no entry is logged and no call is made; the refusal is the scene's report, and the bridge sends the scene again after the next change of the ceiling (its `ceiling` observation).
 
 With no GM client the desired state waits: every connection starts by sending all of them, which changes nothing in a scene already realised. The Core keeps each scene's last report in `.secondchair/scenes/<key>.json`; the read `scene_report(key)` returns it, with `pending` when the desired state changed since. A compendium Actor is imported into the world once, the first time a token needs it.
 

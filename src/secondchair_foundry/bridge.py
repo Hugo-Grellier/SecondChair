@@ -85,6 +85,7 @@ class Bridge:
         self.waiting: dict[str, asyncio.Future[dict]] = {}  # replies awaited, by request id
         self.rules_context: tuple[int, object] | None = None  # (moment seq, last one recorded)
         self.turn_driver: str | None = None  # the connected client's, from its rules context
+        self.ceiling_changes = 0  # ceiling observations received, to realise refused scenes again
 
     @property
     def binding_path(self) -> Path:
@@ -196,6 +197,9 @@ class Bridge:
                     continue  # not a message the Core waits for
                 if kind == "observation":
                     await self._observe(socket, message.get("envelope"))
+                    envelope = message.get("envelope")
+                    if isinstance(envelope, dict) and envelope.get("kind") == "ceiling":
+                        self.ceiling_changes += 1  # scenes it refused are sent again
                 elif kind in ("traces", "erase_traces"):
                     await self._trace(campaign, message)
                 elif kind == "gesture":  # in a task: an approval may wait on a VTT reply
@@ -426,6 +430,7 @@ class Bridge:
         state waits: every connection starts by realising them all, which changes nothing in a
         scene already realised. One scene at a time."""
         sent: dict[str, str] = {}  # scene key -> digest of the desired state sent
+        refused: dict[str, int] = {}  # scene key -> ceiling changes seen when it was refused
         reports = self.ws.root / REPORTS_DIR
         # ponytail: polls the scenes directory; a file watcher if many scenes make it costly.
         while True:
@@ -434,16 +439,22 @@ class Bridge:
                     text = path.read_text()
                 except FileNotFoundError:
                     continue  # removed meanwhile (an undone first preparation)
+                if refused.get(path.stem, self.ceiling_changes) != self.ceiling_changes:
+                    del refused[path.stem], sent[path.stem]  # the GM changed the ceiling since
                 if sent.get(path.stem) == digest(text):
                     continue
                 sent[path.stem] = digest(text)
+                refused.pop(path.stem, None)
                 try:
                     desired = yaml.safe_load(text)
+                    level = await asyncio.to_thread(scene_level, self.ws, path, text)
                     request = {"type": "realise", "id": uuid.uuid4().hex, "scene": path.stem}
-                    reply = await asyncio.wait_for(
-                        self._request(socket, {**request, "desired": desired}), REALISE_TIMEOUT
-                    )
-                    record = {k: reply[k] for k in ("ok", "report", "error") if k in reply}
+                    request = {**request, "desired": desired, "level": level}
+                    reply = await asyncio.wait_for(self._request(socket, request), REALISE_TIMEOUT)
+                    keep = ("ok", "report", "error", "reason")
+                    record = {k: reply[k] for k in keep if k in reply}
+                    if reply.get("reason") == "ceiling":
+                        refused[path.stem] = self.ceiling_changes
                 except yaml.YAMLError as e:
                     record = {"ok": False, "error": f"{path.name} is not valid YAML: {e}"}
                 except TimeoutError:
@@ -477,6 +488,16 @@ def _outcome(reply: dict) -> tuple[dict, dict]:
             raise CeilingRefusal(str(reply.get("error")))
         raise VttError(str(reply.get("error") or f"The GM client sent a malformed reply: {reply}"))
     return before, after
+
+
+def scene_level(ws: Workspace, path: Path, text: str) -> str | None:
+    """The level a desired scene is realised at (DEL-19a): the effective level of the
+    `prepare_scene` entry that last wrote it, or None when the GM did, by hand or by an undo."""
+    entries, _ = delegation.read_log(ws)
+    target = path.relative_to(ws.root).as_posix()
+    writer, content = delegation.last_writes(entries).get(target, ({}, None))
+    is_prep = writer.get("kind") == "action" and content == text
+    return writer.get("effective_level") if is_prep else None
 
 
 async def _close_quietly(socket: WebSocket) -> None:
