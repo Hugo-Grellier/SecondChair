@@ -1129,7 +1129,8 @@ def log_hand_edits(ws: Workspace) -> list[dict]:
     agent-proposal rank (CAN-11). The GM promotes one with `promote`."""
     with locked(ws):
         entries, _ = read_log(ws)
-        known = core_states(entries)
+        # Only canon files: the Core's other targets (scenes/, prep/) are not read as canon.
+        known = {t: c for t, c in core_states(entries).items() if t.startswith(f"{CANON_DIR}/")}
         current = {
             p.relative_to(ws.root).as_posix(): p.read_text()
             for p in sorted((ws.root / CANON_DIR).rglob("*.md"))

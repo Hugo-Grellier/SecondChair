@@ -8,8 +8,8 @@ log, then the report recomputed from those logs (`report.recompute`).
 - Baseline: every responsibility at manual (the `read` profile), so agents take no action and the
   scripted GM does each operation by hand, one hand edit per entity of the gold set (BEN-03).
 
-At both tables an agent then answers the fact probes from canon, in the GM view, with structured
-answers in workspace entity ids (`ask_probes`).
+At both tables an agent then answers the fact and knowledge probes from canon, in the GM view,
+with structured answers in workspace entity ids (`ask_probes`).
 """
 
 import shutil
@@ -35,7 +35,7 @@ TEE = (
     "import subprocess, sys; "
     "sys.exit(subprocess.run(sys.argv[2:], stdout=open(sys.argv[1], 'w')).returncode)"
 )
-# The shape of each fact probe's answer, never its value: the gold set stays the evaluator's.
+# The shape of each probe's answer, never its value: the gold set stays the evaluator's.
 ANSWER_SHAPES = {
     "factions": "An object: each faction's entity id -> the entity ids of the NPCs who belong "
     "to it.",
@@ -50,6 +50,17 @@ ANSWER_SHAPES = {
     '"party_owns": the planned treasures the party owns.',
     "situations": "An object: each active or available situation's entity id -> "
     '{"stage": "active" or "available", "deadline": its date (YYYY-MM-DD) or null}.',
+    "edda-knowledge": '{"name": whether Edda knows the hidden maintainer\'s name, "cause": '
+    'whether she knows what causes the bell, "diversion": whether she knows where the repair '
+    "money went}: each true or false, on the campaign's start date.",
+    "circle-knowledge": '{"name": whether the faction itself holds its hidden member\'s name, '
+    '"cause": whether it holds what causes the bell}: each true or false.',
+    # Canon has no ids for these facts: the shape names each by a term, never which side it is on.
+    "common-knowledge": '{"both_know": [...], "both_do_not_know": [...]}: the terms, among '
+    '"bell-ringing" (the bell is ringing), "council-controls-gate" (the council controls the '
+    'gate) and "bell-cause" (what causes the bell), that both of them know, and that neither '
+    "of them knows, on the campaign's start date.",
+    "belief": '{"ever_true": true or false, "believers": the entity ids of those who believe it}.',
 }
 
 
@@ -90,13 +101,14 @@ def run_s0(
 def ask_probes(
     ws: Workspace, gold: dict, run_dir: Path, runners: dict, hosts: dict[str, list]
 ) -> None:
-    """Ask the fact probes in the GM view (sample README, step 3): an `answer-probes` job gets
-    each question and the shape of its answer, never the expected one. The agent's reply is kept
-    beside the workspace (`report.REPLY_FILE`), for the report to score."""
+    """Ask the fact and knowledge probes in the GM view (sample README, step 3): an
+    `answer-probes` job gets each question and the shape of its answer, never the expected one.
+    The agent's reply is kept beside the workspace (`report.REPLY_FILE`), for the report to
+    score."""
     probes = {
         p["id"]: {"question": p["question"], "answer": ANSWER_SHAPES[p["id"]]}
         for p in gold["probes"]
-        if p["id"] in s0.FACT_PROBES
+        if p["id"] in s0.PROBES
     }
     asked = run_dir / "probes.yaml"
     asked.write_text(yaml.safe_dump(probes, sort_keys=False, allow_unicode=True))
