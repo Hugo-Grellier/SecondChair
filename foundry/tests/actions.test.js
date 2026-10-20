@@ -456,3 +456,34 @@ test("a campaign language whose translation module is inactive refuses the conne
     null,
   );
 });
+
+test("the library's generic reads answer before the system adapter, which keeps its own", async () => {
+  const adapter = {
+    ops: {},
+    reads: { official_name: async () => "adapter", browse_files: async () => "adapter" },
+  };
+  const actions = createActions({
+    resolve: async () => null,
+    store: { load: () => [], save: async () => {} },
+    adapter: () => adapter,
+    ceiling: () => CEILING.default,
+    language: () => "fr",
+    say: async () => "",
+    tell: async () => "",
+    reads: { browse_files: async (params) => ({ dirs: [], files: [], asked: params }) },
+  });
+  const files = await actions.read({
+    type: "read",
+    id: "q",
+    op: "browse_files",
+    params: { path: "maps" },
+  });
+  assert.deepEqual(files, {
+    type: "reply",
+    id: "q",
+    ok: true,
+    result: { dirs: [], files: [], asked: { path: "maps" } },
+  });
+  const name = await actions.read({ type: "read", id: "q", op: "official_name", params: {} });
+  assert.deepEqual(name, { type: "reply", id: "q", ok: true, result: "adapter" });
+});

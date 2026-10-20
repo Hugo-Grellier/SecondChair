@@ -6,7 +6,7 @@ interface FoundrySettingConfig {
   hint?: string;
   scope: "world" | "client" | "user";
   config: boolean;
-  type: StringConstructor | NumberConstructor | BooleanConstructor;
+  type: StringConstructor | NumberConstructor | BooleanConstructor | ObjectConstructor;
   default: unknown;
   choices?: Record<string, string>;
   requiresReload?: boolean;
@@ -21,10 +21,14 @@ interface FoundryModule {
 
 interface FoundryPack {
   collection: string;
+  documentName: string;
   getIndex(options: { fields: string[] }): Promise<
     Iterable<{
       _id: string;
       name: string;
+      uuid?: string;
+      type?: string;
+      img?: string;
       system?: { slug?: string | null };
       flags?: { babele?: { originalName?: string } };
     }>
@@ -147,7 +151,20 @@ declare const CONFIG: {
   queries: Record<string, (data: unknown, context: { user: { id: string } }) => unknown>;
 };
 
-declare const CONST: { REGION_VISIBILITY: { ALWAYS: number } };
+declare const CONST: { REGION_VISIBILITY: { ALWAYS: number }; SHOWDOWN_OPTIONS: object };
+
+/** The Markdown converter Foundry's client ships. */
+declare const showdown: { Converter: new (options?: object) => { makeHtml(text: string): string } };
+
+interface FilePickerClass {
+  browse(
+    source: string,
+    target: string,
+    options?: { extensions?: string[] },
+  ): Promise<{ dirs: string[]; files: string[] }>;
+}
+/** The file picker, before v13 moved it under `foundry.applications.apps`. */
+declare const FilePicker: FilePickerClass;
 
 declare const ui: {
   players?: { render(): unknown };
@@ -167,8 +184,26 @@ declare const ChatMessage: {
 };
 declare const Actor: { create(data: object): Promise<FoundryDoc> };
 
+declare namespace foundry.canvas {
+  function loadTexture(src: string): Promise<{ width: number; height: number } | null>;
+}
+
 declare namespace foundry.canvas.placeables {
   const Token: { prototype: FoundryDoc };
+}
+
+declare namespace foundry.utils {
+  function mergeObject<T extends object>(original: T, other: object, options?: object): T;
+  const cleanHTML: ((html: string) => string) | undefined;
+  function expandObject(data: object): Record<string, unknown>;
+}
+
+declare namespace foundry.applications.ux {
+  const TextEditor: { implementation: { cleanHTML?: (html: string) => string } } | undefined;
+}
+
+declare namespace foundry.applications.apps {
+  const FilePicker: { implementation: FilePickerClass } | undefined;
 }
 
 declare namespace foundry.applications.api {

@@ -28,12 +28,13 @@ my-campaign/
 │   ├── mysteries/     # one Markdown file per mystery graph, named by the mystery entity's id
 │   └── knowledge/     # one Markdown file per knowledge record: k-1a2b3c4d.md
 ├── scenes/            # one YAML file per prepared scene's desired state: goblin-cave.yaml
+├── documents/         # one YAML file per prepared world document's desired state: ransom-note.yaml
 ├── prep/              # the GM's prep notes, Markdown written by `write_prep`: session-3/handoff.md
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
 ├── speakers.yaml      # the speaker table (CAP-02); written by the GM
 ├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
-└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/: each prepared scene's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content); git-ignored, rebuildable
+└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/ and documents/: each prepared scene's and world document's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content); git-ignored, rebuildable
 ```
 
 Later contracts add decisions, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
@@ -540,6 +541,18 @@ choices: {torch: overwrite}   # the GM's calls on conflicts, optional
 ```
 
 The GM may edit it by hand: the next GM client connection, or the running one within a second, realises the new version.
+
+## `documents/`
+
+One YAML file per prepared world document (an NPC actor, a handoff or handout journal, a treasure item, a playlist, a roll table), named by its key: its **desired state**, realised in the VTT by reconciliation before the scenes, which may refer to it as `@prepared:<key>` ([foundry-bridge.md](foundry-bridge.md#prepared-world-documents-arc-07-arc-10)). It is not canon. `prepare_document` writes it (prep, reversible); its format is `desired_document` in [`foundry-bridge.schema.json`](foundry-bridge.schema.json). The GM may edit it by hand, as a scene's.
+
+```yaml
+# documents/grik.yaml
+type: Actor
+base: Compendium.pf2e.pathfinder-bestiary.Actor.aBcD1234
+data: {name: Grik}
+choice: overwrite   # the GM's call on a conflict, optional
+```
 
 ## Hand edits
 

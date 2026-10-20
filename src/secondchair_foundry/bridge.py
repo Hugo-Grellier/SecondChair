@@ -32,13 +32,19 @@ from secondchair.core.machine import foundry_token
 from secondchair.core.vtt import CeilingRefusal, Unanswered, VttError
 from secondchair.core.workspace import Workspace, WorkspaceError
 from secondchair_foundry import desk
-from secondchair_foundry.tools import REPORTS_DIR, SCENES_DIR, digest
+from secondchair_foundry.tools import (
+    DOCUMENT_REPORTS_DIR,
+    DOCUMENTS_DIR,
+    REPORTS_DIR,
+    SCENES_DIR,
+    digest,
+)
 
 PATH = "/foundry"
 BINDING_FILE = "foundry.yaml"
 HELLO_TIMEOUT = 10  # seconds the module has to say hello once the socket is open
 REPLY_TIMEOUT = 15  # seconds the GM client has to take an action and answer
-POLL = 1  # seconds between two looks at the live session, and at the desired scenes
+POLL = 1  # seconds between two looks at the live session, and at the desired states
 REALISE_TIMEOUT = 120  # seconds the GM client has to realise a scene (actor imports included)
 POLICY_VIOLATION = 1008
 NO_GM = (
@@ -47,6 +53,10 @@ NO_GM = (
 )
 RULES_CONTEXT = "rules_context"  # recorded at the start of each moment and when it changes
 CLOCK_TARGET = "time"  # what `set_date` acts on: the world clock, not a document
+REALISED = (  # what the bridge realises, in this order: (folder, reports, message type, key field)
+    (DOCUMENTS_DIR, DOCUMENT_REPORTS_DIR, "realise_document", "document"),
+    (SCENES_DIR, REPORTS_DIR, "realise", "scene"),
+)
 
 
 def _driver_of(context: object) -> str | None:
@@ -425,46 +435,59 @@ class Bridge:
         return reply["result"]
 
     async def _realise(self, socket: WebSocket) -> None:
-        """Send the GM client every desired scene it has not realised in this connection, then
-        each one prep changes, and record its report (ARC-10). With no GM client the desired
-        state waits: every connection starts by realising them all, which changes nothing in a
-        scene already realised. One scene at a time."""
-        sent: dict[str, str] = {}  # scene key -> digest of the desired state sent
-        refused: dict[str, int] = {}  # scene key -> ceiling changes seen when it was refused
-        reports = self.ws.root / REPORTS_DIR
-        # ponytail: polls the scenes directory; a file watcher if many scenes make it costly.
+        """Send the GM client every desired document and scene it has not realised in this
+        connection, then each one prep changes, and record its report (ARC-10). With no GM client
+        the desired state waits: every connection starts by realising them all, which changes
+        nothing in what is already realised. One at a time, documents first, so a scene finds
+        the documents it refers to; a document sent again sends every scene again."""
+        sent: dict[str, str] = {}  # desired file -> digest of the desired state sent
+        refused: dict[str, int] = {}  # desired file -> ceiling changes seen when it was refused
+        # ponytail: polls the desired directories; a file watcher if many files make it costly.
         while True:
-            for path in sorted((self.ws.root / SCENES_DIR).glob("*.yaml")):
-                try:
-                    text = path.read_text()
-                except FileNotFoundError:
-                    continue  # removed meanwhile (an undone first preparation)
-                if refused.get(path.stem, self.ceiling_changes) != self.ceiling_changes:
-                    del refused[path.stem], sent[path.stem]  # the GM changed the ceiling since
-                if sent.get(path.stem) == digest(text):
-                    continue
-                sent[path.stem] = digest(text)
-                refused.pop(path.stem, None)
-                try:
-                    desired = yaml.safe_load(text)
-                    level = await asyncio.to_thread(scene_level, self.ws, path, text)
-                    request = {"type": "realise", "id": uuid.uuid4().hex, "scene": path.stem}
-                    request = {**request, "desired": desired, "level": level}
-                    reply = await asyncio.wait_for(self._request(socket, request), REALISE_TIMEOUT)
-                    keep = ("ok", "report", "error", "reason")
-                    record = {k: reply[k] for k in keep if k in reply}
-                    if reply.get("reason") == "ceiling":
-                        refused[path.stem] = self.ceiling_changes
-                except yaml.YAMLError as e:
-                    record = {"ok": False, "error": f"{path.name} is not valid YAML: {e}"}
-                except TimeoutError:
-                    del sent[path.stem]  # sent again: realising twice changes nothing more
-                    record = {"ok": False, "error": "The GM client did not answer: check the VTT."}
-                except VttError:
-                    return  # the GM client left: the next connection realises it
-                reports.mkdir(parents=True, exist_ok=True)
-                record = {"desired": digest(text), **record}
-                (reports / f"{path.stem}.json").write_text(json.dumps(record, ensure_ascii=False))
+            for folder, reports_dir, kind, field in REALISED:
+                reports = self.ws.root / reports_dir
+                resent = False
+                for path in sorted((self.ws.root / folder).glob("*.yaml")):
+                    name = f"{folder}/{path.name}"
+                    try:
+                        text = path.read_text()
+                    except FileNotFoundError:
+                        continue  # removed meanwhile (an undone first preparation)
+                    if refused.get(name, self.ceiling_changes) != self.ceiling_changes:
+                        del refused[name]  # the GM changed the ceiling since
+                        sent.pop(name, None)
+                    if sent.get(name) == digest(text):
+                        continue
+                    sent[name] = digest(text)
+                    refused.pop(name, None)
+                    resent = True
+                    try:
+                        desired = yaml.safe_load(text)
+                        level = await asyncio.to_thread(scene_level, self.ws, path, text)
+                        request = {"type": kind, "id": uuid.uuid4().hex, field: path.stem}
+                        request = {**request, "desired": desired, "level": level}
+                        reply = await asyncio.wait_for(
+                            self._request(socket, request), REALISE_TIMEOUT
+                        )
+                        keep = ("ok", "report", "error", "reason")
+                        record = {k: reply[k] for k in keep if k in reply}
+                        if reply.get("reason") == "ceiling":
+                            refused[name] = self.ceiling_changes
+                    except yaml.YAMLError as e:
+                        record = {"ok": False, "error": f"{path.name} is not valid YAML: {e}"}
+                    except TimeoutError:
+                        del sent[name]  # sent again: realising twice changes nothing more
+                        error = "The GM client did not answer: check the VTT."
+                        record = {"ok": False, "error": error}
+                    except VttError:
+                        return  # the GM client left: the next connection realises it
+                    reports.mkdir(parents=True, exist_ok=True)
+                    record = {"desired": digest(text), **record}
+                    (reports / f"{path.stem}.json").write_text(
+                        json.dumps(record, ensure_ascii=False)
+                    )
+                if folder == DOCUMENTS_DIR and resent:  # an id a scene refers to may have changed
+                    sent = {k: v for k, v in sent.items() if not k.startswith(f"{SCENES_DIR}/")}
             await asyncio.sleep(POLL)
 
     async def _request(self, socket: WebSocket, request: dict) -> dict:
@@ -491,8 +514,9 @@ def _outcome(reply: dict) -> tuple[dict, dict]:
 
 
 def scene_level(ws: Workspace, path: Path, text: str) -> str | None:
-    """The level a desired scene is realised at (DEL-19a): the effective level of the
-    `prepare_scene` entry that last wrote it, or None when the GM did, by hand or by an undo."""
+    """The level a desired scene or document is realised at (DEL-19a): the effective level of
+    the `prepare_scene` or `prepare_document` entry that last wrote it, or None when the GM did,
+    by hand or by an undo."""
     entries, _ = delegation.read_log(ws)
     target = path.relative_to(ws.root).as_posix()
     writer, content = delegation.last_writes(entries).get(target, ({}, None))
