@@ -1,4 +1,4 @@
-"""Measure index connection costs in fictional, temporary workspaces."""
+"""Measure index connection costs in fictional workspaces; SQLite page I/O is excluded."""
 
 import argparse
 import time
@@ -22,24 +22,37 @@ def _workspace(size: int, root: Path) -> workspace.Workspace:
     return ws
 
 
-def _measure(call) -> tuple[float, int]:
+def _measure(call, paths_read: set[Path] | None = None) -> tuple[float, int]:
     total = 0
     read_bytes = Path.read_bytes
+    read_text = Path.read_text
 
     def counted(path: Path) -> bytes:
         nonlocal total
         data = read_bytes(path)
         total += len(data)
+        if paths_read is not None:
+            paths_read.add(path)
+        return data
+
+    def counted_text(path: Path, *args, **kwargs) -> str:
+        nonlocal total
+        data = read_text(path, *args, **kwargs)
+        total += len(data.encode("utf-8"))
+        if paths_read is not None:
+            paths_read.add(path)
         return data
 
     start = time.perf_counter()
-    with patch.object(Path, "read_bytes", counted):
+    with patch.object(Path, "read_bytes", counted), patch.object(Path, "read_text", counted_text):
         conn = call()
         conn.close()
     return (time.perf_counter() - start) * 1000, total
 
 
-def benchmark(size: int) -> tuple[int, int, int, list[tuple[float, int]]]:
+def benchmark(
+    size: int, unchanged_paths: set[Path] | None = None
+) -> tuple[int, int, int, list[tuple[float, int]]]:
     with TemporaryDirectory(prefix="secondchair-index-bench-") as directory:
         root = Path(directory) / "workspace"
         ws = _workspace(size, root)
@@ -49,7 +62,7 @@ def benchmark(size: int) -> tuple[int, int, int, list[tuple[float, int]]]:
         inputs = [*(root / "canon").rglob("*"), *(root / "action-log").rglob("*")]
         input_bytes = sum(path.stat().st_size for path in inputs if path.is_file())
         cold = _measure(lambda: index.connect(ws))
-        unchanged = _measure(lambda: index.connect(ws))
+        unchanged = _measure(lambda: index.connect(ws), unchanged_paths)
 
         document = next((root / index.ENTITIES_DIR).glob("*.md"))
         document.write_text(document.read_text() + "A hand edit.\n")

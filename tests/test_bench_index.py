@@ -22,6 +22,14 @@ def test_benchmark_reports_columns_and_unchanged_connect_reads_all_inputs(capsys
     assert lines[1] == "| ---: | ---: | ---: | ---: | ---: | ---: |"
     assert lines[2].startswith("| 2 | ")
 
-    # The unchanged call currently hashes every canon and action-log file. #172 will change this.
-    _, _, input_bytes, measurements = bench_index.benchmark(2)
-    assert measurements[1][1] >= input_bytes
+    # #172 will change this when unchanged connects stop reading these inputs.
+    unchanged_paths: set[Path] = set()
+    bench_index.benchmark(2, unchanged_paths)
+    root = next(path.parent for path in unchanged_paths if path.name == "workspace.yaml")
+    inputs = {
+        path
+        for directory in ("canon", "action-log")
+        for path in (root / directory).rglob("*")
+        if path.is_file()
+    }
+    assert inputs <= unchanged_paths
