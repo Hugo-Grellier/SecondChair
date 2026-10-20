@@ -291,6 +291,8 @@ def status(ws: workspace.Workspace) -> str:
         f"Sessions played: {played}",
     ]
     nexts = []
+    if not capture.time(ws)["current_date"] and not live:
+        nexts.append("secondchair date <date>  (set the campaign's current date before play)")
     if (unwrapped := _unwrapped(ws)) and not live:
         lines.append(f"Session {unwrapped} is not wrapped: what was played is not in canon yet.")
         nexts.append(f"secondchair wrap {unwrapped}  (after its wrap job)")

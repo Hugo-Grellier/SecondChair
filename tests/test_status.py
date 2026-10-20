@@ -13,6 +13,7 @@ def test_a_fresh_campaign_says_to_prepare_session_one(ws: Workspace) -> None:  #
 
     assert "Moment: prep" in text and "Sessions played: 0" in text
     assert "prepare session 1" in text
+    assert "secondchair date <date>" in text
 
 
 def test_status_names_the_pending_approvals_and_the_command(ws: Workspace) -> None:  # noqa: F811
