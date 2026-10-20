@@ -87,7 +87,9 @@ declare const game: {
     active: { uuid: string } | null;
     find(fn: (scene: FoundryDoc) => boolean): FoundryDoc;
   };
+  combat: FoundryDoc | null;
   actors: {
+    contents: FoundryDoc[];
     get(id: string): { uuid: string } | undefined;
     find(fn: (actor: FoundryDoc) => boolean): FoundryDoc;
     fromCompendium(doc: FoundryDoc): FoundryDoc;
@@ -95,6 +97,7 @@ declare const game: {
 };
 
 declare function fromUuid(uuid: string): Promise<object | null>;
+declare function fromUuidSync(uuid: string, options?: { strict?: boolean }): FoundryDoc;
 
 declare const Hooks: {
   // biome-ignore lint/suspicious/noExplicitAny: each hook passes its own arguments

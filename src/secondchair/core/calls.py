@@ -55,10 +55,11 @@ def open_call(
     entry: int | None = None,
     job: int | None = None,
     message: str | None = None,
+    **extra: object,
 ) -> dict:
-    """Record a call and schedule it. A job's call inherits the job's deadline when it has one
-    (ARC-28). A call due now in a live session is an interruption (DEL-33). Callers hold the
-    lock."""
+    """Record a call and schedule it, with a kind's own fields in `extra` (a discrepancy's). A
+    job's call inherits the job's deadline when it has one (ARC-28). A call due now in a live
+    session is an interruption (DEL-33). Callers hold the lock."""
     record = _job(ws, job) if job is not None else None
     if record is not None and record.get("deadline") is not None:
         due, at_once = record["deadline"], False
@@ -81,6 +82,7 @@ def open_call(
             "message": message,
             "status": "open",
             "shown": False,
+            **extra,
         },
         CALLS_DIR,
     )

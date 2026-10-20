@@ -14,6 +14,8 @@ ajv.addSchema(envelope);
 
 /** A Foundry bridge message (foundry-bridge.schema.json), which refers to the envelope. */
 export const validMessage = ajv.compile(contract("foundry-bridge.schema.json"));
+/** A `pf2e.outcome` observation's payload (pf2e-outcome.schema.json). */
+export const validOutcome = ajv.compile(contract("pf2e-outcome.schema.json"));
 /** An event envelope (event-envelope.schema.json). */
 export const validEnvelope = /** @type {import("ajv").ValidateFunction} */ (
   ajv.getSchema(envelope.$id)

@@ -18,6 +18,7 @@ from secondchair.core import (
     index,
     jobs,
     machine,
+    rules,
     workspace,
     world,
 )
@@ -223,6 +224,23 @@ def _gm_command(args: argparse.Namespace) -> str:
                 "actions now run at the cell's level, at once and with no undo."
             )
         return f"Hold restored on {args.responsibility} in {args.moment}."
+    if args.command == "house-rule":
+        if args.rule_command == "mark":
+            rule = rules.mark_intended(ws, args.call, args.name, "cli", auth)
+            return (
+                f"House rule {rule['name']!r} recorded: {rule['check']} checks are silenced "
+                "until you remove it."
+            )
+        if args.rule_command == "remove":
+            rule = rules.remove_house_rule(ws, args.name, "cli", auth)
+            return f"House rule {rule['name']!r} removed: {rule['check']} checks run again."
+        return (
+            "\n".join(
+                f"{r['name']}  silences {r['check']} checks (discrepancy {r['call']}, {r['at']})"
+                for r in rules.house_rules(ws)
+            )
+            or "No house rule."
+        )
     if args.command == "break":
         pile = calls.take_break(ws)
         return "\n".join(_describe_call(c) for c in pile) or "Nothing held for the break."
@@ -557,6 +575,21 @@ def main(argv: list[str] | None = None) -> int:
         sub = hold_sub.add_parser(name, parents=[in_workspace], help=help_text)
         sub.add_argument("responsibility", choices=RESPONSIBILITIES)
         sub.add_argument("moment", choices=delegation.MOMENTS)
+    rule_cmd = commands.add_parser(
+        "house-rule", help="the campaign's house rules, which silence a kind of rules check"
+    )
+    rule_sub = rule_cmd.add_subparsers(dest="rule_command", required=True)
+    rule_sub.add_parser("list", parents=[in_workspace], help="list the house rules")
+    mark_cmd = rule_sub.add_parser(
+        "mark",
+        parents=[in_workspace],
+        help="mark a discrepancy as intended, recording a house rule (interactive only)",
+    )
+    mark_cmd.add_argument("call", type=int, help="the discrepancy's call id")
+    mark_cmd.add_argument("name", help="the house rule's name")
+    rule_sub.add_parser(
+        "remove", parents=[in_workspace], help="remove a house rule: its checks run again"
+    ).add_argument("name")
     for name, help_text, parents in (
         ("approve", "approve a pending action", [in_workspace]),
         ("reject", "reject a pending action", [in_workspace, reason]),

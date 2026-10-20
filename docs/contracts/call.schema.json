@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/call.schema.json",
   "title": "Call on the GM",
-  "description": "A call on the GM (DEL-30..33, ADR 0005): a pending proposal, a surfaced exception or a ceiling refusal (DEL-20), stored as YAML in `calls/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. The Core gives it a deadline and applies its safe default when the deadline passes; Surfaces only display it (ARC-11).",
+  "description": "A call on the GM (DEL-30..33, ADR 0005): a pending proposal, a surfaced exception, a ceiling refusal (DEL-20) or a rules discrepancy (RUL-17), stored as YAML in `calls/<id, six digits>.yaml` of the campaign workspace. Protocol version 0.1.0. The Core gives it a deadline and applies its safe default when the deadline passes; Surfaces only display it (ARC-11).",
   "type": "object",
   "required": ["id", "at", "kind", "moment", "moment_seq", "session", "responsibility", "blocking", "deadline", "interruption", "entry", "job", "message", "status", "shown"],
   "additionalProperties": false,
   "properties": {
     "id": {"type": "integer", "minimum": 1, "description": "Increasing, unique among the workspace's calls."},
     "at": {"type": "string", "format": "date-time", "description": "Real time the call was raised."},
-    "kind": {"enum": ["proposal", "exception", "ceiling_refusal"]},
+    "kind": {"enum": ["proposal", "exception", "ceiling_refusal", "discrepancy"]},
     "moment": {"enum": ["prep", "live-session", "between-sessions"], "description": "The moment the call was raised in."},
     "moment_seq": {"type": "integer", "minimum": 1},
     "session": {"type": ["integer", "null"], "description": "The live session's id (moment.yaml), null outside a live session."},
@@ -19,8 +19,13 @@
     "interruption": {"type": "boolean", "description": "Due now during a live session: shown to the GM without the GM asking (DEL-33, MET-06). A call held for the break is not one."},
     "entry": {"type": ["integer", "null"], "description": "A proposal's pending action log entry, or a ceiling refusal's failed one."},
     "job": {"type": ["integer", "null"], "description": "The job the call comes from, if any."},
-    "message": {"type": ["string", "null"], "description": "An exception's or a ceiling refusal's text, or why the Core held a proposal at propose whatever the level (a wrap's contradiction or blocking question, CAP-10)."},
+    "message": {"type": ["string", "null"], "description": "An exception's, a ceiling refusal's or a discrepancy's text, or why the Core held a proposal at propose whatever the level (a wrap's contradiction or blocking question, CAP-10)."},
     "status": {"enum": ["open", "answered", "defaulted", "withdrawn"], "description": "answered when the GM approved or rejected the proposal; defaulted when its deadline passed first: a proposal is rejected, an exception takes no action, logged as a `safe_default` action log entry (DEL-32). A blocking call forced to break is defaulted at once (DEL-31). withdrawn when an entity override of its acting entity (the proposal's action entry, else its job's entity) landed first: the same safe default, logged with the override, and never shown at the break (DEL-16)."},
-    "shown": {"type": "boolean", "description": "Whether a defaulted call was shown again at a break."}
-  }
+    "shown": {"type": "boolean", "description": "Whether a defaulted call was shown again at a break."},
+    "check": {"type": "string", "description": "A discrepancy only: the kind of rules check that failed, what a house rule silences (RUL-24)."},
+    "observation": {"type": "string", "description": "A discrepancy only: the checked observation's locator, observations/<session>.jsonl#<id>."}
+  },
+  "if": {"properties": {"kind": {"const": "discrepancy"}}},
+  "then": {"required": ["check", "observation"]},
+  "else": {"properties": {"check": false, "observation": false}}
 }

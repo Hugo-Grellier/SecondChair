@@ -13,7 +13,16 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute
 
-from secondchair.core import PROTOCOL_VERSION, capture, delegation, jobs, machine, vtt, world
+from secondchair.core import (
+    PROTOCOL_VERSION,
+    capture,
+    delegation,
+    jobs,
+    machine,
+    rules,
+    vtt,
+    world,
+)
 from secondchair.core.delegation import DelegationError
 from secondchair.core.tools import RegistrationError, load_tools
 from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
@@ -63,6 +72,18 @@ def build_server(ws: Workspace) -> MCPServer:
             fn,
             annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
             meta={"secondchair/gm_interaction": True},
+        )
+    # A discrepancy's fix, always held for the GM's approval (RUL-17): a delegated action whose
+    # level the Core caps, so not one of a block's tools.
+    for fn in rules.agent_tools(ws):
+        server.add_tool(
+            fn,
+            annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+            meta={
+                "secondchair/responsibility": rules.RESPONSIBILITY,
+                "secondchair/delegated_action": True,
+                "secondchair/reversible": True,
+            },
         )
     # A session taking and closing a queued job (ARC-29): job state, not canon. A settle-an-unless
     # job's answer and the wrap job's candidates (CAP-04) reach canon through the action log.

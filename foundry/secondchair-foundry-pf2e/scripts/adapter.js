@@ -21,6 +21,8 @@
  * @property {() => Record<string, unknown>} settings  the known rules settings -> value
  * @property {() => {foundry: string, system: string, system_version: string}} versions
  * @property {(name: string) => string} slugify  pf2e's slug of an English name
+ * @property {(uuid: string) => Promise<import("../../secondchair-foundry/scripts/actions.js").Doc | null>} resolve
+ *   the document a UUID names
  */
 
 /** The one Foundry and system major pair the adapter targets (RUL-02). */
@@ -48,6 +50,19 @@ export const RULES_SETTINGS = [
   "automation.rulesBasedVision",
   "automation.encumbrance",
 ].map((key) => `pf2e.${key}`);
+
+/**
+ * What `set_actor` may set on an actor: the fields a discrepancy's fix touches (RUL-17).
+ * ponytail: HP and focus; conditions and spell slots are items, fixed by the GM by hand.
+ */
+export const ACTOR_FIELDS = [
+  "system.attributes.hp.value",
+  "system.attributes.hp.temp",
+  "system.resources.focus.value",
+];
+
+/** @param {Record<string, unknown>} doc @param {string} path */
+const field = (doc, path) => path.split(".").reduce((/** @type {any} */ o, k) => o?.[k], doc);
 
 /** The PF2e world clock is Gregorian plus this many years (CONFIG.PF2E.worldClock.AR). */
 const YEAR_OFFSET = 2700;
@@ -124,6 +139,22 @@ export function createAdapter(env) {
   return {
     translations: TRANSLATIONS,
     ops: {
+      /** Set an actor's HP or focus points, such as a discrepancy's fix (RUL-17). */
+      async set_actor(target, params, expect) {
+        const keys = Object.keys(params);
+        if (!keys.length || keys.some((k) => !ACTOR_FIELDS.includes(k))) {
+          throw new Error(`set_actor sets ${ACTOR_FIELDS.join(", ")} only.`);
+        }
+        const actor = await env.resolve(target);
+        if (actor?.documentName !== "Actor") throw new Error(`No actor ${target} in this world.`);
+        const pick = () => Object.fromEntries(keys.map((k) => [k, field(actor, k)]));
+        const before = pick();
+        if (expect && Object.entries(expect).some(([k, v]) => before[k] !== v)) {
+          throw new Error(`${target} changed since: nothing was done.`);
+        }
+        await actor.update(params);
+        return { before, after: pick() };
+      },
       /**
        * Push a campaign date into the world clock, keeping its time of day (CAL-11): a whole
        * number of days, so the hour stays. Refused after 28 Calistril 4800 AR (CAL-13).

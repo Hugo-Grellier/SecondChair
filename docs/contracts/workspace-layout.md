@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, TRC-03, TRC-04, TRC-05, TRC-06, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
+Workspace schema version: **1**. Requirements: RUL-17, RUL-24, ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, TRC-03, TRC-04, TRC-05, TRC-06, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -14,6 +14,7 @@ my-campaign/
 ├── action-log/        # one YAML file per action log entry: 000001.yaml, 000002.yaml, …
 ├── jobs/              # one YAML file per job: 000001.yaml, …
 ├── calls/             # one YAML file per call on the GM: 000001.yaml, …
+├── house-rules.yaml   # the campaign's house rules, which silence a kind of rules check
 ├── observations/      # one JSON Lines file per live session: 000001.jsonl, …, and outside-sessions.jsonl
 ├── living-world.yaml  # the world-turn cursor; written by the first world-turn
 ├── occurrences/       # one YAML file per world-turn occurrence: 000001.yaml, …
@@ -185,6 +186,21 @@ shown: false            # a defaulted call shown again at a break
 - **Interruptions** (DEL-33, MET-06): calls with `interruption: true`, counted by the Core per live session and per responsibility (`calls.interruptions`), whatever Surface shows them.
 - Approving or rejecting a proposal answers its call.
 - A ceiling refusal takes no action by default: the action already failed.
+- A **discrepancy** (RUL-17) is a rules check that failed on an observation: `kind: discrepancy` under rules_and_combat, never blocking, so held for the break unless the cell's deadline mode forces now. It carries its `message` (what is inconsistent), the kind of `check` and the checked `observation`'s locator; it names no module. Its safe default takes no action. The GM answers it by marking it intended (a house rule, below) or approving a fix an agent proposed (`fix_discrepancy`, which answers it and is always a proposal).
+
+## `house-rules.yaml`
+
+The campaign's house rules (RUL-23, RUL-24), written by `secondchair house-rule mark <call> <name>` and `remove <name>`, each a `gm_interaction` log entry (`add_house_rule`, `remove_house_rule`):
+
+```yaml
+house_rules:
+  - name: Heroic nudge     # unique
+    check: degree          # the kind of rules check it silences
+    call: 7                # the discrepancy marked as intended
+    at: '2026-10-19T21:02:00+00:00'
+```
+
+While a house rule names a kind of check, no discrepancy of that kind is raised. Removing it restores the check for the observations recorded afterwards.
 
 ## `observations/`
 

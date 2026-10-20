@@ -46,6 +46,15 @@ test("the PF2e world clock reads as Absalom Reckoning, 2700 years after the Greg
  */
 function foundry() {
   const day = 86400;
+  const sella = {
+    uuid: "Actor.sella",
+    documentName: "Actor",
+    system: { attributes: { hp: { value: 5, temp: 0 } }, resources: { focus: { value: 1 } } },
+    /** @param {Record<string, number>} changes */
+    async update(changes) {
+      sella.system.attributes.hp.value = changes["system.attributes.hp.value"];
+    },
+  };
   const env = {
     /** seconds since 2025-03-01T00:00Z */
     worldTime: 21.5 * 3600,
@@ -91,6 +100,8 @@ function foundry() {
     versions: () => ({ foundry: "14.369", system: "pf2e", system_version: "8.6.1" }),
     /** @param {string} name */
     slugify: (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    /** @param {string} uuid */
+    resolve: async (uuid) => (uuid === sella.uuid ? sella : null),
   };
   return { env, day, adapter: createAdapter(env) };
 }
@@ -120,6 +131,16 @@ test("a date after 28 Calistril 4800 AR, or one the PF2e clock lacks, is refused
     );
   }
   assert.equal(env.worldTime, before);
+});
+
+test("a discrepancy's fix sets an actor's HP, checking what it expects", async () => {
+  const { adapter } = foundry();
+  const hp = "system.attributes.hp.value";
+  await assert.rejects(adapter.ops.set_actor("Actor.sella", { hp: 3 }, null), /sets system/);
+  await assert.rejects(adapter.ops.set_actor("Actor.nobody", { [hp]: 3 }, null), /No actor/);
+  await assert.rejects(adapter.ops.set_actor("Actor.sella", { [hp]: 10 }, { [hp]: 7 }), /changed/);
+  const result = await adapter.ops.set_actor("Actor.sella", { [hp]: 10 }, { [hp]: 5 });
+  assert.deepEqual(result, { before: { [hp]: 5 }, after: { [hp]: 10 } });
 });
 
 test("only Absalom Reckoning is synced", async () => {

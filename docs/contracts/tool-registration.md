@@ -112,6 +112,14 @@ A delegated action's `fn` that finds its change would contradict canon raises `s
 The Core's own delegated actions are all under memory and reversible: `create_entity`, `record_fact`, `correct_fact`, `record_event` and `record_knowledge` ([workspace layout](workspace-layout.md#canonfacts)).
 The mystery graph adds `record_mystery`, under prep and reversible ([workspace layout](workspace-layout.md#canonmysteries)).
 
+## Rules checks and discrepancies
+
+A System extension registers its rules checks (RUL-14) through the entry point group `secondchair.rules_checks`: a function `(observation, earlier) -> [(check, text)]`, where `earlier()` returns the observation's live session in capture order. The PF2e System extension registers `secondchair_pf2e.checks:check`, which tests each `pf2e.outcome` observation ([`pf2e-outcome.schema.json`](pf2e-outcome.schema.json)) against its own trace, with the kinds of check `modifiers`, `degree`, `damage`, `resource`, `conditions` and `activity`, reading third-party flags through its trace readers (`secondchair_pf2e.readers`, RUL-19). The Core runs every checker on each observation it records for the first time; a checker that raises is reported on stderr and checks nothing. A failed check is a **discrepancy**: a call on the GM ([workspace layout](workspace-layout.md#calls)), unless a house rule silences its kind.
+
+`fix_discrepancy(discrepancy, op, target, params, agent, job)` is served by the Core outside block registration, with the `_meta` of a delegated action under rules_and_combat: it proposes the VTT action that fixes an open discrepancy (such as the PF2e adapter's `set_actor`), which the Core holds at propose whatever the level, the proposal's call carrying the discrepancy as its message; the discrepancy's call is answered. Fixing is never automatic (RUL-17).
+
+On the CLI: `secondchair house-rule mark <call> <name>` marks an open discrepancy as intended, recording a named house rule that silences its kind of check (interactive terminal only, since it turns a check off); `secondchair house-rule list`; `secondchair house-rule remove <name>`, after which that kind of check runs again (RUL-24).
+
 ## GM interactions relayed by agents
 
 `approve_proposal(entry, gm_words)` is served by the Core itself, outside block registration, with `_meta: {"secondchair/gm_interaction": true}`. An agent calls it only when the GM approved a pending reversible action in conversation, quoting the GM's words; the approval is logged "via agent" with the quote (DEL-28). An irreversible action cannot be approved this way.

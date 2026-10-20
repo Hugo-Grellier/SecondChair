@@ -1,0 +1,230 @@
+# Recorded `pf2e.outcome` traces of one live session, in capture order, each with the rules
+# checks it must fail (RUL-16): the bench replays them without Foundry. The planted
+# inconsistencies stand for invisible house rules (a method wrapper, a compendium patch).
+- expect: []
+  envelope: &base
+    id: strike-ok
+    session: 1
+    at: '2026-10-19T20:15:00+00:00'
+    scene: Scene.s1
+    actor: Actor.goblin
+    kind: pf2e.outcome
+    visibility: players
+    payload:
+      type: attack-roll
+      message: m1
+      user: gm
+      actor: Actor.goblin
+      target: Actor.sella
+      action: strike
+      roll:
+        total: 22
+        natural: 14
+        modifiers:
+          - {label: Dogslicer, modifier: 10, enabled: true}
+          - {label: Multiple Attack Penalty, modifier: -2, enabled: true}
+          - {label: Flanking, modifier: 1, enabled: false}
+      dc: 20
+      degree: success
+      unadjusted: success
+      flags: {pf2e: {dosAdjustments: {}}}
+- expect: [modifiers]
+  envelope:
+    <<: *base
+    id: strike-sum
+    payload:
+      type: attack-roll
+      message: m2
+      user: gm
+      actor: Actor.goblin
+      target: Actor.sella
+      action: strike
+      roll:
+        total: 26
+        natural: 14
+        modifiers: [{label: Dogslicer, modifier: 10, enabled: true}]
+      dc: 20
+      degree: success
+      unadjusted: success
+      flags: {pf2e: {dosAdjustments: {}}}
+- expect: []
+  envelope:
+    <<: *base
+    id: save-evasion
+    actor: Actor.sella
+    payload:
+      type: saving-throw
+      message: m3
+      user: player1
+      actor: Actor.sella
+      target: null
+      action: null
+      roll: {total: 23, natural: 15, modifiers: [{label: Reflex, modifier: 8, enabled: true}]}
+      dc: 22
+      degree: criticalSuccess
+      unadjusted: success
+      flags: {pf2e: {dosAdjustments: {success: {label: Evasion, amount: criticalSuccess}}}}
+- expect: []
+  envelope:
+    <<: *base
+    id: natural-20
+    payload:
+      type: skill-check
+      message: m4
+      user: gm
+      actor: Actor.goblin
+      target: null
+      action: null
+      roll: {total: 25, natural: 20, modifiers: [{label: Stealth, modifier: 5, enabled: true}]}
+      dc: 30
+      degree: success
+      unadjusted: success
+      flags: {pf2e: {dosAdjustments: {}}}
+- expect: [degree]
+  envelope:
+    <<: *base
+    id: degree-raised
+    payload:
+      type: skill-check
+      message: m5
+      user: gm
+      actor: Actor.goblin
+      target: null
+      action: null
+      roll: {total: 15, natural: 10, modifiers: [{label: Athletics, modifier: 5, enabled: true}]}
+      dc: 20
+      degree: success
+      unadjusted: failure
+      flags: {pf2e: {dosAdjustments: {}}}
+- expect: [degree]
+  envelope:
+    <<: *base
+    id: toolbelt-save
+    payload:
+      type: spell-cast
+      message: m6
+      user: gm
+      actor: Actor.shaman
+      target: null
+      action: null
+      flags:
+        pf2e-toolbelt:
+          targetHelper:
+            type: spell
+            targets: [Scene.s1.Token.t1]
+            saveVariants:
+              "null":
+                basic: true
+                dc: 25
+                statistic: fortitude
+                saves:
+                  t1: {die: 12, value: 24, success: success, unadjustedOutcome: success, statistic: fortitude, roll: '{}', dosAdjustments: {}}
+- expect: []
+  envelope:
+    <<: *base
+    id: damage-resisted
+    actor: Actor.sella
+    payload:
+      type: damage-taken
+      message: m7
+      user: gm
+      actor: Actor.sella
+      target: null
+      action: null
+      damage: {total: 15, instances: [{type: fire, total: 15}]}
+      iwr: [{category: resistance, type: fire, adjustment: -5}]
+      hp: {before: {value: 30, temp: 0}, after: {value: 20, temp: 0}}
+      shield: null
+      flags: {}
+- expect: [damage]
+  envelope:
+    <<: *base
+    id: damage-unresisted
+    actor: Actor.sella
+    payload:
+      type: damage-taken
+      message: m8
+      user: gm
+      actor: Actor.sella
+      target: null
+      action: null
+      damage: {total: 15, instances: [{type: fire, total: 15}]}
+      iwr: [{category: resistance, type: fire, adjustment: -5}]
+      hp: {before: {value: 20, temp: 0}, after: {value: 5, temp: 0}}
+      shield: null
+      flags: {}
+- expect: []
+  envelope:
+    <<: *base
+    id: slot-spent
+    actor: Actor.shaman
+    payload:
+      type: spell-cast
+      message: m9
+      user: gm
+      actor: Actor.shaman
+      target: null
+      action: null
+      resource: {kind: slot, before: 3, after: 2}
+      flags: {}
+- expect: [resource]
+  envelope:
+    <<: *base
+    id: focus-kept
+    actor: Actor.shaman
+    payload:
+      type: spell-cast
+      message: m10
+      user: gm
+      actor: Actor.shaman
+      target: null
+      action: null
+      resource: {kind: focus, before: 1, after: 1}
+      flags: {}
+- expect: [conditions]
+  envelope:
+    <<: *base
+    id: frightened-zero
+    actor: Actor.goblin
+    visibility: gm
+    payload:
+      type: condition
+      message: null
+      user: gm
+      actor: Actor.goblin
+      target: null
+      action: null
+      conditions: {before: {frightened: 1}, after: {frightened: 0}}
+      flags: {}
+- expect: []
+  envelope:
+    <<: *base
+    id: demoralize
+    actor: Actor.sella
+    payload:
+      type: skill-check
+      message: m11
+      user: player1
+      actor: Actor.sella
+      target: Actor.goblin
+      action: demoralize
+      roll: {total: 21, natural: 11, modifiers: [{label: Intimidation, modifier: 10, enabled: true}]}
+      dc: 18
+      degree: success
+      unadjusted: success
+      flags: {pf2e: {dosAdjustments: {}}}
+- expect: [activity]
+  envelope:
+    <<: *base
+    id: frightened-two
+    actor: Actor.goblin
+    visibility: gm
+    payload:
+      type: condition
+      message: null
+      user: gm
+      actor: Actor.goblin
+      target: null
+      action: null
+      conditions: {before: {}, after: {frightened: 2}}
+      flags: {}
