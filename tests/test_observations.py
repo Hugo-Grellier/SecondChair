@@ -212,4 +212,5 @@ def test_an_observation_waits_for_the_workspace_lock_and_takes_it_reentrantly(
         assert observations.record(played, envelope("mine")) is None  # same thread: reentrant
     worker.join(5)
     assert done.is_set()
-    assert observations.find(played, "observations/000001.jsonl#late") is not None
+    for id_ in ("late", "mine"):
+        assert observations.find(played, f"observations/000001.jsonl#{id_}") is not None

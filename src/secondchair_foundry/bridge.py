@@ -142,6 +142,8 @@ class Bridge:
     def bind(self, world: str, campaign: str | None) -> str:
         """Check the world against the workspace's binding (PKG-09, ARC-18), binding an unbound
         world to an unbound workspace on first contact."""
+        # ponytail: waits on the event loop while a CLI gesture holds the lock, which stalls
+        # every socket; move the hello to a thread if long gestures make that noticeable.
         with delegation.locked(self.ws):  # read, check and write as one (#211)
             return self._bind(world, campaign)
 
