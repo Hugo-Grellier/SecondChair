@@ -541,7 +541,13 @@ test("a desired scene gets a document's guards: no ownership, clean HTML, no scr
 });
 
 test("a read path stays in Foundry's data: no URL, scheme, absolute path or ..", async () => {
-  for (const ok of ["", "maps", "modules/pf2e-beginner-box/assets/map.webp", "a..b/c.webp"])
+  for (const ok of [
+    "",
+    "maps",
+    "modules/pf2e-beginner-box/assets/map.webp",
+    "a..b/c.webp",
+    "modules/x/Log%20Fume%20-%20Tower/map.webp", // Foundry lists paths encoded
+  ])
     assert.equal(dataPath(ok), ok);
   const reads = genericReads({
     browse: async () => ({ dirs: [], files: [] }),
@@ -561,6 +567,11 @@ test("a read path stays in Foundry's data: no URL, scheme, absolute path or ..",
     "maps/../../x.png",
     "..",
     "maps\\..\\x.png",
+    "maps/%2e%2e/x.png",
+    "https%3A//evil.example/x.png",
+    "%2Fetc/passwd",
+    "maps/x.png%0a",
+    "%E0%A4%A",
   ]) {
     await assert.rejects(reads.image_size({ path: bad }), /relative/, bad);
     await assert.rejects(reads.browse_files({ path: bad }), /relative/, bad);

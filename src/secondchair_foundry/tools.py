@@ -10,6 +10,7 @@ import json
 import re
 from collections.abc import Iterator
 from typing import Any, Literal, TypedDict
+from urllib.parse import unquote
 
 import yaml
 
@@ -303,13 +304,17 @@ def _sets_ownership(value: object) -> bool:
 
 def _data_path(path: str) -> str:
     """`path` if it is relative to Foundry's data: no scheme or URL (`https:`, `data:`, `//`), no
-    leading `/`, no `..` segment, so a read never reaches outside the GM's install."""
-    if (
-        re.match(r"^[a-z][\w+.-]*:", path, re.IGNORECASE)
-        or path.startswith(("/", "\\"))
-        or ".." in re.split(r"[/\\]", path)
-    ):
-        raise ValueError(f"{path!r} is not a path in Foundry's data: give a relative one.")
+    leading `/`, no `..` segment, no control character, checked as given and percent-decoded
+    (Foundry lists paths encoded, `Log%20Fume`): a read never leaves the GM's install."""
+    decoded = unquote(path, errors="strict")
+    for text in (path, decoded):
+        if (
+            re.match(r"^[a-z][\w+.-]*:", text, re.IGNORECASE)
+            or text.startswith(("/", "\\"))
+            or ".." in re.split(r"[/\\]", text)
+            or re.search(r"[\x00-\x1f\x7f]", text)
+        ):
+            raise ValueError(f"{path!r} is not a path in Foundry's data: give a relative one.")
     return path
 
 

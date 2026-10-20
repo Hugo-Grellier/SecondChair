@@ -231,6 +231,11 @@ def test_an_image_size_is_asked_of_the_gm_client(bridge: str, token: str) -> Non
         "/etc/passwd",
         "maps/../../x.png",
         "maps\\..\\x.png",
+        "maps/%2e%2e/x.png",
+        "https%3A//evil.example/x.png",
+        "%2Fetc/passwd",
+        "maps/x.png%0a",
+        "maps/x.png\n",
     ],
 )
 @pytest.mark.parametrize("tool", ["image_size", "browse_files"])

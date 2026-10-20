@@ -332,9 +332,23 @@ const INDEXED = [
  * @param {unknown} path @returns {string} */
 export function dataPath(path) {
   const text = String(path ?? "");
-  const segments = text.split(/[/\\]/);
-  if (/^[a-z][\w+.-]*:/i.test(text) || /^[/\\]/.test(text) || segments.includes("..")) {
+  const refuse = () => {
     throw new Error(`"${text}" is not a path in Foundry's data: give a relative one.`);
+  };
+  /** @type {string} */
+  let decoded = "";
+  try {
+    decoded = decodeURIComponent(text); // Foundry lists paths encoded (`Log%20Fume`)
+  } catch {
+    refuse();
+  }
+  for (const t of [text, decoded]) {
+    const segments = t.split(/[/\\]/);
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are refused
+    const control = /[\u0000-\u001f\u007f]/.test(t);
+    if (/^[a-z][\w+.-]*:/i.test(t) || /^[/\\]/.test(t) || segments.includes("..") || control) {
+      refuse();
+    }
   }
   return text;
 }
