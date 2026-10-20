@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/pf2e-outcome.schema.json",
+  "title": "PF2e outcome trace",
+  "description": "The payload of a `pf2e.outcome` observation (RUL-13), which the PF2e system adapter `secondchair-foundry-pf2e` emits in every mode of play for each outcome it sees: a check roll, a damage roll, damage taken, a spell cast, a condition change. Each section is present only when the outcome has it. The PF2e System extension's rules checks read nothing else (RUL-14, RUL-15). Protocol version 0.1.0.",
+  "type": "object",
+  "required": ["type", "message", "user", "actor", "target", "action", "flags"],
+  "additionalProperties": false,
+  "$defs": {
+    "degree": {"enum": ["criticalFailure", "failure", "success", "criticalSuccess", null]},
+    "hp": {
+      "type": "object",
+      "required": ["value", "temp"],
+      "additionalProperties": false,
+      "properties": {"value": {"type": "integer"}, "temp": {"type": "integer"}}
+    },
+    "conditions": {
+      "type": "object",
+      "description": "Condition slug -> its value, null for a condition with none.",
+      "additionalProperties": {"type": ["integer", "null"]}
+    }
+  },
+  "properties": {
+    "type": {"type": "string", "description": "pf2e's context type (attack-roll, saving-throw, skill-check, damage-roll, damage-taken, spell-cast, …), or `condition` for a condition change."},
+    "message": {"type": ["string", "null"], "description": "The chat message's id, null for a condition change."},
+    "user": {"type": ["string", "null"], "description": "The Foundry user whose client made it (RUL-17)."},
+    "actor": {"type": ["string", "null"], "description": "The rolling, casting or affected actor's UUID."},
+    "target": {"type": ["string", "null"], "description": "The targeted actor's UUID, if any."},
+    "action": {"type": ["string", "null"], "description": "The activity rolled, from pf2e's `action:<slug>` roll option (demoralize, trip, …)."},
+    "roll": {
+      "type": "object",
+      "description": "A check's roll and its breakdown.",
+      "required": ["total", "natural", "modifiers"],
+      "additionalProperties": false,
+      "properties": {
+        "total": {"type": "integer"},
+        "natural": {"type": ["integer", "null"], "description": "The d20 kept, null for a roll without one."},
+        "modifiers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "modifier", "enabled"],
+            "additionalProperties": false,
+            "properties": {"label": {"type": "string"}, "modifier": {"type": "integer"}, "enabled": {"type": "boolean"}}
+          }
+        }
+      }
+    },
+    "dc": {"type": ["integer", "null"]},
+    "degree": {"$ref": "#/$defs/degree", "description": "The degree pf2e recorded, after adjustment."},
+    "unadjusted": {"$ref": "#/$defs/degree", "description": "The degree before adjustment."},
+    "damage": {
+      "type": "object",
+      "description": "Damage taken: the damage roll applied, before IWR.",
+      "required": ["total", "instances"],
+      "additionalProperties": false,
+      "properties": {
+        "total": {"type": "integer"},
+        "instances": {"type": "array", "items": {"type": "object", "required": ["type", "total"], "properties": {"type": {"type": "string"}, "total": {"type": "integer"}}}}
+      }
+    },
+    "iwr": {
+      "type": "array",
+      "description": "Damage taken: the immunities, weaknesses, resistances and hardness pf2e applied, as its damage-taken message shows them.",
+      "items": {
+        "type": "object",
+        "required": ["category", "type", "adjustment"],
+        "properties": {"category": {"type": "string"}, "type": {"type": "string"}, "adjustment": {"type": "integer"}}
+      }
+    },
+    "hp": {
+      "type": "object",
+      "description": "Damage taken: the actor's HP and temporary HP before and after.",
+      "required": ["before", "after"],
+      "additionalProperties": false,
+      "properties": {"before": {"$ref": "#/$defs/hp"}, "after": {"$ref": "#/$defs/hp"}}
+    },
+    "shield": {"type": ["integer", "null"], "description": "Damage taken: the damage a blocking shield took, null when none blocked."},
+    "resource": {
+      "type": "object",
+      "description": "A spell cast: what it spends, counted before and after (a spontaneous slot's uses, prepared copies not expended, focus points, innate uses); `none` for a cantrip or a free cast.",
+      "required": ["kind", "before", "after"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["slot", "focus", "innate", "none"]},
+        "before": {"type": "integer"},
+        "after": {"type": "integer"}
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "description": "A condition change: the actor's conditions before (absent when the adapter had not seen them yet) and after.",
+      "required": ["after"],
+      "additionalProperties": false,
+      "properties": {"before": {"$ref": "#/$defs/conditions"}, "after": {"$ref": "#/$defs/conditions"}}
+    },
+    "flags": {
+      "type": "object",
+      "description": "Evidence for the trace readers (RUL-19), as the modules wrote it: `pf2e` ({dosAdjustments}), and when active `pf2e-toolbelt` (the message's), `pf2e-visioner` (the actor's token's), `pf2e-reaction` and `pf2e-combater` (its combatant's), `sundry` ({effects: the actor's effect slugs}).",
+      "additionalProperties": {"type": "object"}
+    }
+  }
+}

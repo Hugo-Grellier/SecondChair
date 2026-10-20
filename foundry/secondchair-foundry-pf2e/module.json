@@ -1,7 +1,7 @@
 {
   "id": "secondchair-foundry-pf2e",
   "title": "SecondChair for Pathfinder Second Edition",
-  "description": "The PF2e system adapter of SecondChair: it plugs into the SecondChair module to give the GM's local SecondChair the rules context, official names in the campaign language and the Absalom Reckoning calendar sync. Requires the SecondChair module; sends nothing to any AI service by itself.",
+  "description": "The PF2e system adapter of SecondChair: it plugs into the SecondChair module to give the GM's local SecondChair the rules context, each outcome's trace for its rules checks, official names in the campaign language and the Absalom Reckoning calendar sync. Requires the SecondChair module; sends nothing to any AI service by itself.",
   "version": "0.1.0",
   "compatibility": {
     "minimum": "14",

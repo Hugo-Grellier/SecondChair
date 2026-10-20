@@ -58,9 +58,10 @@ def problem(envelope: object) -> str | None:
 
 
 def record(ws: Workspace, envelope: object) -> str | None:
-    """Append `envelope` to its session's file, once per id. Returns why it is refused, or None
-    when it is recorded (or already was). An observation of a session not opened yet is refused;
-    one of an ended session is still recorded: it was captured live and delivered late."""
+    """Append `envelope` to its session's file, once per id, then run the rules checks on it
+    (RUL-14). Returns why it is refused, or None when it is recorded (or already was). An
+    observation of a session not opened yet is refused; one of an ended session is still
+    recorded: it was captured live and delivered late."""
     if reason := problem(envelope):
         return reason
     assert isinstance(envelope, dict)
@@ -78,6 +79,9 @@ def record(ws: Workspace, envelope: object) -> str | None:
             out.write(("\n" if torn else "") + json.dumps(envelope, ensure_ascii=False) + "\n")
             out.flush()
             os.fsync(out.fileno())
+    from secondchair.core import rules  # it raises calls, which build on delegation
+
+    rules.check(ws, envelope)
     return None
 
 
