@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from secondchair import runner
+from secondchair import runner, transcribe
 from secondchair.core import calls, canon, delegation, index, jobs, machine, workspace
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
@@ -68,6 +68,41 @@ def configured_runners() -> tuple[dict[str, list[dict[str, str]]], dict[str, lis
     ):
         raise MachineConfigError(f"{path}: hosts must map host names to command lists.")
     return runners, {**runner.HOSTS, **hosts}
+
+
+def configured_transcription() -> list[str] | None:
+    """The transcription engine's command template, or None for WhisperX's."""
+    path, config = _machine_config()
+    template = config.get("transcription")
+    if template is not None and not (
+        isinstance(template, list) and template and all(isinstance(a, str) for a in template)
+    ):
+        raise MachineConfigError(f"{path}: transcription must be a command list.")
+    return template
+
+
+def _track(value: str) -> tuple[str, Path]:
+    """A speaker track `discord-user=audio-file`."""
+    speaker, sep, path = value.partition("=")
+    if not sep or not speaker or not path:
+        raise argparse.ArgumentTypeError(f"{value!r}: expected discord-user=audio-file")
+    return speaker, Path(path)
+
+
+def _transcribe_command(args: argparse.Namespace) -> None:
+    ws = workspace.load(args.workspace)
+    if args.source:
+        if args.tracks:
+            raise transcribe.TranscriptionError("Give either speaker tracks or --from, not both.")
+        source_id = transcribe.register(ws, args.session, args.source)
+        print(f"Referenced transcript {source_id} for session {args.session}.")
+        return
+    tracks = dict(args.tracks)
+    if len(tracks) != len(args.tracks):
+        raise transcribe.TranscriptionError("Give one track per speaker.")
+    template = configured_transcription()
+    out = transcribe.transcribe(ws, args.session, tracks, args.out, args.language, template)
+    print(f"Transcript of session {args.session}: {out}")
 
 
 HOST_SETUP = {
@@ -205,7 +240,7 @@ def check(ws: workspace.Workspace) -> int:
     """Rebuild the derived index and validate the workspace from the directory alone, with no
     Foundry or Source (CAN-10, PKG-15); 1 if a file is invalid. Lists the hand edits the
     rebuild logged that await the GM (CAN-11)."""
-    errors = dict.fromkeys(index.rebuild(ws) + delegation.check(ws))
+    errors = dict.fromkeys(index.rebuild(ws) + delegation.check(ws) + transcribe.check(ws))
     for error in errors:
         print(f"secondchair: {error}", file=sys.stderr)
     entities, facts, events = index.counts(ws)
@@ -422,6 +457,28 @@ def main(argv: list[str] | None = None) -> int:
         "run", parents=[sub_workspace], help="start queued jobs with the configured runner"
     )
     run_cmd.add_argument("job", type=int, nargs="?", help="one job (default: every queued job)")
+    transcribe_cmd = commands.add_parser(
+        "transcribe",
+        parents=[in_workspace],
+        help="transcribe a played session's per-speaker tracks, or reference an attributed "
+        "transcript; both stay outside the workspace",
+    )
+    transcribe_cmd.add_argument("--session", type=int, required=True, help="the session id")
+    transcribe_cmd.add_argument(
+        "tracks", type=_track, nargs="*", help="one per speaker: discord-user=audio-file"
+    )
+    transcribe_cmd.add_argument(
+        "--from",
+        dest="source",
+        type=Path,
+        help="a transcript any engine produced in the transcript format, instead of tracks",
+    )
+    transcribe_cmd.add_argument(
+        "--out", type=Path, help="the transcript (default: session-<id>.jsonl by the first track)"
+    )
+    transcribe_cmd.add_argument(
+        "--language", help="the language spoken (default: the campaign language)"
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -451,6 +508,8 @@ def main(argv: list[str] | None = None) -> int:
             serve(workspace.load(args.workspace), configured_port())
         elif args.command == "jobs":
             return _jobs_command(args)
+        elif args.command == "transcribe":
+            _transcribe_command(args)
         else:
             print(_gm_command(args))
     except (
@@ -460,6 +519,7 @@ def main(argv: list[str] | None = None) -> int:
         DelegationError,
         CanonError,
         runner.RunnerError,
+        transcribe.TranscriptionError,
         OSError,
     ) as e:
         print(f"secondchair: {e}", file=sys.stderr)
