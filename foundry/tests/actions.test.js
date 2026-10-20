@@ -23,6 +23,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
     ["Scene.s.Token.t", "Token", { x: 100, y: 200, hidden: true }],
     ["Scene.s.Wall.w", "Wall", { ds: 0 }],
     ["JournalEntry.j", "JournalEntry", { ownership: { default: 0 } }],
+    ["User.u", "User", { name: "Alice" }],
   ])) {
     docs[uuid] = {
       documentName,
@@ -50,6 +51,13 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
     said.push(line);
     return `m${said.length}`;
   };
+  /** @type {[unknown, string][]} */
+  const told = [];
+  /** @param {unknown} user @param {string} line */
+  const tell = async (user, line) => {
+    told.push([/** @type {any} */ (user).name, line]);
+    return `w${told.length}`;
+  };
   /** @type {unknown[]} */
   let saved = [];
   const store = {
@@ -65,6 +73,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
     ceiling: () => ceiling,
     language: () => "fr",
     say,
+    tell,
   });
   /** @param {object} request */
   const handle = async (request) => {
@@ -92,6 +101,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
   return {
     docs,
     said,
+    told,
     handle,
     read,
     store,
@@ -103,6 +113,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
         ceiling: () => ceiling,
         language: () => "fr",
         say,
+        tell,
       }),
   };
 }
@@ -238,6 +249,30 @@ test("a creature speaks a line aloud, which no undo takes back", async () => {
   const wall = await handle({ id: "s3", expect: null, ...line, target: "Scene.s.Wall.w" });
   assert.match(wall.ok ? "" : wall.error, /not a Token/);
   assert.deepEqual(said, ["Die, longshanks!"]);
+});
+
+test("a whisper reaches one player, and no undo takes it back", async () => {
+  const { told, handle } = world();
+  const line = { op: "whisper", target: "User.u", params: { content: "The gauge is dry." } };
+  const whispered = await handle({ id: "w1", expect: null, ...line });
+  assert.deepEqual(whispered, {
+    type: "reply",
+    id: "w1",
+    ok: true,
+    before: { message: null },
+    after: { message: "w1" },
+  });
+  assert.deepEqual(told, [["Alice", "The gauge is dry."]]);
+  const undo = await handle({
+    id: "w2",
+    ...line,
+    params: { message: null },
+    expect: { message: "w1" },
+  });
+  assert.equal(undo.ok, false);
+  const token = await handle({ id: "w3", expect: null, ...line, target: "Scene.s.Token.t" });
+  assert.match(token.ok ? "" : token.error, /not a User/);
+  assert.equal(told.length, 1);
 });
 
 test("a generic action refuses the wrong document or fields", async () => {

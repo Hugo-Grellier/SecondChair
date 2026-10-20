@@ -419,6 +419,8 @@ def act(
             effect["after"] = change.params
             if change.cites is not None:
                 effect["cites"] = _check_cites(ws, change.cites, entity)
+            if change.whisper:  # held for the wrap of this session (CAP-08)
+                effect.update(whisper=True, session=current_session(ws))
         elif isinstance(change, Change):
             path = _target(ws, change.path)
             effect = {"target": change.path, "before": path.read_text() if path.exists() else None}
@@ -819,48 +821,109 @@ def _check_cites(ws: Workspace, cites: list[str], entity: str | None = None) -> 
 def _disclose(ws: Workspace, disclosure: dict) -> None:
     """Mark the facts an applied disclosure cites as known by the party, on the current date and
     in the current session (null outside one): one irreversible action entry per knowledge
-    record, approved as the disclosure was (CAN-17). Callers hold the lock."""
-    from secondchair.core import capture, index
-
-    if not disclosure.get("cites"):
+    record, approved as the disclosure was (CAN-17). A whisper marks none (CAP-08:
+    `hold_whispers`). Callers hold the lock."""
+    if not disclosure.get("cites") or disclosure.get("whisper"):
         return
-    known = {k["fact"] for k in index.search_knowledge(ws, [index.PARTY]) if k["mode"] == "knows"}
-    locator = f"{LOG_DIR}/{disclosure['id']:06d}.yaml"
-    date, session = capture.time(ws)["current_date"], current_session(ws)
-    for fact in dict.fromkeys(disclosure["cites"]):
-        if fact in known:
-            continue
-        record = {
-            "id": f"k-{secrets.token_hex(4)}",
-            "knower": index.PARTY,
-            "fact": fact,
-            "mode": "knows",
-            "date": date,
-            "event": None,
-            "rank": "played",  # shown at the table, quoted by the disclosure's entry
-            "origin": {
-                "kind": "observation",
-                "quote": f"{disclosure['tool']} {disclosure['target']}",
-                "locator": locator,
-            },
-            "session": session,
-        }
-        mark = {
-            **{k: disclosure[k] for k in ("kind", "moment", "moment_seq", "tool")},
-            **{k: disclosure[k] for k in ("responsibility", "effective_level", "agent", "job")},
-            "override_lowered": False,
-            "entity": None,
-            "reversible": False,
-            "source": f"disclosure {locator}",
-            "runner_configuration": disclosure["runner_configuration"],
-            "target": f"{index.KNOWLEDGE_DIR}/{record['id']}.md",
-            "before": None,
-            "after": index.join_doc(record, ""),
-            "status": "applied",
-            "approval": disclosure["approval"],
-        }
+    known = _known_to_party(ws)
+    for fact in (f for f in dict.fromkeys(disclosure["cites"]) if f not in known):
+        mark = _party_learns(ws, disclosure, fact, current_session(ws))
         _apply(ws, mark, "after")
         _append(ws, mark)
+
+
+def hold_whispers(ws: Workspace, session: int) -> set[int]:
+    """At the wrap, each fact an applied whisper of `session` (or of no session) cited that the
+    party does not know yet becomes a call on the GM: its party knowledge record held at
+    propose, which the GM approves if the player shared it (CAP-08). A fact is held once,
+    however many whispers cited it, and never once it is no longer true. Returns the entries of
+    every such record. Callers hold the lock."""
+    from secondchair.core import calls, index
+
+    entries, _ = read_log(ws)
+    whispers = {
+        f"whisper {LOG_DIR}/{e['id']:06d}.yaml": e
+        for e in entries
+        if e.get("whisper") and e.get("session") in (session, None) and e["status"] == "applied"
+    }
+    held = [e for e in entries if e.get("source") in whispers]
+    marks = {e["id"] for e in held}
+    asked = _known_to_party(ws) | {index.split_doc(e["after"])[0]["fact"] for e in held}
+    moment, seq = current_moment(ws)
+    for source, whisper in whispers.items():
+        for fact in dict.fromkeys(whisper.get("cites") or []):
+            try:
+                _check_cites(ws, [fact])  # canon may have changed since it was whispered
+            except DelegationError:
+                continue
+            if fact in asked:
+                continue
+            asked.add(fact)
+            mark = _party_learns(ws, whisper, fact, whisper["session"])
+            mark.update(
+                moment=moment,
+                moment_seq=seq,
+                effective_level="propose",
+                source=source,
+                status="pending",
+                approval=None,
+            )
+            logged = _append(ws, mark)
+            marks.add(logged["id"])
+            calls.open_call(
+                ws,
+                kind="proposal",
+                responsibility=whisper["responsibility"],
+                table_moment=moment,
+                blocking=False,
+                entry=logged["id"],
+                message=f"Whispered to {whisper['target']}, not shown to the table (CAP-08): "
+                f"approve if the party knows {fact} now.",
+            )
+    return marks
+
+
+def _known_to_party(ws: Workspace) -> set[str]:
+    from secondchair.core import index
+
+    return {k["fact"] for k in index.search_knowledge(ws, [index.PARTY]) if k["mode"] == "knows"}
+
+
+def _party_learns(ws: Workspace, disclosure: dict, fact: str, session: int | None) -> dict:
+    """The irreversible action entry writing the party's knowledge of `fact`, learned from
+    `disclosure` on the current date, logged as the disclosure was."""
+    from secondchair.core import capture, index
+
+    locator = f"{LOG_DIR}/{disclosure['id']:06d}.yaml"
+    record = {
+        "id": f"k-{secrets.token_hex(4)}",
+        "knower": index.PARTY,
+        "fact": fact,
+        "mode": "knows",
+        "date": capture.time(ws)["current_date"],
+        "event": None,
+        "rank": "played",  # said or shown in play, quoted by the disclosure's entry
+        "origin": {
+            "kind": "observation",
+            "quote": f"{disclosure['tool']} {disclosure['target']}",
+            "locator": locator,
+        },
+        "session": session,
+    }
+    return {
+        **{k: disclosure[k] for k in ("kind", "moment", "moment_seq", "tool")},
+        **{k: disclosure[k] for k in ("responsibility", "effective_level", "agent", "job")},
+        "override_lowered": False,
+        "entity": None,
+        "reversible": False,
+        "source": f"disclosure {locator}",
+        "runner_configuration": disclosure["runner_configuration"],
+        "target": f"{index.KNOWLEDGE_DIR}/{record['id']}.md",
+        "before": None,
+        "after": index.join_doc(record, ""),
+        "status": "applied",
+        "approval": disclosure["approval"],
+    }
 
 
 # Hand edits (CAN-11): a canon file changed outside the Core.

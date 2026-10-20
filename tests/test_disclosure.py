@@ -15,13 +15,14 @@ from test_delegation import gm, log
 from test_knowledge import learn
 
 from secondchair.cli import main
-from secondchair.core import delegation, index, knowledge, vtt, workspace
+from secondchair.core import calls, capture, delegation, index, jobs, knowledge, vtt, workspace
 from secondchair.core.delegation import DelegationError
 from secondchair.core.server import build_server
 from secondchair.core.workspace import Workspace
 from secondchair_foundry import desk
 
 TOKEN = "Scene.s1.Token.t1"
+PLAYER = "User.u1"
 
 
 class FakeVtt:
@@ -29,10 +30,14 @@ class FakeVtt:
 
     def __init__(self) -> None:
         self.docs: dict[str, dict] = {TOKEN: {"hidden": True}}
+        self.whispered: list[tuple[str, str]] = []
 
     def perform(
         self, op: str, target: str, params: dict, expect: dict | None, level: str | None
     ) -> tuple[dict, dict]:
+        if op == "whisper":
+            self.whispered.append((target, params["content"]))
+            return {"message": None}, {"message": f"m{len(self.whispered)}"}
         assert op == "reveal_token"
         before = dict(self.docs[target])
         self.docs[target].update(params)
@@ -240,6 +245,37 @@ def test_an_npc_disclosure_is_checked_again_at_approval(
 
     with pytest.raises(DelegationError, match="does not know"):
         delegation.approve(ws, log(ws)[-1]["id"], "cli", authenticated=True)
+
+
+def test_a_whisper_marks_nothing_known_by_the_party_and_the_wrap_asks_the_gm(
+    ws: Workspace, foundry: FakeVtt, clue: str
+) -> None:
+    set_disclosure(ws, "act-then-review")
+    lift(ws)
+
+    told = call(
+        ws, "whisper", user=PLAYER, line="The gauge is dry.", cites=[clue], agent="claude-live"
+    )
+
+    assert told.structured_content["status"] == "applied", told
+    assert foundry.whispered == [(PLAYER, "The gauge is dry.")]
+    assert knowledge.known(ws, index.PARTY) == {}  # CAP-08: one player is not the party
+    call(ws, "whisper", user="User.u2", line="Dry.", cites=[clue], agent="claude-live")
+    delegation.change_moment(ws, "between-sessions")
+    jobs.start(ws, 1, {"host": "h", "model": "m", "effort": "e"}, manual=True)
+    jobs.end(ws, 1)
+
+    [question] = capture.wrap(ws, 1, authenticated=True, end="4725-03-03")["questions"]
+    assert (question["kind"], question["responsibility"]) == ("proposal", "disclosure")
+    assert "Whispered to User.u1" in question["message"]
+    again = capture.wrap(ws, 1, authenticated=True, end="4725-03-03")["questions"]
+    assert [q["id"] for q in again] == [question["id"]]  # held once, not twice
+
+    delegation.approve(ws, question["entry"], "cli", authenticated=True)
+    assert capture.wrap(ws, 1, authenticated=True, end="4725-03-03")["settled"] is not None
+    learned = knowledge.known(ws, index.PARTY)[clue]
+    assert (learned["mode"], learned["date"]) == ("knows", "4725-03-02")
+    assert [c for c in calls.read_calls(ws) if c["status"] == "open"] == []
 
 
 def tool_names(ws: Workspace) -> set[str]:

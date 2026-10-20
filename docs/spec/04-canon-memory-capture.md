@@ -28,7 +28,7 @@ Decisions: [ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md), [ADR 0008](..
 - **CAN-14** A knower knows, believes or suspects a fact, with when it learned it (fictional date and event). The model is closed-world, plus inheritance from the knower's factions and the **common knowledge** of the places it lives in.
 - **CAN-15** A **belief** is a fact recorded as never true, which a knower believes.
 - **CAN-16** Content written for an audience (an NPC line in an acting cue, a disclosure, an entity description) MUST cite the ids of the facts it uses. The Core refuses it if the audience does not know a cited fact, refuses unknown ids, and scans it for forbidden strings (secret names, canaries). Paraphrased leaks are not blocked; the test bench measures them. A disclosure is the exception: its cited facts teach the party (CAN-17), so the party need not know them beforehand. No knower bounds a disclosure the GM authored: its cited facts MUST exist in canon, be true and carry no canary, and the GM's authenticated approval (or a lifted hold, DEL-09a) is the gate. When an NPC (the acting entity) discloses, it MUST know every fact it cites.
-- **CAN-17** A disclosure marks the facts it cites as known by the party, with the fictional date and the session.
+- **CAN-17** A disclosure marks the facts it cites as known by the party, with the fictional date and the session. A whisper to one player does not: its cited facts become calls held for the wrap (CAP-08; GM decision, [#118](https://github.com/Hugo-Grellier/SecondChair/issues/118)).
 
 ## Campaign language and names ([#16](https://github.com/Hugo-Grellier/SecondChair/issues/16), [#17](https://github.com/Hugo-Grellier/SecondChair/issues/17))
 
