@@ -28,6 +28,7 @@ my-campaign/
 │   ├── mysteries/     # one Markdown file per mystery graph, named by the mystery entity's id
 │   └── knowledge/     # one Markdown file per knowledge record: k-1a2b3c4d.md
 ├── scenes/            # one YAML file per prepared scene's desired state: goblin-cave.yaml
+├── prep/              # the GM's prep notes, Markdown written by `write_prep`: session-3/handoff.md
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
 ├── speakers.yaml      # the speaker table (CAP-02); written by the GM
 ├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
@@ -365,6 +366,10 @@ sessions:
 - The VTT clock observed during the session proposes it too (CAL-14): the first and last `clock` observations of the session ([foundry-bridge.md](foundry-bridge.md), "The rules context and the world clock"). The wrap takes it when the notes give no interval (`from: clock`), and asks the GM for `--start` and `--end` when the two disagree.
 - `secondchair date` shows the current date; `secondchair date <date>`, in an interactive terminal, sets it (a GM gesture). At session start a served Core pushes it into the VTT clock when the calendar is a System extension's named one (CAL-11).
 - `secondchair wrap <session> [--start <date>] [--end <date>]`, in an interactive terminal and outside a live session, is the GM's grouped round (CAP-13). It refuses while a wrap job for the session is queued or started, or a candidate is not consolidated. First come the session's open calls, held questions with contradictions leading, then pending proposals, among them the facts the session's whispers cited (CAP-08, [knowledge](#canonknowledge)), which the GM answers with `secondchair approve` or `secondchair reject`, then, once none is open, what was applied with its action log entries, each undoable with `secondchair log undo`. It then settles the interval (the GM's dates over the notes' or the clock's, `from: gm`; it asks for `--end` when none gives one), refuses an end before the current date, moves the current date to the end and queues the world-turn job (`world-turn`, under living world, inputs `until`, the new current date, and `since`, the session start, used only while `living-world.yaml` has no cursor) (LW-07). Its agent starts the Core's world-turn with `run_world_turn`; the GM may run `secondchair world turn` instead. A wrapped session is not wrapped again.
+
+## `prep/`
+
+Markdown the GM reads to run a session, written by agents with `write_prep` (responsibility prep, logged and undoable) or by the GM by hand. The `prepare-a-session` playbook writes `session-<n>/handoff.md`; `quick-help` may append improvised cards to `session-<n>/improv.md`. Paths are lowercase words joined by dashes, folders allowed, ending in `.md`. Prep is a desired state, not canon (ADR 0007): nothing here is read as truth, and what is played becomes canon only at the wrap.
 
 ## `canon/entities/`
 

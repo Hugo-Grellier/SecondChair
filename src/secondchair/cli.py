@@ -231,19 +231,20 @@ def _gm_command(args: argparse.Namespace) -> str:
     if args.command == "confirm":
         if not auth:  # DEL-29
             raise DelegationError("Confirming a GM decision needs an interactive terminal.")
-        entry = canon.confirm(ws, args.id, "cli", auth)
-        return f"Confirmed {args.id} as a GM decision (entry {entry['id']})."
+        done = [f"{i} (entry {canon.confirm(ws, i, 'cli', auth)['id']})" for i in args.id]
+        return f"Confirmed as GM decisions: {', '.join(done)}."
     if args.command == "wrap":
         return _describe_wrap(capture.wrap(ws, args.session, auth, args.start, args.end))
     if args.command == "promote":
         delegation.promote(ws, args.entry, "cli", auth)
         return f"Promoted hand edit {args.entry} to a GM decision."
     if args.command == "approve":
-        if _in_vtt(ws, args.entry):
-            _relay(ws, {"gesture": "approve", "entry": args.entry, "authenticated": auth})
-        else:
-            delegation.approve(ws, args.entry, "cli", auth)
-        return f"Approved and applied entry {args.entry}."
+        for entry in args.entry:  # one at a time, in order: the first refusal stops the rest
+            if _in_vtt(ws, entry):
+                _relay(ws, {"gesture": "approve", "entry": entry, "authenticated": auth})
+            else:
+                delegation.approve(ws, entry, "cli", auth)
+        return f"Approved and applied {_entries(args.entry)}."
     if args.command == "reject":
         delegation.reject(ws, args.entry, args.reason, "cli", auth)
         return f"Rejected entry {args.entry} ({args.reason})."
@@ -253,6 +254,10 @@ def _gm_command(args: argparse.Namespace) -> str:
     else:
         delegation.undo(ws, args.entry, args.reason, "cli", auth)
     return f"Undid entry {args.entry} ({args.reason})."
+
+
+def _entries(ids: list[int]) -> str:
+    return f"entry {ids[0]}" if len(ids) == 1 else f"entries {', '.join(map(str, ids))}"
 
 
 def _describe_call(call: dict) -> str:
@@ -584,16 +589,17 @@ def main(argv: list[str] | None = None) -> int:
     rule_sub.add_parser(
         "remove", parents=[in_workspace], help="remove a house rule: its checks run again"
     ).add_argument("name")
-    for name, help_text, parents in (
-        ("approve", "approve a pending action", [in_workspace]),
-        ("reject", "reject a pending action", [in_workspace, reason]),
-    ):
-        commands.add_parser(name, parents=parents, help=help_text).add_argument("entry", type=int)
+    commands.add_parser(
+        "approve", parents=[in_workspace], help="approve pending actions, in the order given"
+    ).add_argument("entry", type=int, nargs="+")
+    commands.add_parser(
+        "reject", parents=[in_workspace, reason], help="reject a pending action"
+    ).add_argument("entry", type=int)
     commands.add_parser(
         "confirm",
         parents=[in_workspace],
-        help="confirm a fact or event relayed from your words as a GM decision (interactive only)",
-    ).add_argument("id", help="the fact or event id, f-… or v-…")
+        help="confirm facts or events relayed from your words as GM decisions (interactive only)",
+    ).add_argument("id", nargs="+", help="the fact or event ids, f-… or v-…")
     wrap_cmd = commands.add_parser(
         "wrap",
         parents=[in_workspace],
