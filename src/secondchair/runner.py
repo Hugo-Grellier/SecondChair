@@ -37,6 +37,8 @@ HOSTS: dict[str, list[str]] = {
         "--allowedTools",
         "mcp__secondchair Read",
         # A job has no GM at hand: relaying the GM's approval is never a job's to do (DEL-27).
+        # ponytail: only the built-in templates withhold it; a GM-defined host in the machine
+        # configuration must do the same, until the Core refuses it to a job's session.
         "--disallowedTools",
         "mcp__secondchair__approve_proposal",
     ],
