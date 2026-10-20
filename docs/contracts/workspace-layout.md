@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAP-03, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAP-01, CAP-02, CAP-03, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -22,11 +22,13 @@ my-campaign/
 │   ├── mysteries/     # one Markdown file per mystery graph, named by the mystery entity's id
 │   └── knowledge/     # one Markdown file per knowledge record: k-1a2b3c4d.md
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
+├── speakers.yaml      # the speaker table (CAP-02); written by the GM
+├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
 └── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on); git-ignored, rebuildable
 ```
 
-Later contracts add decisions, the speaker table and friction reports, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
+Later contracts add decisions and friction reports, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
 
 ## `workspace.yaml`
 
@@ -293,6 +295,35 @@ origin: {kind: source, source: bible.md, page: "B14"}
 - Knowledge is closed-world: a knower holds only its own records, plus those of the factions it is a `member_of` and the places it `lives_in` (one level; a faction never inherits from its members). With a date, only relations valid then and records learned by then count. A fact held several ways takes its strongest mode (knows, then believes, then suspects).
 - A never-true fact is believed or suspected, never known. Records on retconned facts are ignored.
 - Content written for an audience (an NPC line, a disclosure, an entity description) cites the ids of the facts it uses and goes through `check_audience_content` (CAN-16): refused when a cited id is not in canon, when the audience does not hold a cited fact, or when the text carries a canary (`CANARY-<zone>-<n>`) or an entity name (or alias) that appears in no fact the audience holds, the audience's own names excepted. Names match whole-word and case-sensitive; paraphrased leaks are not blocked, the test bench measures them.
+
+## `speakers.yaml`
+
+The speaker table (CAP-02): each Discord user whose track is recorded maps to its player, their PC, and whether it is the GM's track. The GM writes it; `secondchair check` validates it.
+
+```yaml
+gm_hugo: {player: Hugo, gm: true}
+alice_42: {player: Alice, pc: Valeros}
+```
+
+| Key | Type | Rule |
+|---|---|---|
+| `player` | string | Required. |
+| `pc` | string or null | The player's PC; absent for the GM. |
+| `gm` | boolean | Default `false`. Exactly one speaker is the GM's track. |
+
+## `sources/`
+
+Raw audio and full transcripts are Sources outside the workspace (CAP-15, PKG-12). `secondchair transcribe --session <id> <discord-user>=<audio> …` runs the engine per speaker track (WhisperX by default, the campaign vocabulary as hotwords) and writes the transcript in the transcript format ([`transcript.schema.json`](transcript.schema.json)) outside the workspace; `secondchair transcribe --session <id> --from <transcript>` references one any engine produced. A single-track input is refused. Each Source gets one reference file here; where it lives on disk is machine configuration (`$XDG_CONFIG_HOME/secondchair/sources.yaml`, id → path), never the workspace.
+
+```yaml
+id: s-1a2b3c4d      # s- and the first 8 hex digits of the hash
+kind: transcript    # audio | transcript
+sha256: 1a2b3c4d…
+session: 1
+from: [s-5e6f7a8b, s-9c0d1e2f]   # transcript: the audio Sources it was made from; audio: `speaker` instead
+```
+
+The engine is `whisperx <audio> --output_dir <dir> --output_format json --language <lang> --hotwords <vocabulary>` unless the machine configuration's `transcription` gives another command list (placeholders `{audio}`, `{out_dir}`, `{language}`, `{hotwords}`; it writes `<out_dir>/<audio stem>.json` with WhisperX's `segments`). The Hugging Face token stays in the engine's environment (`HF_TOKEN`, PKG-14); SecondChair never reads or stores it.
 
 ## Hand edits
 

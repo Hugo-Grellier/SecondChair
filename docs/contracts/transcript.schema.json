@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Hugo-Grellier/SecondChair/docs/contracts/transcript.schema.json",
+  "title": "Transcript segment",
+  "description": "One segment of a session transcript (CAP-01). A transcript is a JSON Lines file (UTF-8, `.jsonl`), one segment per line, so it can be written as a live stream of segments. Lines are in order of `start` when `secondchair transcribe` writes them; a stream may append them as they come. Protocol version 0.1.0. Any engine producing this format is accepted (`secondchair transcribe --from`), provided at least two speakers are attributed (CAP-02: single-track diarization is out of v4). A transcript is a Source: it stays outside the campaign workspace, which references it by id and hash in `sources/` (CAP-15, PKG-12). A quote's locator (CAP-04) is the transcript's Source id and the segment's `start`.",
+  "type": "object",
+  "required": ["speaker", "start", "end", "text"],
+  "additionalProperties": false,
+  "properties": {
+    "speaker": {"type": "string", "minLength": 1, "description": "The Discord user who spoke, a key of the campaign's speaker table (`speakers.yaml`), which gives the player, the PC and the GM's track."},
+    "start": {"type": "number", "minimum": 0, "description": "Seconds from the start of the session recording, shared by every track."},
+    "end": {"type": "number", "minimum": 0, "description": "Seconds from the start of the session recording; not before `start`."},
+    "text": {"type": "string", "minLength": 1, "description": "What was said, verbatim, in the language spoken."}
+  }
+}
