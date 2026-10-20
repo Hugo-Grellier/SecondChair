@@ -28,7 +28,7 @@ function world() {
           : { kind: "slot", key: `entry1.slot${rank}` },
     conditions: (actor) => ({ ...actor.conditions }),
     evidence: () => ({ "pf2e-visioner": { cover: { t2: "standard" } } }),
-    driver: () => driver.id,
+    driver: (actor) => (actor === sella ? null : driver.id), // Sella is a PC
   };
   /** @type {{id: string | null}} the active turn driver */
   const driver = { id: null };
@@ -163,8 +163,8 @@ test("a condition change carries the conditions before, once seen, and after", (
   assert.deepEqual(second.conditions, { before: { frightened: 2 }, after: { frightened: 1 } });
 });
 
-test("an outcome made while a turn driver is active names it: the GM's act, run through it", () => {
-  const { shaman, tracer, driver } = world();
+test("a GM creature's outcome while a turn driver is active names it: the GM's act", () => {
+  const { shaman, sella, tracer, driver } = world();
   const strike = message({
     actor: shaman,
     flags: { pf2e: { context: { type: "attack-roll", outcome: "success" } } },
@@ -178,6 +178,11 @@ test("an outcome made while a turn driver is active names it: the GM's act, run 
   assert.equal(driven?.user, "gm");
   shaman.conditions = { frightened: 1 };
   assert.equal(tracer.conditions(shaman, "gm").turn_driver, "pf2e-combater");
+  // A PC's own act stays its player's.
+  assert.equal(
+    tracer.message({ ...strike, actor: sella, user: "player1" })?.turn_driver,
+    undefined,
+  );
 });
 
 test("a message with no pf2e outcome is no trace, and unreadable IWR is none", () => {

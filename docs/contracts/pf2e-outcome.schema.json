@@ -114,7 +114,7 @@
     },
     "turn_driver": {
       "type": "string",
-      "description": "The turn driver active when the outcome was made (RUL-11, RUL-12), absent when none is: its executor is off, so the act is the GM's, run through the driver from the client of `user`, and is checked like any other."
+      "description": "The turn driver active when a GM creature's outcome was made (RUL-11, RUL-12), absent when none is or for a PC's: the executor is off, so the act is the GM's, run through the driver from the client of `user`, and is checked like any other."
     }
   }
 }
