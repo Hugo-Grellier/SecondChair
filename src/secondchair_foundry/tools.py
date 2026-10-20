@@ -308,7 +308,14 @@ def _data_path(path: str) -> str:
     """`path` if it is relative to Foundry's data: no scheme or URL (`https:`, `data:`, `//`), no
     leading `/`, no `..` segment, no control character, checked as given and percent-decoded
     (Foundry lists paths encoded, `Log%20Fume`): a read never leaves the GM's install."""
-    decoded = unquote(path, errors="strict")
+    refused = ValueError(f"{path!r} is not a path in Foundry's data: give a relative one.")
+    # A malformed or non-UTF-8 percent sequence, which decodeURIComponent refuses too.
+    if re.search(r"%(?![0-9A-Fa-f]{2})", path):
+        raise refused
+    try:
+        decoded = unquote(path, errors="strict")
+    except UnicodeDecodeError:
+        raise refused from None
     for text in (path, decoded):
         if (
             re.match(r"^[a-z][\w+.-]*:", text, re.IGNORECASE)
@@ -316,7 +323,7 @@ def _data_path(path: str) -> str:
             or ".." in re.split(r"[/\\]", text)
             or re.search(r"[\x00-\x1f\x7f]", text)
         ):
-            raise ValueError(f"{path!r} is not a path in Foundry's data: give a relative one.")
+            raise refused
     return path
 
 

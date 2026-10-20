@@ -541,6 +541,7 @@ test("a desired scene gets a document's guards: no ownership, clean HTML, no scr
 });
 
 test("a read path stays in Foundry's data: no URL, scheme, absolute path or ..", async () => {
+  const origin = "https://foundry.example";
   for (const ok of [
     "",
     "maps",
@@ -548,14 +549,16 @@ test("a read path stays in Foundry's data: no URL, scheme, absolute path or ..",
     "a..b/c.webp",
     "modules/x/Log%20Fume%20-%20Tower/map.webp", // Foundry lists paths encoded
   ])
-    assert.equal(dataPath(ok), ok);
+    assert.equal(dataPath(ok, origin), ok);
   const reads = genericReads({
     browse: async () => ({ dirs: [], files: [] }),
     packs: () => [],
     documents: () => null,
     imageSize: async () => ({ width: 1, height: 1 }),
+    origin,
   });
   for (const bad of [
+    " //evil.example/x.png", // the URL parser drops the leading space: another origin
     "https://evil.example/x.png",
     "http:x.png",
     "data:image/png;base64,AAAA",

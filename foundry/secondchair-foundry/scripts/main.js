@@ -386,6 +386,7 @@ Hooks.once("ready", () => {
             return picker.browse(source, path, options);
           },
           packs: () => game.packs,
+          origin: location.origin,
           // Foundry's texture loader takes images and videos alike (a .webm map).
           imageSize: async (path) => {
             const texture = await foundry.canvas.loadTexture(path);

@@ -317,8 +317,8 @@ const INDEXED = [
 
 /** A path relative to Foundry's data, or why not: no scheme or URL (`https:`, `data:`, `//`),
  * no leading `/`, no `..` segment, so a read never reaches outside the GM's install.
- * @param {unknown} path @returns {string} */
-export function dataPath(path) {
+ * @param {unknown} path @param {string} [origin]  the Foundry page's origin @returns {string} */
+export function dataPath(path, origin) {
   const text = String(path ?? "");
   const refuse = () => {
     throw new Error(`"${text}" is not a path in Foundry's data: give a relative one.`);
@@ -338,6 +338,8 @@ export function dataPath(path) {
       refuse();
     }
   }
+  // Resolved as the browser would fetch it, it stays on the GM's Foundry.
+  if (origin && new URL(text, `${origin}/`).origin !== origin) refuse();
   return text;
 }
 
@@ -360,18 +362,23 @@ const matches = (name, query) =>
  *   Foundry's file picker browse
  * @param {() => Iterable<{collection: string, documentName: string, getIndex(options: {fields: string[]}): Promise<Iterable<Data>>}>} env.packs
  * @param {(type: string) => Iterable<WorldDoc> | null} env.documents  a world collection
+ * @param {string} [env.origin]  the Foundry page's origin, which a read path stays on
  * @param {(path: string) => Promise<{width: number, height: number}>} env.imageSize
  *   an image's or video's size in pixels, loaded in the GM's client
  * @returns {Record<string, (params: Data) => Promise<unknown>>}
  */
-export function genericReads({ browse, packs, documents, imageSize }) {
+export function genericReads({ browse, packs, documents, imageSize, origin }) {
   /** @param {string[]} list */
   const cut = (list) => list.slice(0, LIMIT);
   return {
     async browse_files({ path = "", source = "data", extensions = null }) {
       const options = Array.isArray(extensions) ? { extensions } : {};
       if (!SOURCES.includes(String(source))) throw new Error(`Source "${source}": data or public.`);
-      const { dirs = [], files = [] } = await browse(String(source), dataPath(path), options);
+      const { dirs = [], files = [] } = await browse(
+        String(source),
+        dataPath(path, origin),
+        options,
+      );
       const more = Math.max(0, dirs.length - LIMIT) + Math.max(0, files.length - LIMIT);
       return { dirs: cut(dirs), files: cut(files), ...(more && { more }) };
     },
@@ -403,7 +410,7 @@ export function genericReads({ browse, packs, documents, imageSize }) {
     },
     async image_size({ path }) {
       if (typeof path !== "string" || !path) throw new Error("image_size needs a `path`.");
-      const { width, height } = await imageSize(dataPath(path));
+      const { width, height } = await imageSize(dataPath(path, origin));
       return { width, height };
     },
     async list_world_documents({ type, query = "" }) {
