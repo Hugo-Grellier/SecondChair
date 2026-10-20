@@ -161,3 +161,31 @@ def test_a_broken_checker_never_loses_the_observation(ws: Workspace, capsys) -> 
     assert observations.find(ws, "observations/000001.jsonl#strike-ok") is not None
     assert "rules check failed on strike-ok" in capsys.readouterr().err
     assert open_calls(ws) == []
+
+
+def test_unreadable_house_rules_never_lose_the_observation(ws: Workspace, capsys) -> None:  # noqa: F811
+    delegation.start_session(ws)
+    (ws.root / rules.HOUSE_RULES_FILE).write_text("house_rules: foo\n")
+    assert observations.record(ws, by_id("strike-sum")) is None
+    assert observations.find(ws, "observations/000001.jsonl#strike-sum") is not None
+    assert "rules checks not run on strike-sum" in capsys.readouterr().err
+
+
+def test_a_standing_lifecycle_break_is_reported_once() -> None:
+    stuck = by_id("frightened-zero")
+    stuck["payload"]["conditions"] = {
+        "before": {"frightened": 0},
+        "after": {"frightened": 0, "off-guard": None},
+    }
+    assert replay(stuck) == []
+    stuck["payload"]["conditions"]["after"]["dying"] = 1
+    assert replay(stuck) == ["conditions"]
+
+
+def test_an_activity_is_held_only_to_the_next_condition_change_of_its_target() -> None:
+    applied = by_id("frightened-zero") | {"id": "frightened-one"}
+    applied["payload"]["conditions"] = {"before": {}, "after": {"frightened": 1}}
+    later = by_id("frightened-two")
+    session = [*SESSION[:-1], applied, later]
+    assert replay(applied, session) == []
+    assert replay(later, session) == []  # a later fright is not the demoralize's

@@ -15,6 +15,11 @@ const COMBATANT_FLAGS = ["pf2e-reaction", "pf2e-combater"];
 /** @param {string} id */
 const active = (id) => game.modules.get(id)?.active === true;
 
+/** A spontaneous or flexible prepared entry spends its slots' value, not a prepared copy. */
+const spendsSlots = (/** @type {Doc} */ entry) =>
+  entry.system?.prepared?.value === "spontaneous" ||
+  (entry.system?.prepared?.value === "prepared" && entry.system?.prepared?.flexible === true);
+
 /** Every countable spell resource of an actor, by key (outcomes.js). @param {Doc} actor */
 function resources(actor) {
   /** @type {Record<string, number>} */
@@ -22,7 +27,7 @@ function resources(actor) {
   const focus = actor.system?.resources?.focus?.value;
   if (typeof focus === "number") found.focus = focus;
   for (const entry of actor.itemTypes?.spellcastingEntry ?? []) {
-    const mode = entry.system?.prepared?.value;
+    const mode = spendsSlots(entry) ? "spontaneous" : entry.system?.prepared?.value;
     for (const [slot, data] of Object.entries(entry.system?.slots ?? {})) {
       const s = /** @type {Doc} */ (data);
       if (mode === "spontaneous") found[`${entry.id}.${slot}`] = Number(s.value);
@@ -55,7 +60,7 @@ const traced = {
     if (!entry || !spell || spell.isCantrip) return { kind: "none", key: null };
     const mode = entry.system?.prepared?.value;
     if (mode === "focus") return { kind: "focus", key: "focus" };
-    if (mode === "spontaneous") return { kind: "slot", key: `${entry.id}.slot${rank}` };
+    if (spendsSlots(entry)) return { kind: "slot", key: `${entry.id}.slot${rank}` };
     if (mode === "prepared") return { kind: "slot", key: `${entry.id}.slot${rank}.${spell.id}` };
     if (mode === "innate" && spell.system?.location?.uses?.max) {
       return { kind: "innate", key: `${spell.id}.uses` };
@@ -165,14 +170,18 @@ Hooks.once(
           payload,
         });
       });
-      /** @param {Doc} item @param {unknown} _ @param {string} user */
-      const condition = (item, _, user) => {
+      // createItem and deleteItem pass (item, options, userId), updateItem (item, changes, …).
+      /** @param {Doc} item @param {unknown[]} rest */
+      const condition = (item, ...rest) => {
         if (item.type !== "condition" || !item.actor) return;
-        const payload = tracer.conditions(item.actor, user ?? null);
+        const user = rest.at(-1);
+        const payload = tracer.conditions(item.actor, typeof user === "string" ? user : null);
         emit({ actor: item.actor.uuid, kind: "pf2e.outcome", visibility: "gm", payload });
       };
       for (const hook of ["createItem", "updateItem", "deleteItem"]) Hooks.on(hook, condition);
       // A resource grown back (a rest, Refocus) raises what the next cast starts from.
+      // ponytail: one lowered by hand keeps the higher before, so a cast that spent nothing
+      // after it passes; telling a hand edit from a cast's spending needs the update's origin.
       Hooks.on("updateActor", (/** @type {Doc} */ actor) => tracer.raise(actor));
       Hooks.on("updateItem", (/** @type {Doc} */ item) => item.actor && tracer.raise(item.actor));
       // A rules setting changed (RUL-22); a module toggled reloads the client, and the Core reads

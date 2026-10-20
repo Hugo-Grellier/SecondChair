@@ -8,6 +8,7 @@ capture quotes it, with the locator `observations/<session>.jsonl#<id>`.
 import json
 import os
 import re
+import sys
 import threading
 from datetime import datetime
 
@@ -81,7 +82,10 @@ def record(ws: Workspace, envelope: object) -> str | None:
             os.fsync(out.fileno())
     from secondchair.core import rules  # it raises calls, which build on delegation
 
-    rules.check(ws, envelope)
+    try:  # recorded already: a resend is not checked again, so nothing may escape here
+        rules.check(ws, envelope)
+    except Exception as e:
+        print(f"SecondChair: rules checks not run on {envelope['id']}: {e}", file=sys.stderr)
     return None
 
 

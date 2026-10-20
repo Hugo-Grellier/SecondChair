@@ -176,26 +176,30 @@ def resource(p: dict) -> list[Failure]:
     ]
 
 
+def _lifecycle(state: dict) -> set[str]:
+    found = {
+        f"{slug} {value} is still applied, at no value."
+        for slug, value in state.items()
+        if value is not None and value < 1
+    }
+    if "dying" in state and "unconscious" not in state:
+        found.add(f"dying {state['dying']} but not unconscious.")
+    return found
+
+
 def conditions(p: dict) -> list[Failure]:
     """The condition lifecycle holds: a valued condition is at 1 or more, and a dying creature
-    is unconscious."""
+    is unconscious. Only what this change broke: a standing one was reported when it began."""
     change = p.get("conditions")
     if not isinstance(change, dict):
         return []
-    after = change["after"]
-    found = [
-        ("conditions", f"{_what(p)}: {slug} {value} is still applied, at no value.")
-        for slug, value in after.items()
-        if value is not None and value < 1
-    ]
-    if "dying" in after and "unconscious" not in after:
-        found.append(("conditions", f"{_what(p)}: dying {after['dying']} but not unconscious."))
-    return found
+    broken = _lifecycle(change["after"]) - _lifecycle(change.get("before") or {})
+    return [("conditions", f"{_what(p)}: {text}") for text in sorted(broken)]
 
 
 def activity(observation: dict, earlier: Callable[[], list[dict]]) -> list[Failure]:
     """A condition an activity gives its target matches the activity's degree: the latest
-    activity rolled against this actor in the session before the change."""
+    activity rolled against this actor, when this is the actor's first condition change since."""
     p = observation["payload"]
     change = p.get("conditions")
     if not (isinstance(change, dict) and isinstance(change.get("before"), dict)):
@@ -214,7 +218,9 @@ def activity(observation: dict, earlier: Callable[[], list[dict]]) -> list[Failu
         if o["id"] == observation["id"]:
             break
         q = o["payload"]
-        if (
+        if o["kind"] == KIND and q.get("conditions") and q.get("actor") == p.get("actor"):
+            rolled = None  # the activity's result was applied, or not, before this change
+        elif (
             o["kind"] == KIND
             and q.get("target") == p.get("actor")
             and q.get("action") in ACTIVITIES

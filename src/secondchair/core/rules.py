@@ -27,7 +27,6 @@ from secondchair.core.delegation import (
     DelegationError,
     _interaction,
     _read_yaml,
-    _save,
     _write,
     current_moment,
     locked,
@@ -62,9 +61,9 @@ def check(ws: Workspace, observation: dict) -> list[dict]:
             print(f"SecondChair: rules check failed on {observation['id']}: {e}", file=sys.stderr)
     if not found:
         return []
-    silenced = {rule["check"] for rule in house_rules(ws)}
     raised = []
     with locked(ws):
+        silenced = {rule["check"] for rule in house_rules(ws)}
         for kind, text in found:
             if kind in silenced:
                 continue
@@ -92,6 +91,14 @@ def house_rules(ws: Workspace) -> list[dict]:
     return rules
 
 
+def _open_discrepancy(ws: Workspace, call_id: int) -> dict:
+    path = ws.root / CALLS_DIR / f"{call_id:06d}.yaml"
+    call = _read_yaml(path) if path.is_file() else None
+    if call is None or call["kind"] != "discrepancy" or call["status"] != "open":
+        raise DelegationError(f"Call {call_id} is not an open discrepancy.")
+    return call
+
+
 def _write_rules(ws: Workspace, rules: list[dict]) -> None:
     text = yaml.safe_dump({"house_rules": rules}, sort_keys=False, allow_unicode=True)
     _write(ws.root / HOUSE_RULES_FILE, text)
@@ -112,12 +119,7 @@ def mark_intended(
     if not name:
         raise DelegationError("A house rule needs a name.")
     with locked(ws):
-        path = ws.root / CALLS_DIR / f"{call_id:06d}.yaml"
-        call = _read_yaml(path) if path.is_file() else None
-        if call is None or call["kind"] != "discrepancy":
-            raise DelegationError(f"Call {call_id} is not a discrepancy.")
-        if call["status"] != "open":
-            raise DelegationError(f"Discrepancy {call_id} is {call['status']}, not open.")
+        call = _open_discrepancy(ws, call_id)
         rules = house_rules(ws)
         if any(rule["name"] == name for rule in rules):
             raise DelegationError(f"A house rule is already named {name!r}.")
@@ -128,8 +130,7 @@ def mark_intended(
             "at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
         _write_rules(ws, [*rules, rule])
-        call["status"] = "answered"
-        _save(ws, call, CALLS_DIR)
+        calls.close(ws, call_id)
         _interaction(
             ws,
             "add_house_rule",
@@ -143,12 +144,8 @@ def mark_intended(
         return rule
 
 
-def remove_house_rule(
-    ws: Workspace, name: str, channel: str, authenticated: bool, quote: str | None = None
-) -> dict:
+def remove_house_rule(ws: Workspace, name: str, channel: str, authenticated: bool) -> dict:
     """Remove a house rule: its kind of check runs again. Accepted from any Surface."""
-    if channel == "via agent" and not (quote and quote.strip()):
-        raise DelegationError("A house rule removal relayed by an agent must quote the GM's words.")
     with locked(ws):
         rules = house_rules(ws)
         rule = next((r for r in rules if r["name"] == name), None)
@@ -161,7 +158,7 @@ def remove_house_rule(
             None,
             channel,
             authenticated,
-            quote,
+            None,
             None,
             house_rule={k: rule[k] for k in ("name", "check", "call")},
         )
@@ -192,16 +189,12 @@ def propose_fix(
     """Hold a fix for an open discrepancy at propose: the discrepancy's call is answered by the
     proposal's, which carries it as its message."""
     with locked(ws):
-        path = ws.root / CALLS_DIR / f"{discrepancy:06d}.yaml"
-        call = _read_yaml(path) if path.is_file() else None
-        if call is None or call["kind"] != "discrepancy" or call["status"] != "open":
-            raise DelegationError(f"Call {discrepancy} is not an open discrepancy.")
+        call = _open_discrepancy(ws, discrepancy)
         hold = f"fix for discrepancy {discrepancy}: {call['message']}"
         done = delegation.act(
             ws, FIX, agent, lambda: FIX.fn(discrepancy, op, target, params), job, hold=hold
         )
-        call["status"] = "answered"
-        _save(ws, call, CALLS_DIR)
+        calls.close(ws, discrepancy)
         return done
 
 
