@@ -45,6 +45,7 @@
         },
         "occurrence": {"type": "string", "description": "Present for an effect of the world-turn or a GM gesture on the living world: the occurrence key it applies (05-living-world-calendar.md, LW-04). Undoing an occurrence undoes every entry carrying its key and its cascade (LW-12)."},
         "op": {"type": "string", "description": "Present for an action taken in the VTT: the VTT connector's operation (docs/contracts/foundry-bridge.md). Absent for a workspace file."},
+        "cites": {"type": "array", "items": {"type": "string"}, "description": "Present for a disclosure: the ids of the facts it shows the players (CAN-16). Once it is applied, each one the party did not know yet gets a knowledge record, written by its own irreversible action entry with the same tool, level and approval, whose `source` names this entry (CAN-17)."},
         "target": {"type": "string", "description": "The workspace file the action writes, relative to the workspace root; for a VTT action, the document acted on, as the connector names it (a Foundry UUID)."},
         "before": {"type": ["string", "object", "null"], "description": "The target's content before the action; null when absent. For a VTT action, the fields the VTT reported before it; null until it is taken."},
         "after": {"type": ["string", "object", "null"], "description": "The target's content after the action; null when deleted. For a VTT action, the fields asked for, then the ones the VTT reported after it."},
@@ -76,7 +77,7 @@
       "required": ["interaction", "entry", "channel", "authenticated", "quote", "reason"],
       "properties": {
         "kind": {"const": "gm_interaction"},
-        "interaction": {"enum": ["approve", "reject", "undo", "confirm", "promote", "add_override", "remove_override"], "description": "add_override and remove_override add or remove an entity override (DEL-14, DEL-27), carried in `override`, with `entry` null; removing one is accepted only from an authenticated Surface. promote makes a hand edit a GM decision (CAN-11), from an authenticated Surface only; confirm promotes a fact or event recorded from the GM's words to the gm_decision rank (CAN-09, DEL-29); it is accepted only from an authenticated Surface and rewrites `target` from `before` to `after`."},
+        "interaction": {"enum": ["approve", "reject", "undo", "confirm", "promote", "add_override", "remove_override", "lift_hold", "restore_hold"], "description": "add_override and remove_override add or remove an entity override (DEL-14, DEL-27), carried in `override`, with `entry` null; removing one is accepted only from an authenticated Surface. lift_hold and restore_hold lift or restore one delegation-table cell's irreversible hold (DEL-09a, DEL-27), carried in `hold`, with `entry` null; lifting is accepted only from an authenticated Surface. promote makes a hand edit a GM decision (CAN-11), from an authenticated Surface only; confirm promotes a fact or event recorded from the GM's words to the gm_decision rank (CAN-09, DEL-29); it is accepted only from an authenticated Surface and rewrites `target` from `before` to `after`."},
         "entry": {"type": ["integer", "null"], "description": "The action entry acted on; for confirm, the action or hand_edit entry that wrote the confirmed file, null when none did; for promote, the hand_edit entry promoted."},
         "target": {"type": "string", "description": "confirm only: the canon file it rewrites."},
         "before": {"type": "string", "description": "confirm only: that file's content before."},
@@ -96,14 +97,28 @@
             "level": {"enum": ["manual", "propose", "act-then-review", "autonomous"]},
             "moment": {"enum": ["prep", "live-session", "between-sessions", null]}
           }
+        },
+        "hold": {
+          "type": "object",
+          "description": "lift_hold and restore_hold only: the cell whose hold was lifted or restored.",
+          "required": ["responsibility", "moment"],
+          "additionalProperties": false,
+          "properties": {
+            "responsibility": {"enum": ["prep", "memory", "vtt_operations", "rules_and_combat", "living_world", "npcs", "narrative_direction", "disclosure"]},
+            "moment": {"enum": ["prep", "live-session", "between-sessions"]}
+          }
         }
       },
       "if": {"properties": {"interaction": {"const": "confirm"}}},
-      "then": {"required": ["target", "before", "after"], "properties": {"authenticated": {"const": true}, "override": false}},
+      "then": {"required": ["target", "before", "after"], "properties": {"authenticated": {"const": true}, "override": false, "hold": false}},
       "else": {
         "if": {"properties": {"interaction": {"enum": ["add_override", "remove_override"]}}},
-        "then": {"required": ["override"], "properties": {"entry": {"type": "null"}, "target": false, "before": false, "after": false}},
-        "else": {"properties": {"entry": {"type": "integer"}, "target": false, "before": false, "after": false, "override": false}}
+        "then": {"required": ["override"], "properties": {"entry": {"type": "null"}, "target": false, "before": false, "after": false, "hold": false}},
+        "else": {
+          "if": {"properties": {"interaction": {"enum": ["lift_hold", "restore_hold"]}}},
+          "then": {"required": ["hold"], "properties": {"entry": {"type": "null"}, "target": false, "before": false, "after": false, "override": false}},
+          "else": {"properties": {"entry": {"type": "integer"}, "target": false, "before": false, "after": false, "override": false, "hold": false}}
+        }
       },
       "unevaluatedProperties": false
     },

@@ -25,7 +25,7 @@ from secondchair.core.calendar import CalendarError
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.server import GM_PATH, LOOPBACK, MCP_PATH, SERVE_FILE, serve
-from secondchair.core.tools import RegistrationError
+from secondchair.core.tools import RESPONSIBILITIES, RegistrationError
 from secondchair.core.workspace import STATE_DIR, WorkspaceError
 
 DEFAULT_PORT = 7240
@@ -206,6 +206,16 @@ def _gm_command(args: argparse.Namespace) -> str:
             return f"{args.responsibility} for {args.entity} lowered to {args.level} ({where})."
         delegation.remove_override(ws, *o, args.moment, "cli", auth)
         return f"Override removed: {args.responsibility} for {args.entity}."
+    if args.command == "hold":
+        lift = args.hold_command == "lift"
+        cell = (args.responsibility, args.moment)
+        delegation.set_hold(ws, *cell, not lift, "cli", auth)
+        if lift:
+            return (
+                f"Hold lifted on {args.responsibility} in {args.moment}: its irreversible "
+                "actions now run at the cell's level, at once and with no undo."
+            )
+        return f"Hold restored on {args.responsibility} in {args.moment}."
     if args.command == "break":
         pile = calls.take_break(ws)
         return "\n".join(_describe_call(c) for c in pile) or "Nothing held for the break."
@@ -487,6 +497,17 @@ def main(argv: list[str] | None = None) -> int:
         if name == "add":
             sub.add_argument("level", choices=delegation.LEVELS)
         sub.add_argument("--moment", choices=delegation.MOMENTS, help="default: every moment")
+    hold_cmd = commands.add_parser(
+        "hold", help="the irreversible hold of one delegation-table cell"
+    )
+    hold_sub = hold_cmd.add_subparsers(dest="hold_command", required=True)
+    for name, help_text in (
+        ("lift", "let the cell's irreversible actions run at its level (interactive only)"),
+        ("restore", "hold the cell's irreversible actions at propose again"),
+    ):
+        sub = hold_sub.add_parser(name, parents=[in_workspace], help=help_text)
+        sub.add_argument("responsibility", choices=RESPONSIBILITIES)
+        sub.add_argument("moment", choices=delegation.MOMENTS)
     for name, help_text, parents in (
         ("approve", "approve a pending action", [in_workspace]),
         ("reject", "reject a pending action", [in_workspace, reason]),

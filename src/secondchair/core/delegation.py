@@ -8,6 +8,7 @@ YAML file per action log entry in `action-log/` (docs/contracts/action-log-entry
 import fcntl
 import functools
 import inspect
+import secrets
 import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -51,7 +52,8 @@ OCCURRENCES_DIR = "occurrences"  # the world-turn's occurrences (world.py)
 WORLD_FILE = "living-world.yaml"  # the world-turn's cursor
 FRICTIONS_DIR = "frictions"
 
-# The base profiles (DEL-06), in RESPONSIBILITIES order; every cell's deadline mode is auto.
+# The base profiles (DEL-06), in RESPONSIBILITIES order; every cell's deadline mode is auto and
+# its irreversible hold set (DEL-09a).
 _PROFILE_LEVELS = {
     "read": ("manual",) * 8,
     "prep": (
@@ -77,7 +79,7 @@ _PROFILE_LEVELS = {
 }
 BASE_PROFILES = {
     name: {
-        r: {"level": level, "deadline": "auto"}
+        r: {"level": level, "deadline": "auto", "hold": True}
         for r, level in zip(RESPONSIBILITIES, levels, strict=True)
     }
     for name, levels in _PROFILE_LEVELS.items()
@@ -185,14 +187,16 @@ def effective_level(
     ws: Workspace, responsibility: str, moment: str, reversible: bool, entity: str | None = None
 ) -> str:
     """The table cell for the moment, lowered by the acting entity's overrides (DEL-12). An
-    irreversible action is held at propose (DEL-09), and so is narrative direction (DEL-08)."""
+    irreversible action is held at propose while the cell's hold is set (DEL-09, DEL-09a), and
+    narrative direction is held at propose (DEL-08)."""
     level = _cell(ws, moment, responsibility).get("level")
     if level not in LEVELS:
         raise WorkspaceError(
             f"{ws.root / TABLE_FILE}: {moment} / {responsibility} needs a level among "
             f"{', '.join(LEVELS)}."
         )
-    levels = [level] if reversible else [level, "propose"]
+    hold = not reversible and held(ws, moment, responsibility)
+    levels = [level, "propose"] if hold else [level]
     levels += [CAPS[responsibility]] if responsibility in CAPS else []
     levels += [
         o["level"]
@@ -202,6 +206,76 @@ def effective_level(
         and o["moment"] in (None, moment)
     ]
     return min(levels, key=LEVELS.index)
+
+
+def held(ws: Workspace, moment: str, responsibility: str) -> bool:
+    """Whether the cell holds irreversible actions at propose (DEL-09a); set when absent."""
+    hold = _cell(ws, moment, responsibility).get("hold", True)
+    if type(hold) is not bool:
+        raise WorkspaceError(
+            f"{ws.root / TABLE_FILE}: {moment} / {responsibility} hold must be true or false."
+        )
+    return hold
+
+
+def set_hold(
+    ws: Workspace,
+    responsibility: str,
+    moment: str,
+    hold: bool,
+    channel: str,
+    authenticated: bool,
+    quote: str | None = None,
+) -> dict:
+    """Restore (`hold` true) or lift a cell's irreversible hold (DEL-09a): restoring is accepted
+    from any Surface, an agent relay quoting the GM included; lifting approves every future
+    irreversible action of the cell, so only an authenticated Surface may. In force at once."""
+    if responsibility not in RESPONSIBILITIES:
+        raise DelegationError(
+            f"Unknown responsibility {responsibility!r}; expected one of "
+            f"{', '.join(RESPONSIBILITIES)}."
+        )
+    if moment not in MOMENTS:
+        raise DelegationError(f"Unknown moment {moment!r}; expected one of {', '.join(MOMENTS)}.")
+    if not hold and not authenticated:
+        raise DelegationError(
+            "Lifting the irreversible hold approves every future irreversible action of the "
+            "cell: do it from an authenticated Surface (the CLI in an interactive terminal)."
+        )
+    if channel == "via agent" and not (quote and quote.strip()):
+        raise DelegationError("A hold relayed by an agent must quote the GM's words.")
+    with locked(ws):
+        table = _read_yaml(ws.root / TABLE_FILE)
+        cell = table.get(moment, {}).get(responsibility)
+        if not isinstance(cell, dict):
+            raise WorkspaceError(f"{ws.root / TABLE_FILE}: no {moment} / {responsibility} cell.")
+        cell["hold"] = hold
+        _write(ws.root / TABLE_FILE, yaml.safe_dump(table, sort_keys=False, allow_unicode=True))
+        return _interaction(
+            ws,
+            "restore_hold" if hold else "lift_hold",
+            None,
+            channel,
+            authenticated,
+            quote,
+            None,
+            hold={"responsibility": responsibility, "moment": moment},
+        )
+
+
+def hold_tool(ws: Workspace) -> Callable[..., dict[str, Any]]:
+    """The agent relay of a GM restoring the irreversible hold (DEL-09a). Lifting has none."""
+
+    def restore_hold(responsibility: str, moment: str, gm_words: str) -> dict[str, Any]:
+        """Hold every irreversible action (a disclosure, a public line) of one delegation-table
+        cell at propose again, when the GM asked for it in conversation: quote the GM's exact
+        words. `moment`: prep, live-session or between-sessions. In force at once. Only the GM
+        can lift it, from an authenticated Surface."""
+        with _for_agent():
+            interaction = set_hold(ws, responsibility, moment, True, "via agent", False, gm_words)
+        return {"entry": interaction["id"], "hold": interaction["hold"]}
+
+    return restore_hold
 
 
 def _cell(ws: Workspace, moment: str, responsibility: str) -> dict:
@@ -341,6 +415,8 @@ def act(
             # The VTT reports the state before; at propose it is known only once approved.
             effect = {"op": change.op, "target": change.target, "before": None}
             effect["after"] = change.params
+            if change.cites is not None:
+                effect["cites"] = _check_cites(ws, change.cites)
         elif isinstance(change, Change):
             path = _target(ws, change.path)
             effect = {"target": change.path, "before": path.read_text() if path.exists() else None}
@@ -381,6 +457,8 @@ def act(
                 _call_if_ceiling(ws, failed, e, table_moment, blocking)
                 raise DelegationError(f"Failed action, logged as entry {failed['id']}: {e}") from e
         logged = _append(ws, entry)
+        if entry["status"] == "applied":
+            _disclose(ws, logged)
         if entry["status"] == "pending":
             calls.open_call(
                 ws,
@@ -434,6 +512,7 @@ def approve(
             "interaction": interaction["id"],
         }
         _save(ws, entry)
+        _disclose(ws, entry)
         return entry
 
 
@@ -701,6 +780,79 @@ def _call_if_ceiling(
         )
 
 
+# Disclosures (CAN-16, CAN-17): what the players get to see marks its facts known by the party.
+
+
+def _check_cites(ws: Workspace, cites: list[str]) -> list[str]:
+    """A disclosure's cited facts: each in canon, true, and free of canaries; and a current
+    date to learn them on. Callers hold the lock."""
+    from secondchair.core import capture, index, knowledge
+
+    if not isinstance(cites, list) or not all(isinstance(c, str) for c in cites):
+        raise DelegationError("A disclosure's `cites` must be a list of fact ids.")
+    facts = {f["id"]: f for f in index.search_facts(ws)}
+    reasons = []
+    if unknown := [c for c in cites if c not in facts]:
+        reasons.append(f"unknown fact ids {unknown}")
+    if never := [c for c in cites if c in facts and facts[c]["never_true"]]:
+        reasons.append(f"never-true facts {never}, which the party can only believe")
+    if canaries := [
+        c for c in cites if c in facts and knowledge.CANARY.search(facts[c]["statement"])
+    ]:
+        reasons.append(f"facts carrying a canary {canaries}")
+    if capture.time(ws)["current_date"] is None:
+        reasons.append("no current campaign date to learn them on (time.yaml)")
+    if reasons:
+        raise DelegationError(f"Disclosure refused: {'; '.join(reasons)}.")
+    return cites
+
+
+def _disclose(ws: Workspace, disclosure: dict) -> None:
+    """Mark the facts an applied disclosure cites as known by the party, on the current date and
+    in the current session (null outside one): one irreversible action entry per knowledge
+    record, approved as the disclosure was (CAN-17). Callers hold the lock."""
+    from secondchair.core import capture, index
+
+    if not disclosure.get("cites"):
+        return
+    held = {k["fact"] for k in index.search_knowledge(ws, [index.PARTY]) if k["mode"] == "knows"}
+    locator = f"{LOG_DIR}/{disclosure['id']:06d}.yaml"
+    for fact in dict.fromkeys(disclosure["cites"]):
+        if fact in held:
+            continue
+        record = {
+            "id": f"k-{secrets.token_hex(4)}",
+            "knower": index.PARTY,
+            "fact": fact,
+            "mode": "knows",
+            "date": capture.time(ws)["current_date"],
+            "event": None,
+            "rank": "played",  # shown at the table, quoted by the disclosure's entry
+            "origin": {
+                "kind": "observation",
+                "quote": f"{disclosure['tool']} {disclosure['target']}",
+                "locator": locator,
+            },
+            "session": current_session(ws),
+        }
+        mark = {
+            **{k: disclosure[k] for k in ("kind", "moment", "moment_seq", "tool")},
+            **{k: disclosure[k] for k in ("responsibility", "effective_level", "agent", "job")},
+            "override_lowered": False,
+            "entity": None,
+            "reversible": False,
+            "source": f"disclosure {locator}",
+            "runner_configuration": disclosure["runner_configuration"],
+            "target": f"{index.KNOWLEDGE_DIR}/{record['id']}.md",
+            "before": None,
+            "after": index.join_doc(record, ""),
+            "status": "applied",
+            "approval": disclosure["approval"],
+        }
+        _apply(ws, mark, "after")
+        _append(ws, mark)
+
+
 # Hand edits (CAN-11): a canon file changed outside the Core.
 
 CANON_DIR = "canon"
@@ -729,12 +881,14 @@ def _core_states(entries: list[dict]) -> dict[str, str | None]:
     by_id = {e["id"]: e for e in entries}
     writes = []
     for e in entries:
+        if e.get("kind") == "action" and "op" in e:
+            continue  # a VTT action writes no workspace file
         if e.get("kind") == "action" and e.get("status") in ("applied", "undone"):
             when = e["approval"]["interaction"] if e.get("approval") else e["id"]
             writes.append((when, e.get("target"), e.get("after")))
         elif e.get("kind") == "hand_edit" or e.get("interaction") == "confirm":
             writes.append((e["id"], e.get("target"), e.get("after")))
-        elif e.get("interaction") == "undo" and e.get("entry") in by_id:
+        elif e.get("interaction") == "undo" and "op" not in by_id.get(e.get("entry"), {"op": 0}):
             undone = by_id[e["entry"]]
             writes.append((e["id"], undone.get("target"), undone.get("before")))
     writes.sort(key=lambda w: w[0])
@@ -827,7 +981,7 @@ def check(ws: Workspace) -> list[str]:
         overrides(ws)
         for moment in MOMENTS:
             for responsibility in RESPONSIBILITIES:
-                effective_level(ws, responsibility, moment, reversible=True)
+                effective_level(ws, responsibility, moment, reversible=False)
                 calls.deadline(ws, responsibility, moment, blocking=False)
     except WorkspaceError as e:
         errors.append(str(e))
