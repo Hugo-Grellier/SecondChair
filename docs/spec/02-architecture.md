@@ -67,6 +67,8 @@ VTT-agnostic Python. It provides:
 - **ARC-13** Authenticated Surfaces are the CLI in an interactive terminal and the Director's Desk opened as the VTT's GM user. Conversation is not authenticated ([ADR 0003](../adr/0003-core-is-the-only-gateway.md)).
 - **ARC-14** The **Director's Desk** is a minimal panel: the calls due now, approve or reject with a rejection reason, the active NPC's acting cue with "I voice this one" / "Hand back", and the pile held for the break. No tabs: the action log, staging and the living world stay in conversation and the CLI ([ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md), [#19](https://github.com/Hugo-Grellier/SecondChair/issues/19)).
 
+- **ARC-14a** `serve` also shows a **read-only view** at `/` of its loopback port, JSON under `/api/`: pending proposals and open calls with their diff and the CLI command that answers them, the action log, the Markdown under `prep/` and `notes/`, the desired VTT state with its last reconciliation, canon search and jobs. It is not a Surface in the ARC-13 sense: it relays no gesture, approves nothing, holds no state (ARC-11), refuses a Host header other than its loopback address, and serves no file outside `prep/` and `notes/`, so no Source, machine configuration or token.
+
 ## Contracts
 
 - **ARC-15** Core ↔ System extension: the Core provides a generic entity model (types, names, description, relations, fictional time, knowledge). The extension adds schema fragments, calculators, calendars, reference-data access and payload types. Entities carry no prose sections with truth value ([ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md)).
