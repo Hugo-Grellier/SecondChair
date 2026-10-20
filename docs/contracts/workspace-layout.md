@@ -49,6 +49,7 @@ calendar: absalom
 | `schema_version` | integer | The workspace schema this file follows (PKG-16). A version newer than the running SecondChair supports is refused. An older one blocks `serve` until `secondchair upgrade` (in the workspace, or with `-w <workspace>`) migrates it in place, one version at a time; only the migrated files and the `schema_version` line change, so the GM reviews the diff (in their own repository, `git diff`) and commits it. |
 | `campaign_language` | string, BCP 47 tag | Set at `init` and fixed for v4 (CAN-18). `init` refuses to run on an existing workspace, so it cannot be changed through the tool. |
 | `calendar` | string or mapping | The campaign calendar, required, set at `init` and fixed like the language (CAL-01). One of the three forms below. |
+| `frictions` | mapping, optional | The friction detectors' thresholds for this campaign (TRC-03), editable at any time; see [Friction detectors](#friction-detectors-trc-03). |
 
 ### `calendar`
 
@@ -217,12 +218,37 @@ rescheduled_date: null
 Keys: `<front>/tick@<date>`, `<front>/<step id>`, `<situation>/deadline@<date>`, `<front>/pause@<date>`, `<front>/resume@<date>`, and `<key>~<date>` for a rescheduled one. A rule effect is applied through the action log under living world, every entry carrying the key (`occurrence`); an `unless` tick queues a `settle-an-unless` job (input `occurrence`) and an engaged situation's deadline a `propose-narrative-direction` job; a world-turn that applied anything queues one `propose-consequences` job (input `occurrences`, the keys). On the CLI, in the workspace: `secondchair world turn <date> [--since <date>]` (refused in a live session; `--since` on the first one), `secondchair world forecast <date>` (writes nothing), `secondchair world decide <key> accept|reject|reschedule [--date <date>]`, `secondchair world undo <key> --reason <reason>` (with its cascade; the keys return to the queue) and `secondchair world pause|resume <front> <date>`.
 ## `frictions/`
 
-The per-moment friction report (TRC-04), the only trace-derived content the workspace keeps: one Markdown file per moment, named by the moment's `seq` on six digits, written by the Core from the raw behaviour traces ([foundry-bridge.md](foundry-bridge.md), "Behaviour traces"), which stay outside the workspace. It is rewritten whenever a gap arrives for that moment; the friction detectors (TRC-03) add their frictions to it. The front matter holds, so far, the trace gaps: traces lost because no GM client relayed them (TRC-05).
+The per-moment friction report (TRC-04), the only trace-derived content the workspace keeps: one Markdown file per moment, named by the moment's `seq` on six digits, written by the Core from the raw behaviour traces ([foundry-bridge.md](foundry-bridge.md), "Behaviour traces"), which stay outside the workspace, and from the action log. It is rewritten whenever a gap arrives for that moment, when the moment ends (if any trace was kept in it), and on demand: `secondchair frictions [<seq>]` (in the workspace, or with `-w <workspace>`; the current moment by default; exit 1 when no trace was kept in it). The front matter holds:
+
+- `gm_effort` (10-success-bench.md): `interactions`, the moment's GM interactions with SecondChair in the action log (`gm_interaction` and `hand_edit` entries); `manual_acts`, the acts in a GM user's traces (a `roll`, a token `move` or `target`, a system adapter's action event, a `drop`); and `frictions`, the GM frictions. A Director's Desk interaction counts once, as its GM interaction: the windows of SecondChair's own applications and what SecondChair does through the GM's client (`by: secondchair`) are neither manual acts nor frictions.
+- `table_friction`: how many player frictions; watched over time, never part of GM effort.
+- `frictions`: every friction, numbered from 1 (`id`, which the diagnostic playbook cites), with its `detector`, `user`, `name`, `role` (`gm` or `player`) and its trace span: `from` and `to`, the `t` of its first and last record, in milliseconds on the capturing client's clock, as in the user's trace file.
+- `gaps`: traces lost because no GM client relayed them (TRC-05).
 
 ```markdown
 ---
 moment: live-session
 seq: 2
+gm_effort:
+  interactions: 1
+  manual_acts: 2
+  frictions: 1
+table_friction: 1
+frictions:
+- id: 1
+  detector: hunting
+  user: gM1aB2cD3eF4gH5i
+  name: Gamemaster
+  role: gm
+  from: 1760000100000
+  to: 1760000120000
+- id: 2
+  detector: rage_clicks
+  user: aB3dE5fG7hI9jK1l
+  name: Alice
+  role: player
+  from: 1760000500000
+  to: 1760000501000
 gaps:
 - user: aB3dE5fG7hI9jK1l
   name: Alice
@@ -233,10 +259,52 @@ gaps:
 
 # Friction report: live-session (moment 2)
 
+## GM effort
+
+- Interactions with SecondChair: 1
+- Manual acts in the VTT: 2
+- GM frictions: 1
+
+## GM frictions
+
+- 1. Gamemaster: hunting, from 2025-10-09T08:55:00Z to 2025-10-09T08:55:20Z.
+
+## Table friction
+
+Player frictions, watched over time; never part of GM effort.
+
+- 2. Alice: rage clicks, from 2025-10-09T09:01:40Z to 2025-10-09T09:01:41Z.
+
 ## Trace gaps
 
 - Alice: 42 records lost from 2025-10-09T08:53:20Z to 2025-10-09T08:54:50Z, with no GM client to relay them (TRC-05).
 ```
+
+### Friction detectors (TRC-03)
+
+A closed list, deterministic, with no model. Each reads one user's records of one moment, leaving out SecondChair's own (above). Thresholds are in seconds (or a count, pixels or a share), tunable per campaign under `frictions` in `workspace.yaml`, one mapping per detector, overriding only the keys it gives; an unknown detector is refused:
+
+```yaml
+frictions:
+  long_creature_turn: {over: 120}
+  hunting: {windows: 4}
+```
+
+| Detector | Whose | Fires on | Thresholds (default) |
+|---|---|---|---|
+| `rules_lookup` | GM (live session only), player | a window opened on a compendium document (`Compendium.…`) or a window of an app in `apps`; its span runs to that window's close | `apps` (`[Compendium, CompendiumBrowser]`) |
+| `hunting` | GM, player | `windows` windows opened and closed within `within` s with no act between | `windows` (3), `within` (30) |
+| `long_creature_turn` | GM | a turn whose combatant no player owns (`players: []`) lasting over `over` s, up to the next `turn` | `over` (90) |
+| `manual_correction` | GM | an `undo` event or Ctrl/Cmd+Z outside a text field, a `move.cancel`, or the same roll formulas rolled again within `within` s | `within` (10) |
+| `dead_time` | GM | in a GM creature's turn, over `over` s with no input record | `over` (20) |
+| `long_turn` | player | a turn of a combatant the player owns lasting over `over` s | `over` (120) |
+| `cancelled_roll_dialog` | player | a `roll.cancel` event | none |
+| `rage_clicks` | player | `clicks` clicks within `within` s, all within `radius` px of the first | `clicks` (3), `within` (2), `radius` (10) |
+| `click_on_nothing` | player | a left click on an element that is no control (no `data-action`, not a link, button, form field, label, summary or the canvas) followed by no semantic event within `within` s | `within` (1) |
+| `targeting_fixed` | player | a `target` within `within` s after an action started: a `roll`, a system adapter's action event or a `roll.cancel` | `within` (10) |
+| `stumbling_input` | player | a burst of typing (no pause over `pause` s) with at least `deletions` deletions making at least `share` of its key presses | `deletions` (5), `share` (0.25), `pause` (2) |
+
+`roll.cancel`, `move.cancel` and `undo` also match a system adapter's event of that name (`pf2e.roll.cancel`). A turn still running when the records stop is not measured. The diagnostic playbook `diagnose-frictions` reads a report and proposes delegation table changes citing friction ids, at propose only: it changes nothing, and the GM edits `delegation.yaml` (TRC-06).
 
 ## `capture/`
 

@@ -18,6 +18,20 @@ let core = null;
 /** @type {ReturnType<typeof createRecorder> | null} */
 let recorder = null;
 
+/** How many Core requests and realisations are running in this client: what Foundry reports
+ * meanwhile is SecondChair acting, not the GM (TRC-03).
+ * ponytail: a GM act during a queued request is tagged as SecondChair's too. */
+let acting = 0;
+/** @template T @param {() => Promise<T>} run @returns {Promise<T>} */
+async function asSecondChair(run) {
+  acting += 1;
+  try {
+    return await run();
+  } finally {
+    acting -= 1;
+  }
+}
+
 /** The system adapter, once one registered (ARC-08); without it mechanical actions fail (ARC-09). */
 /** @type {Adapter | null} */
 let adapter = null;
@@ -328,13 +342,13 @@ Hooks.once("ready", () => {
           const message = JSON.parse(String(event.data));
           if (desk?.receive(message)) return;
           if (message.type === "request")
-            socket.send(JSON.stringify(await actions.handle(message)));
+            socket.send(JSON.stringify(await asSecondChair(() => actions.handle(message))));
           else if (message.type === "session") capture.setSession(message.session);
           else if (message.type === "ack") {
             if (!message.ok) console.error("SecondChair: observation refused:", message.error);
             capture.ack(message.id);
           } else if (message.type === "realise")
-            socket.send(JSON.stringify(await realiseScene(message)));
+            socket.send(JSON.stringify(await asSecondChair(() => realiseScene(message))));
         } catch (error) {
           // A malformed frame or a closed socket: the Core times the request out as failed.
           console.error("SecondChair:", error);
@@ -495,12 +509,17 @@ function traces() {
               type: "traces",
               user,
               name: game.users.get(user)?.name ?? user,
+              gm: game.users.get(user)?.isGM ?? false,
               records,
             }),
           )
         : game.socket.emit(SOCKET, { type: "traces", records }),
   });
-  const rec = createRecorder({ consented, flush: (records) => outbox.push(game.user.id, records) });
+  const rec = createRecorder({
+    consented,
+    flush: (records) => outbox.push(game.user.id, records),
+    acting: () => acting > 0,
+  });
   recorder = rec;
   setInterval(() => rec.flush(), 1000);
 
@@ -583,8 +602,9 @@ function traces() {
   document.addEventListener("keydown", (e) => input(keyInput(e)), opts);
 
   // Semantic events (TRC-02); a system adapter adds its own through the module's `api.trace`.
-  // ponytail: no idle, undo, cancelled move or cancelled roll dialog event yet; detectors (#65)
-  // read idle from the input stream, the adapter reports system dialogs.
+  // ponytail: no idle, undo, cancelled move or cancelled roll dialog event of our own; the
+  // detectors read idle and Ctrl+Z from the input stream, and a system adapter reports its
+  // cancelled moves and roll dialogs as `<system>.move.cancel` and `<system>.roll.cancel`.
   window.addEventListener("focus", () => semantic("focus"));
   window.addEventListener("blur", () => semantic("blur"));
   /** @param {any} app */
@@ -608,7 +628,13 @@ function traces() {
     if (userId === game.user.id && ("x" in changes || "y" in changes))
       semantic("move", { token: doc.uuid });
   });
+  // Whose turn it is: the users owning the combatant, none for a GM creature (TRC-03).
   Hooks.on("combatTurnChange", (/** @type {CombatLike} */ combat, _prior, current) =>
-    semantic("turn", { combat: combat.id, round: current.round, turn: current.turn }),
+    semantic("turn", {
+      combat: combat.id,
+      round: current.round,
+      turn: current.turn,
+      players: (combat.turns[current.turn ?? -1]?.players ?? []).map((u) => u.id),
+    }),
   );
 }

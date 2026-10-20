@@ -59,6 +59,30 @@ test("once consented, both streams leave on one clock, in order", () => {
   assert.ok(a.t < b.t);
 });
 
+test("what SecondChair does through this client is tagged as its own, never the user's", () => {
+  /** @type {object[]} */
+  let flushed = [];
+  let acting = false;
+  const recorder = createRecorder({
+    consented: () => true,
+    flush: (records) => {
+      flushed = records;
+    },
+    acting: () => acting,
+  });
+  recorder.record("semantic", { event: "move", token: "Scene.s.Token.t" });
+  acting = true;
+  recorder.record("semantic", { event: "move", token: "Scene.s.Token.t" });
+  recorder.record("input", { input: "click", button: 0 });
+  recorder.flush();
+  assert.deepEqual(
+    flushed.map((r) => /** @type {{by?: string}} */ (r).by),
+    [undefined, "secondchair", undefined],
+  );
+  const message = { type: "traces", user: "gm", name: "GM", gm: true, records: flushed };
+  assert.ok(validMessage(message), JSON.stringify(validMessage.errors));
+});
+
 test("revoking stops capture, even of what was waiting to be sent", () => {
   const { sent, state, recorder } = client({ consent: true });
   recorder.record("input", { input: "click", button: 0 });

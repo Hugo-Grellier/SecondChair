@@ -328,6 +328,7 @@ def test_a_job_carries_the_vocabulary_of_the_entities_it_is_about(ws: Workspace)
 def test_every_playbook_is_an_agent_skill_with_a_tier_and_a_responsibility() -> None:
     skills = runner.skills()
     assert sorted(s.name for s in skills) == [
+        "diagnose-frictions",
         "propose-consequences",
         "propose-narrative-direction",
         "realise-a-scene",

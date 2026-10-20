@@ -92,6 +92,7 @@ interface CombatLike {
 interface CombatantLike {
   name: string;
   hidden: boolean;
+  players?: { id: string }[];
   actor: { uuid: string } | null;
 }
 

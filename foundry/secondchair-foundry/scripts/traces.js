@@ -16,14 +16,18 @@ const TEXT_FIELD = "input, textarea, select, [contenteditable]";
  * @param {() => boolean} args.consented  read in this client, at capture and again at flush
  * @param {(records: TraceRecord[]) => void} args.flush  called at every flush, even with nothing
  * @param {() => number} [args.now]  the one clock both streams share
+ * @param {() => boolean} [args.acting]  whether SecondChair is acting through this client: its
+ *   semantic events are then tagged `by: "secondchair"`, never the user's own acts (TRC-03)
  */
-export function createRecorder({ consented, flush, now = Date.now }) {
+export function createRecorder({ consented, flush, now = Date.now, acting = () => false }) {
   /** @type {TraceRecord[]} */
   let queue = [];
   return {
     /** @param {"semantic" | "input"} stream @param {Record<string, unknown>} data */
     record(stream, data) {
-      if (consented()) queue.push({ ...data, t: now(), stream });
+      if (!consented()) return;
+      const by = stream === "semantic" && acting() ? { by: "secondchair" } : {};
+      queue.push({ ...data, ...by, t: now(), stream });
     },
     flush() {
       const records = queue;

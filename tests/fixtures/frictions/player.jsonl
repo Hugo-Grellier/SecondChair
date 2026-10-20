@@ -1,0 +1,27 @@
+{"t": 1760000000000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 1, "players": ["alice0000000001"], "moment": "live-session", "seq": 2}
+{"t": 1760000150000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 2, "players": [], "moment": "live-session", "seq": 2}
+{"t": 1760000200000, "stream": "semantic", "event": "window.open", "window": "a", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000205000, "stream": "semantic", "event": "window.close", "window": "a", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000210000, "stream": "semantic", "event": "window.open", "window": "b", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000212000, "stream": "semantic", "event": "window.close", "window": "b", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000215000, "stream": "semantic", "event": "window.open", "window": "c", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000220000, "stream": "semantic", "event": "window.close", "window": "c", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000300000, "stream": "semantic", "event": "pf2e.roll.cancel", "moment": "live-session", "seq": 2}
+{"t": 1760000400000, "stream": "semantic", "event": "pf2e.strike", "actor": "Actor.alice", "moment": "live-session", "seq": 2}
+{"t": 1760000403000, "stream": "semantic", "event": "target", "token": "Scene.s.Token.goblin", "on": true, "moment": "live-session", "seq": 2}
+{"t": 1760000500000, "stream": "input", "input": "click", "button": 0, "x": 100, "y": 100, "canvas": null, "target": "a.control[data-action=toggle]", "moment": "live-session", "seq": 2}
+{"t": 1760000500500, "stream": "input", "input": "click", "button": 0, "x": 102, "y": 101, "canvas": null, "target": "a.control[data-action=toggle]", "moment": "live-session", "seq": 2}
+{"t": 1760000501000, "stream": "input", "input": "click", "button": 0, "x": 99, "y": 100, "canvas": null, "target": "a.control[data-action=toggle]", "moment": "live-session", "seq": 2}
+{"t": 1760000600000, "stream": "input", "input": "click", "button": 0, "x": 300, "y": 200, "canvas": null, "target": "div.window-content", "moment": "live-session", "seq": 2}
+{"t": 1760000700000, "stream": "semantic", "event": "window.open", "window": "p", "app": "Compendium", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000702000, "stream": "semantic", "event": "window.close", "window": "p", "app": "Compendium", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000800000, "stream": "input", "input": "type", "del": false, "moment": "live-session", "seq": 2}
+{"t": 1760000800200, "stream": "input", "input": "type", "del": true, "moment": "live-session", "seq": 2}
+{"t": 1760000800400, "stream": "input", "input": "type", "del": false, "moment": "live-session", "seq": 2}
+{"t": 1760000800600, "stream": "input", "input": "type", "del": true, "moment": "live-session", "seq": 2}
+{"t": 1760000800800, "stream": "input", "input": "type", "del": false, "moment": "live-session", "seq": 2}
+{"t": 1760000801000, "stream": "input", "input": "type", "del": true, "moment": "live-session", "seq": 2}
+{"t": 1760000801200, "stream": "input", "input": "type", "del": false, "moment": "live-session", "seq": 2}
+{"t": 1760000801400, "stream": "input", "input": "type", "del": true, "moment": "live-session", "seq": 2}
+{"t": 1760000801600, "stream": "input", "input": "type", "del": false, "moment": "live-session", "seq": 2}
+{"t": 1760000801800, "stream": "input", "input": "type", "del": true, "moment": "live-session", "seq": 2}

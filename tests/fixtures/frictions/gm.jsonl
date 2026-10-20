@@ -1,0 +1,29 @@
+{"t": 1760000000000, "stream": "semantic", "event": "window.open", "window": "j1", "app": "JournalEntrySheet", "document": "Compendium.pf2e.journals.JournalEntry.rules1", "moment": "live-session", "seq": 2}
+{"t": 1760000005000, "stream": "semantic", "event": "window.close", "window": "j1", "app": "JournalEntrySheet", "document": "Compendium.pf2e.journals.JournalEntry.rules1", "moment": "live-session", "seq": 2}
+{"t": 1760000100000, "stream": "semantic", "event": "window.open", "window": "a", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000105000, "stream": "semantic", "event": "window.close", "window": "a", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000110000, "stream": "semantic", "event": "window.open", "window": "b", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000112000, "stream": "semantic", "event": "window.close", "window": "b", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000115000, "stream": "semantic", "event": "window.open", "window": "c", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000120000, "stream": "semantic", "event": "window.close", "window": "c", "app": "CharacterSheetPF2e", "document": "Actor.goblin1", "moment": "live-session", "seq": 2}
+{"t": 1760000200000, "stream": "semantic", "event": "roll", "formulas": ["1d20+5"], "moment": "live-session", "seq": 2}
+{"t": 1760000205000, "stream": "semantic", "event": "roll", "formulas": ["1d20+5"], "moment": "live-session", "seq": 2}
+{"t": 1760000210000, "stream": "input", "input": "key", "key": "z", "ctrl": true, "shift": false, "alt": false, "meta": false, "moment": "live-session", "seq": 2}
+{"t": 1760000300000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 0, "players": [], "moment": "live-session", "seq": 2}
+{"t": 1760000301000, "stream": "input", "input": "move", "x": 10, "y": 10, "canvas": null, "moment": "live-session", "seq": 2}
+{"t": 1760000330000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
+{"t": 1760000340000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
+{"t": 1760000350000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
+{"t": 1760000360000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
+{"t": 1760000370000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
+{"t": 1760000380000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
+{"t": 1760000390000, "stream": "input", "input": "move", "x": 20, "y": 20, "canvas": null, "moment": "live-session", "seq": 2}
+{"t": 1760000400000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 1, "players": ["alice0000000001"], "moment": "live-session", "seq": 2}
+{"t": 1760000500000, "stream": "semantic", "event": "window.open", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000501000, "stream": "input", "input": "click", "button": 0, "x": 5, "y": 5, "canvas": null, "target": "button[data-action=approve]", "moment": "live-session", "seq": 2}
+{"t": 1760000502000, "stream": "semantic", "event": "window.close", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000503000, "stream": "semantic", "event": "window.open", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000504000, "stream": "semantic", "event": "window.close", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000505000, "stream": "semantic", "event": "window.open", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000506000, "stream": "semantic", "event": "window.close", "window": "d", "app": "SecondChairDesk", "document": null, "moment": "live-session", "seq": 2}
+{"t": 1760000507000, "stream": "semantic", "event": "move", "token": "Scene.s.Token.t", "by": "secondchair", "moment": "live-session", "seq": 2}

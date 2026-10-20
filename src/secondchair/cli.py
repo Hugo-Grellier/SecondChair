@@ -18,6 +18,7 @@ from secondchair.core import (
     index,
     jobs,
     machine,
+    traces,
     workspace,
     world,
 )
@@ -517,6 +518,11 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "upgrade", parents=[in_workspace], help="migrate the workspace to the current schema"
     )
+    commands.add_parser(
+        "frictions",
+        parents=[in_workspace],
+        help="write a moment's friction report from the behaviour traces (default: current)",
+    ).add_argument("seq", type=int, nargs="?")
     log_cmd = commands.add_parser("log", help="the action log")
     log_sub = log_cmd.add_subparsers(dest="log_command", required=True)
     undo_cmd = log_sub.add_parser(
@@ -617,6 +623,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
         elif args.command == "check":
             return check(workspace.load(args.workspace))
+        elif args.command == "frictions":
+            ws = workspace.load(args.workspace)
+            seq = args.seq or delegation.current_moment(ws)[1]
+            path = traces.report_moment(ws, seq)
+            if path is None:
+                print(
+                    f"secondchair: no behaviour traces were kept in moment {seq}.", file=sys.stderr
+                )
+                return 1
+            print(path)
         elif args.command == "serve":
             serve(workspace.load(args.workspace), configured_port())
         elif args.command == "jobs":

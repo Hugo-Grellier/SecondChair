@@ -466,6 +466,10 @@
           "type": "string",
           "description": "The user's name, for the report."
         },
+        "gm": {
+          "type": "boolean",
+          "description": "Whether the user is a GM: a GM's frictions and manual acts count in GM effort, a player's frictions in table friction (TRC-03). Absent means false."
+        },
         "records": {
           "type": "array",
           "items": {
