@@ -228,6 +228,7 @@ test("a token the GM moved by hand survives a second reconciliation", async () =
   await boss.update({ x: 700, y: 300, hidden: false }); // moved and revealed in play
 
   assert.deepEqual((await realiseChecked(w, cave())).summary, { noop: 3 });
+  /** @type {any} */
   const renamed = cave();
   renamed.items[0].data.name = "Goblin chief";
   const report = await realiseChecked(w, renamed);
