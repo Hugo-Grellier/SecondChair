@@ -132,6 +132,35 @@ def test_an_inferred_candidate_is_an_agent_proposal_carrying_its_quote_as_eviden
     assert index.search_facts(ws)[0]["rank"] == "agent_proposal"
 
 
+def test_an_inferred_candidate_cannot_close_played_canon_and_its_duplicate_is_a_proposal(
+    ws: Workspace,
+) -> None:
+    edda = entity(ws, "Edda Vale")
+    job = wrap_job(ws)
+    submit(ws, job, GAUGE)
+    [gauge] = capture.consolidate(ws, job)
+    submit(ws, job, FEE, inferred=True, closes=[gauge["fact"]])
+    told = "The party told Edda that the gauge stayed at zero while the bell rang."
+    submit(
+        ws,
+        job,
+        told,
+        inferred=True,
+        classification="duplicate",
+        reason="known",
+        duplicate_of=gauge["fact"],
+        known_by=[edda],
+    )
+
+    done = {c["quote"]: c for c in capture.consolidate(ws, job)}
+
+    # An agent proposal cannot close a played fact (CAN-08): on main it ranked played and did.
+    assert done[FEE]["status"] == "failed" and "ranks played" in done[FEE]["error"]
+    assert done[told]["status"] == "duplicate"
+    [known] = index.search_knowledge(ws, [edda])
+    assert (known["rank"], known["origin"]["kind"]) == ("agent_proposal", "job")
+
+
 def test_an_approved_inferred_question_stays_an_agent_proposal(ws: Workspace) -> None:
     job = wrap_job(ws)
     submit(ws, job, GAUGE, inferred=True, classification="contradiction", reason="?")
@@ -322,7 +351,6 @@ def test_a_duplicate_adds_provenance_and_knowledge_but_no_fact(ws: Workspace) ->
 
     [dup] = capture.consolidate(ws, job)
 
-    assert dup["status"] == "duplicate"
     assert dup["fact"] == gauge["fact"]
     assert len(index.search_facts(ws)) == 1
     assert [k["fact"] for k in index.search_knowledge(ws, [edda])] == [gauge["fact"]]
