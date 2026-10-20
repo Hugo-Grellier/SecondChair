@@ -493,8 +493,46 @@ test("a desired scene gets a document's guards: no ownership, clean HTML, no scr
   );
   assert.deepEqual(guarded.scene, { name: "Cave", navName: '<p>Lair</p><img src="x">' });
   assert.deepEqual(guarded.items[0].data, { x: 1, y: 1, text: '<p>Lair</p><img src="x">' });
-  assert.deepEqual(guarded.items[1].data.flags, { m: {} });
+  assert.deepEqual(guarded.items[1].data.flags, {}); // not the module's namespace
 
-  const trap = { key: "trap", type: "Region", data: { behaviors: [{ type: "executeScript" }] } };
-  assert.throws(() => guardedScene({ scene: { name: "Cave" }, items: [trap] }, deps), /script/);
+  const flagged = {
+    key: "f",
+    type: "Tile",
+    data: { flags: { pf2e: { x: 1 }, [MODULE]: { y: 2 } } },
+  };
+  assert.deepEqual(
+    guardedScene({ scene: { name: "Cave" }, items: [flagged] }, deps).items[0].data,
+    {
+      flags: { [MODULE]: { y: 2 } },
+    },
+  );
+  const dotted = { key: "d", type: "Tile", data: { "flags.pf2e.x": 1 } };
+  assert.deepEqual(guardedScene({ scene: { name: "Cave" }, items: [dotted] }, deps).items[0].data, {
+    flags: {},
+  });
+
+  /** @param {any} data */
+  const region = (data) => ({
+    scene: { name: "Cave" },
+    items: [{ key: "r", type: "Region", data }],
+  });
+  const allowed = region({ behaviors: [{ type: "pauseGame", system: { once: true } }] });
+  assert.equal(guardedScene(allowed, deps).items[0].data.behaviors[0].type, "pauseGame");
+  for (const [data, error] of /** @type {[any, RegExp][]} */ ([
+    [{ behaviors: [{ type: "executeScript" }] }, /executeScript/],
+    [{ behaviors: [{ type: "executeMacro" }] }, /executeMacro/],
+    [{ behaviors: [{ type: "my-module.run" }] }, /my-module/],
+    [{ "behaviors.0.type": "executeScript" }, /must be a list/],
+    [{ behaviors: { 0: { type: "pauseGame" } } }, /must be a list/],
+    [{ behaviors: ["pauseGame"] }, /must be a list/],
+    [{ "==behaviors": [] }, /operator/],
+  ]))
+    assert.throws(() => guardedScene(region(data), deps), error);
+  for (const scene of [
+    { name: "Cave", tokens: [{ name: "x" }] },
+    { name: "Cave", "walls.0.c": [0, 0, 1, 1] },
+    { name: "Cave", levels: [{ background: { src: "x" } }] },
+    { name: "Cave", "-=regions": null },
+  ])
+    assert.throws(() => guardedScene({ scene, items: [] }, deps), /as items|operator/);
 });

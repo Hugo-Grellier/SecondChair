@@ -111,7 +111,29 @@ def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F
                     }
                 ],
             },
-            "script",
+            "executeScript",
+        ),
+        *(
+            ({**CAVE, "items": [{"key": "r", "type": "Region", "data": data}]}, error)
+            for data, error in [
+                ({"behaviors": [{"type": "executeMacro"}]}, "executeMacro"),
+                ({"behaviors": [{"type": "my-module.run"}]}, "my-module.run"),
+                ({"behaviors.0.type": "executeScript"}, "must be a list"),
+                ({"behaviors": {"0": {"type": "pauseGame"}}}, "must be a list"),
+                ({"behaviors": ["pauseGame"]}, "must be a list"),
+                ({"==behaviors": []}, "operator"),
+                ({"flags": {"pf2e": {}}}, "pf2e"),
+                ({"flags.core.sheetClass": "x"}, "core"),
+            ]
+        ),
+        *(
+            ({**CAVE, "scene": {"name": "Cave", **extra}}, error)
+            for extra, error in [
+                ({"tokens": []}, "as items"),
+                ({"walls.0.c": [0, 0, 1, 1]}, "as items"),
+                ({"levels": [{}]}, "as items"),
+                ({"-=regions": None}, "operator"),
+            ]
         ),
     ],
 )
@@ -125,6 +147,14 @@ def test_a_scene_never_sets_ownership_nor_runs_a_script(
     assert result.is_error
     assert error in result.content[0].text
     assert not (ws.root / "scenes").exists()
+
+
+def test_a_scene_may_place_an_allowed_region_behaviour(ws: Workspace) -> None:  # noqa: F811
+    region = {"key": "r", "type": "Region", "data": {"behaviors": [{"type": "pauseGame"}]}}
+    flags = {"flags": {"secondchair-foundry": {}}}
+    tile = {"key": "t", "type": "Tile", "data": flags}
+    arguments = {"key": "cave", **CAVE, "items": [region, tile], "agent": "claude-prep"}
+    assert not call(ws, "prepare_scene", arguments).is_error
 
 
 def test_with_no_gm_client_open_the_desired_state_waits_and_is_applied_on_connection(

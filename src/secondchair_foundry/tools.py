@@ -26,7 +26,22 @@ EMBEDDED = ("pages", "sounds", "items", "results")  # embedded documents, each r
 # A world or compendium document's UUID, its type captured: Actor.<id>, Compendium.<pack>.Actor.<id>
 UUID = re.compile(r"^(?:Compendium\.[\w-]+\.[\w-]+\.)?(\w+)\.[A-Za-z0-9]+$")
 ITEM_TYPES = ("Token", "Wall", "AmbientLight", "AmbientSound", "Note", "Tile", "Drawing", "Region")
-SCRIPT = "executeScript"  # the Region behaviour running arbitrary code, never prep's
+MODULE = "secondchair-foundry"  # the only flags namespace prep may write on a placed object
+# The Region behaviour types prep may place: any other (executeScript, executeMacro, a module's)
+# could run code in every client.
+BEHAVIORS = (
+    "adjustDarknessLevel",
+    "displayScrollingText",
+    "pauseGame",
+    "suppressWeather",
+    "teleportToken",
+    "toggleBehavior",
+)
+# A Scene's embedded collections: what a scene places only arrives as an item.
+SCENE_EMBEDDED = (
+    *("drawings", "levels", "lights", "notes", "regions", "sounds", "templates", "tiles"),
+    *("tokens", "walls"),
+)
 KEY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 type Choice = Literal["keep", "overwrite", "recreate"]
@@ -108,8 +123,10 @@ def prepare_scene(
     fields; a Token also takes `actor`, the UUID of the Actor (world or compendium) it is made
     from. `choices` are the GM's calls by object key
     (`_scene` for the scene itself): `keep` the VTT's version of a conflict, `overwrite` it, or
-    `recreate` an object deleted in play. Never set `ownership`, nor a Region behaviour of type
-    `executeScript`; HTML is sanitized. Writing the same state again changes nothing."""
+    `recreate` an object deleted in play. Never set `ownership` nor another module's `flags`; a
+    Region's `behaviors` are of the types adjustDarknessLevel, displayScrollingText, pauseGame,
+    suppressWeather, teleportToken, toggleBehavior only; HTML is sanitized. Writing the same
+    state again changes nothing."""
     desired: dict[str, Any] = {"scene": scene, "items": items}
     if choices:
         desired["choices"] = choices
@@ -140,11 +157,37 @@ def _check(key: str, desired: dict[str, Any]) -> None:
             raise ValueError(f"{k}: an item has only key, type, actor and data.")
         if "actor" in item and (item["type"] != "Token" or not isinstance(item["actor"], str)):
             raise ValueError(f"{k}: only a Token takes an `actor`, an Actor's UUID.")
-        behaviors = item["data"].get("behaviors")
-        if any(isinstance(b, dict) and b.get("type") == SCRIPT for b in behaviors or []):
-            raise ValueError(f"{k}: a Region behaviour may not run a script ({SCRIPT}).")
+        _check_placed(k, item["data"])
+    if operator := next((o for o in desired["scene"] if str(o).startswith(("-=", "=="))), None):
+        raise ValueError(f"_scene: no update operator ({operator}) in prep.")
+    if placed := sorted({str(f).split(".")[0] for f in desired["scene"]} & set(SCENE_EMBEDDED)):
+        raise ValueError(f"_scene: place {', '.join(placed)} as items, not in the scene.")
     if _sets_ownership([desired["scene"], *(i["data"] for i in desired["items"])]):
         raise ValueError("`ownership` is not prep's: who sees a scene is the GM's call in Foundry.")
+
+
+def _check_placed(key: str, data: dict[str, Any]) -> None:
+    """Refuse in a placed object's data what only the GM may write: an update operator, flags of
+    another namespace than the module's, a Region behaviour of a type not allowed."""
+    if operator := next((o for o in data if str(o).startswith(("-=", "=="))), None):
+        raise ValueError(f"{key}: no update operator ({operator}) in prep.")
+    flags = data.get("flags", {})
+    if not isinstance(flags, dict):
+        raise ValueError(f"{key}: `flags` must map namespaces to their flags.")
+    dotted = {str(f).split(".")[1] for f in data if str(f).startswith("flags.")}
+    if foreign := sorted((set(flags) | dotted) - {MODULE}):
+        raise ValueError(f"{key}: flags of {', '.join(foreign)} are not prep's.")
+    if any(str(f).startswith("behaviors.") for f in data) or not (
+        isinstance(data.get("behaviors", []), list)
+        and all(isinstance(b, dict) for b in data.get("behaviors", []))
+    ):
+        raise ValueError(f"{key}: `behaviors` must be a list of behaviours.")
+    for behavior in data.get("behaviors", []):
+        if behavior.get("type") not in BEHAVIORS:
+            raise ValueError(
+                f"{key}: a Region behaviour of type {behavior.get('type')!r} is not prep's; "
+                f"prep places {', '.join(BEHAVIORS)}."
+            )
 
 
 def prepare_document(

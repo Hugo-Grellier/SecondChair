@@ -153,7 +153,13 @@ With no GM client the desired state waits: every connection starts by sending al
 
 A Token whose `actor` prep changed is rebound to the new Actor on update. A copy the GM pasted carries the same key: only one object per key is prep's, the others are the GM's.
 
-A desired scene gets a [prepared document's guards](#prepared-world-documents-arc-07-arc-10): `prepare_scene` refuses an `ownership` key anywhere in the scene or an item's data, and a Region behaviour of type `executeScript` (it runs code in every client); the module drops such ownership keys, sanitizes every HTML string (a Note's, a Tile's or Drawing's text) and refuses such a behaviour too.
+A desired scene gets a [prepared document's guards](#prepared-world-documents-arc-07-arc-10): `prepare_scene` refuses an `ownership` key anywhere in the scene or an item's data. By allowlist, it also refuses:
+- an update operator key (`-=…`, `==…`) in the scene or an item;
+- an embedded collection in the scene itself (`drawings`, `levels`, `lights`, `notes`, `regions`, `sounds`, `templates`, `tiles`, `tokens`, `walls`, dotted or not): what a scene places arrives only as an item;
+- an item's `flags` of any namespace but `secondchair-foundry`;
+- a Region's `behaviors` that is not a list of objects (or is given as dotted keys), or holds a behaviour whose type is not one of `adjustDarknessLevel`, `displayScrollingText`, `pauseGame`, `suppressWeather`, `teleportToken`, `toggleBehavior` (any other, such as `executeScript`, `executeMacro` or a module's, could run code in every client).
+
+The module, after expanding dotted keys, drops the ownership keys and an item's foreign flags namespaces, sanitizes every HTML string (a Note's, a Tile's or Drawing's text), and refuses the rest as a whole scene.
 
 A scene's map, `scene.background` and `scene.foreground` (`{src}`), is written where the Foundry version keeps it: from Foundry 14, in the scene's default level (`levels[0]`, `defaultLevel0000` on a new scene), since Foundry 14 ignores the Scene's own `background`; and read back from there, so a map the GM changes is a retouch.
 

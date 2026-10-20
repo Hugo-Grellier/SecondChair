@@ -144,29 +144,73 @@ export function written(type, data, { markdown, clean, expand }) {
   return rest;
 }
 
+/** The Region behaviour types prep may place; any other (executeScript, executeMacro, a
+ * module's) could run code in every client. */
+export const BEHAVIORS = [
+  "adjustDarknessLevel",
+  "displayScrollingText",
+  "pauseGame",
+  "suppressWeather",
+  "teleportToken",
+  "toggleBehavior",
+];
+
+/** A Scene's embedded collections: what it places only arrives as an item. */
+export const SCENE_EMBEDDED = [
+  "drawings",
+  "levels",
+  "lights",
+  "notes",
+  "regions",
+  "sounds",
+  "templates",
+  "tiles",
+  "tokens",
+  "walls",
+];
+
+/** Foundry's update operators: `-=key` deletes, `==key` replaces. Never prep's in a scene. */
+const OPERATOR = /^(-=|==)/;
+
 /**
  * A desired scene under a prepared document's guards: no ownership at any depth, every HTML
- * string sanitized (a Note's text, a Tile's or Drawing's text), and no Region behaviour running a
- * script in every client, which prep may never place.
+ * string sanitized (a Note's text, a Tile's or Drawing's text); no update operator, and no
+ * embedded collection in the scene itself; only the module's own flags on an item; a Region's
+ * behaviours a list of the allowed types only. Refused as a whole: prep never writes one.
  * @param {import("./scenes.js").Desired} desired
  * @param {{clean(html: string): string, expand(data: Data): Data}} html
  * @returns {import("./scenes.js").Desired}
  */
 export function guardedScene(desired, { clean, expand }) {
-  /** @param {Data} data */
-  const guard = (data) => cleaned(unowned(data, expand), clean);
+  /** @param {string} what @param {Data} data */
+  const guard = (what, data) => {
+    const safe = cleaned(unowned(data, expand), clean);
+    const operator = Object.keys(safe).find((k) => OPERATOR.test(k));
+    if (operator) throw new Error(`${what}: no update operator (${operator}) in prep.`);
+    return safe;
+  };
+  const scene = guard("_scene", desired.scene);
+  const placed = Object.keys(scene).filter((k) => SCENE_EMBEDDED.includes(k));
+  if (placed.length)
+    throw new Error(`_scene: place ${placed.join(", ")} as items, not in the scene.`);
   const items = desired.items.map((item) => {
-    const data = guard(item.data);
-    if ([data.behaviors ?? []].flat().some((/** @type {any} */ b) => b?.type === SCRIPT)) {
-      throw new Error(`${item.key}: a Region behaviour may not run a script (${SCRIPT}).`);
+    const data = guard(item.key, item.data);
+    if (data.flags) data.flags = data.flags[MODULE] ? { [MODULE]: data.flags[MODULE] } : {};
+    if ("behaviors" in data) {
+      const list = data.behaviors;
+      const plain = (/** @type {any} */ b) => b && typeof b === "object" && !Array.isArray(b);
+      if (!Array.isArray(list) || !list.every(plain)) {
+        throw new Error(`${item.key}: \`behaviors\` must be a list of behaviours.`);
+      }
+      const refused = list.find((b) => !BEHAVIORS.includes(b.type));
+      if (refused) {
+        throw new Error(`${item.key}: a Region behaviour of type "${refused.type}" is not prep's.`);
+      }
     }
     return { ...item, data };
   });
-  return { ...desired, scene: guard(desired.scene), items };
+  return { ...desired, scene, items };
 }
-
-/** The Region behaviour type running arbitrary code in every client. */
-const SCRIPT = "executeScript";
 
 /**
  * Realise one desired world document: create it, or reconcile it with what the VTT holds now.
