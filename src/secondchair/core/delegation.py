@@ -375,6 +375,8 @@ def act(
             blocking = record.get("blocking", False)
             if record["responsibility"] in JOB_GOVERNED:
                 governing.append(record["responsibility"])
+            if record["playbook"] == "propose-narrative-direction" and occurrence is None:
+                occurrence = record["inputs"]["occurrence"]  # its answer closes it (LW-19)
         responsibility = governing[-1]
 
         def strictest(entity: str | None = None) -> tuple[str, str]:
@@ -515,6 +517,7 @@ def approve(
             entry["status"] = "applied"
             _save(ws, entry)
             _disclose(ws, entry)
+            _narrative_answered(ws, entry)
             return entry
     # The GM is answering now: a ceiling refusal is held for the break.
     return _take(ws, entry, entry["moment"], False, approving)
@@ -546,7 +549,15 @@ def undo(ws: Workspace, entry_id: int, reason: str, channel: str, authenticated:
         _interaction(ws, "undo", entry_id, channel, authenticated, None, reason)
         entry["status"] = "undone"
         _save(ws, entry)
+        _narrative_answered(ws, entry)
         return entry
+
+
+def _narrative_answered(ws: Workspace, entry: dict) -> None:
+    from secondchair.core import world  # it builds on this module
+
+    if entry.get("occurrence") is not None:
+        world.proposal_answered(ws, entry)
 
 
 def confirm(
@@ -806,6 +817,8 @@ def _take(
         entry.update(status="applied", before=before, after=after)  # as the VTT reports them
         _save(ws, entry)
         _disclose(ws, entry)
+        if approving is not None:
+            _narrative_answered(ws, entry)
     return entry
 
 

@@ -620,6 +620,39 @@ def test_new_narrative_is_held_at_propose_whatever_its_cell(ws: Workspace) -> No
     assert (entry["responsibility"], entry["effective_level"]) == ("narrative_direction", "propose")
 
 
+def test_a_narrative_occurrence_follows_the_gm_answer_to_its_proposal(ws: Workspace) -> None:
+    chain = situation(ws, "Inspect the Chain", stage="active", deadline="4725-01-10")
+    turn(ws, "4725-01-10")
+    key = f"{chain}/deadline@4725-01-10"
+    job = occ(ws, key)["job"]
+    jobs.start(ws, job, CONFIG, manual=True)
+
+    def propose(statement: str) -> int:
+        origin = {"kind": "job", "job": str(job)}
+        args = {"statement": statement, "entities": [chain], "origin": origin}
+        result = job_act(ws, "record_fact", job, **args)
+        assert delegation.read_entry(ws, result["entry"])["occurrence"] == key
+        return result["entry"]
+
+    # A rejected proposal leaves the occurrence queued.
+    delegation.reject(ws, propose("The chain holds."), "tone", "cli", authenticated=True)
+    assert occ(ws, key)["status"] == "queued"
+
+    # An approved one applies it: it leaves the queue (and S0's narrative_pending).
+    snaps, rusts = propose("The chain snaps."), propose("The chain rusts.")
+    delegation.approve(ws, snaps, "cli", authenticated=True)
+    delegation.approve(ws, rusts, "cli", authenticated=True)
+    assert (occ(ws, key)["status"], occ(ws, key)["entries"]) == ("applied", [snaps, rusts])
+    assert key not in queued(ws)
+
+    # LW-12: undoing the applied outcome returns it to the queue, entry by entry or as a whole.
+    delegation.undo(ws, rusts, "other", "cli", authenticated=True)
+    assert (occ(ws, key)["status"], occ(ws, key)["entries"]) == ("applied", [snaps])
+    assert world.undo(ws, key, "other", "cli", authenticated=True) == [key]
+    assert (occ(ws, key)["status"], occ(ws, key)["entries"]) == ("queued", [])
+    assert delegation.read_entry(ws, snaps)["status"] == "undone"
+
+
 def test_a_derived_consequence_is_an_agent_proposal_at_the_living_world_level(
     ws: Workspace,
 ) -> None:
