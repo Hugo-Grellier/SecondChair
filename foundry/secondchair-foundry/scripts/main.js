@@ -18,6 +18,28 @@ let core = null;
 /** @type {ReturnType<typeof createRecorder> | null} */
 let recorder = null;
 
+/** SecondChair's own VTT writes in flight in this client: what they trigger is not a manual act. */
+let acting = 0;
+
+/**
+ * Run one of the Core's requests, tagging the semantic events it triggers `secondchair`, so a
+ * Director's Desk gesture counts once in GM effort (TRC-03).
+ * @template T @param {() => Promise<T>} run @returns {Promise<T>}
+ */
+async function asSecondChair(run) {
+  acting++;
+  try {
+    return await run();
+  } finally {
+    acting--;
+  }
+}
+
+/** Record a semantic event (TRC-02). @param {string} event @param {Record<string, unknown>} [data] */
+function semantic(event, data = {}) {
+  recorder?.record("semantic", { ...data, event, ...(acting > 0 && { secondchair: true }) });
+}
+
 /** The system adapter, once one registered (ARC-08); without it mechanical actions fail (ARC-09). */
 /** @type {Adapter | null} */
 let adapter = null;
@@ -187,7 +209,7 @@ Hooks.once("init", () => {
      * A system event for the behaviour traces, e.g. `pf2e.strike` (TRC-02).
      * @param {string} event @param {Record<string, unknown>} [data]
      */
-    trace: (event, data = {}) => recorder?.record("semantic", { ...data, event }),
+    trace: (event, data = {}) => semantic(event, data),
   };
   /** @type {{api?: object}} */ (game.modules.get(MODULE)).api = api;
   // A system adapter registers through this hook (ARC-08, ADR 0004), whatever the load order.
@@ -342,7 +364,7 @@ Hooks.once("ready", () => {
           const message = JSON.parse(String(event.data));
           if (desk?.receive(message)) return;
           if (message.type === "request")
-            socket.send(JSON.stringify(await actions.handle(message)));
+            socket.send(JSON.stringify(await asSecondChair(() => actions.handle(message))));
           else if (message.type === "read")
             socket.send(JSON.stringify(await actions.read(message)));
           else if (message.type === "session") capture.setSession(message.session);
@@ -350,7 +372,7 @@ Hooks.once("ready", () => {
             if (!message.ok) console.error("SecondChair: observation refused:", message.error);
             capture.ack(message.id);
           } else if (message.type === "realise")
-            socket.send(JSON.stringify(await realiseScene(message)));
+            socket.send(JSON.stringify(await asSecondChair(() => realiseScene(message))));
         } catch (error) {
           // A malformed frame or a closed socket: the Core times the request out as failed.
           console.error("SecondChair:", error);
@@ -511,6 +533,7 @@ function traces() {
               type: "traces",
               user,
               name: game.users.get(user)?.name ?? user,
+              gm: Boolean(game.users.get(user)?.isGM),
               records,
             }),
           )
@@ -554,8 +577,6 @@ function traces() {
   // Raw input (TRC-02), on the recorder's clock.
   /** @param {Record<string, unknown>} data */
   const input = (data) => rec.record("input", data);
-  /** @param {string} event @param {Record<string, unknown>} [data] */
-  const semantic = (event, data = {}) => rec.record("semantic", { ...data, event });
   const onCanvas = () => {
     const p = canvas?.ready ? canvas.mousePosition : null;
     return p ? { x: Math.round(p.x), y: Math.round(p.y) } : null;
@@ -599,8 +620,9 @@ function traces() {
   document.addEventListener("keydown", (e) => input(keyInput(e)), opts);
 
   // Semantic events (TRC-02); a system adapter adds its own through the module's `api.trace`.
-  // ponytail: no idle, undo, cancelled move or cancelled roll dialog event yet; detectors (#65)
-  // read idle from the input stream, the adapter reports system dialogs.
+  // ponytail: no idle, undo, cancelled move or cancelled roll dialog event here; the friction
+  // detectors read idle and Ctrl+Z from the input stream, and the adapter reports the rest
+  // (`<system>.move.cancel`, `<system>.roll.cancel`, `<system>.strike`…).
   window.addEventListener("focus", () => semantic("focus"));
   window.addEventListener("blur", () => semantic("blur"));
   /** @param {any} app */
@@ -624,7 +646,10 @@ function traces() {
     if (userId === game.user.id && ("x" in changes || "y" in changes))
       semantic("move", { token: doc.uuid });
   });
-  Hooks.on("combatTurnChange", (/** @type {CombatLike} */ combat, _prior, current) =>
-    semantic("turn", { combat: combat.id, round: current.round, turn: current.turn }),
-  );
+  // `own`: this user's turn; for a GM, a GM creature's (TRC-03: long turns, dead time).
+  Hooks.on("combatTurnChange", (/** @type {CombatLike} */ combat, _prior, current) => {
+    const c = combat.combatant;
+    const own = Boolean(c?.isOwner && !(game.user.isGM && c.hasPlayerOwner));
+    semantic("turn", { combat: combat.id, round: current.round, turn: current.turn, own });
+  });
 }

@@ -1,0 +1,25 @@
+{"t": 1760000001000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 0, "own": true}
+{"t": 1760000060000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": "canvas#board"}
+{"t": 1760000125000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": "canvas#board"}
+{"t": 1760000130000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 1, "own": false}
+{"t": 1760000140000, "stream": "semantic", "event": "window.open", "window": "w5", "app": "ActorSheet", "document": "Actor.a3"}
+{"t": 1760000141000, "stream": "semantic", "event": "window.close", "window": "w5", "app": "ActorSheet", "document": "Actor.a3"}
+{"t": 1760000142000, "stream": "semantic", "event": "window.open", "window": "w6", "app": "ActorSheet", "document": "Item.i2"}
+{"t": 1760000143000, "stream": "semantic", "event": "window.close", "window": "w6", "app": "ActorSheet", "document": "Item.i2"}
+{"t": 1760000144000, "stream": "semantic", "event": "window.open", "window": "w7", "app": "ActorSheet", "document": "Item.i3"}
+{"t": 1760000145000, "stream": "semantic", "event": "window.close", "window": "w7", "app": "ActorSheet", "document": "Item.i3"}
+{"t": 1760000150000, "stream": "semantic", "event": "pf2e.roll.cancel"}
+{"t": 1760000160000, "stream": "input", "input": "click", "button": 0, "x": 100, "y": 100, "canvas": null, "target": "canvas#board"}
+{"t": 1760000160500, "stream": "input", "input": "click", "button": 0, "x": 105, "y": 102, "canvas": null, "target": "canvas#board"}
+{"t": 1760000161000, "stream": "input", "input": "click", "button": 0, "x": 101, "y": 99, "canvas": null, "target": "canvas#board"}
+{"t": 1760000170000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": null}
+{"t": 1760000180000, "stream": "semantic", "event": "pf2e.strike", "slug": "longsword"}
+{"t": 1760000183000, "stream": "semantic", "event": "target", "token": "Scene.s1.Token.t2", "on": true}
+{"t": 1760000190000, "stream": "semantic", "event": "window.open", "window": "w8", "app": "JournalEntrySheet", "document": "Compendium.pf2e.journals.JournalEntry.S55aqBWIoBM3h0kd"}
+{"t": 1760000199000, "stream": "input", "input": "type", "del": false}
+{"t": 1760000200000, "stream": "input", "input": "type", "del": true}
+{"t": 1760000201000, "stream": "input", "input": "type", "del": true}
+{"t": 1760000202000, "stream": "input", "input": "type", "del": true}
+{"t": 1760000203000, "stream": "input", "input": "type", "del": true}
+{"t": 1760000204000, "stream": "input", "input": "type", "del": true}
+{"t": 1760000205000, "stream": "input", "input": "type", "del": false}

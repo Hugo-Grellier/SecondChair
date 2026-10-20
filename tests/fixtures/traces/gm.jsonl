@@ -1,0 +1,21 @@
+{"t": 1760000001000, "stream": "semantic", "event": "window.open", "window": "w1", "app": "JournalEntrySheet", "document": "Compendium.pf2e.journals.JournalEntry.S55aqBWIoBM3h0kd"}
+{"t": 1760000003000, "stream": "semantic", "event": "window.close", "window": "w1", "app": "JournalEntrySheet", "document": "Compendium.pf2e.journals.JournalEntry.S55aqBWIoBM3h0kd"}
+{"t": 1760000004000, "stream": "semantic", "event": "roll", "formulas": ["1d20+5"]}
+{"t": 1760000010000, "stream": "semantic", "event": "window.open", "window": "w2", "app": "ActorSheet", "document": "Actor.a1"}
+{"t": 1760000011000, "stream": "semantic", "event": "window.close", "window": "w2", "app": "ActorSheet", "document": "Actor.a1"}
+{"t": 1760000012000, "stream": "semantic", "event": "window.open", "window": "w3", "app": "ActorSheet", "document": "Actor.a2"}
+{"t": 1760000013000, "stream": "semantic", "event": "window.close", "window": "w3", "app": "ActorSheet", "document": "Actor.a2"}
+{"t": 1760000014000, "stream": "semantic", "event": "window.open", "window": "w4", "app": "ActorSheet", "document": "Item.i1"}
+{"t": 1760000015000, "stream": "semantic", "event": "window.close", "window": "w4", "app": "ActorSheet", "document": "Item.i1"}
+{"t": 1760000020000, "stream": "semantic", "event": "move", "token": "Scene.s1.Token.t1"}
+{"t": 1760000023000, "stream": "input", "input": "key", "key": "z", "ctrl": true, "shift": false, "alt": false, "meta": false}
+{"t": 1760000030000, "stream": "semantic", "event": "roll", "formulas": ["1d20+7"]}
+{"t": 1760000035000, "stream": "semantic", "event": "roll", "formulas": ["1d20+7"]}
+{"t": 1760000040000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 2, "own": true}
+{"t": 1760000041000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": "canvas#board"}
+{"t": 1760000070000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": "canvas#board"}
+{"t": 1760000085000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": "canvas#board"}
+{"t": 1760000100000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": "canvas#board"}
+{"t": 1760000115000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": "canvas#board"}
+{"t": 1760000130000, "stream": "input", "input": "click", "button": 0, "x": 640, "y": 360, "canvas": null, "target": "canvas#board"}
+{"t": 1760000140000, "stream": "semantic", "event": "turn", "combat": "c1", "round": 1, "turn": 3, "own": false}

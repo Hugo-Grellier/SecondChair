@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, TRC-04, TRC-05, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
+Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, TRC-03, TRC-04, TRC-05, TRC-06, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -49,6 +49,7 @@ calendar: absalom
 | `schema_version` | integer | The workspace schema this file follows (PKG-16). A version newer than the running SecondChair supports is refused. An older one blocks `serve` until `secondchair upgrade` (in the workspace, or with `-w <workspace>`) migrates it in place, one version at a time; only the migrated files and the `schema_version` line change, so the GM reviews the diff (in their own repository, `git diff`) and commits it. |
 | `campaign_language` | string, BCP 47 tag | Set at `init` and fixed for v4 (CAN-18). `init` refuses to run on an existing workspace, so it cannot be changed through the tool. |
 | `calendar` | string or mapping | The campaign calendar, required, set at `init` and fixed like the language (CAL-01). One of the three forms below. |
+| `friction_thresholds` | mapping, optional | The campaign's friction detector thresholds (TRC-03), each a positive number overriding its default; see [`frictions/`](#frictions). An unknown name is refused when a report is written. |
 
 ### `calendar`
 
@@ -223,7 +224,32 @@ rescheduled_date: null
 Keys: `<front>/tick@<date>`, `<front>/<step id>`, `<situation>/deadline@<date>`, `<front>/pause@<date>`, `<front>/resume@<date>`, and `<key>~<date>` for a rescheduled one. A rule effect is applied through the action log under living world, every entry carrying the key (`occurrence`); an `unless` tick queues a `settle-an-unless` job (input `occurrence`) and an engaged situation's deadline a `propose-narrative-direction` job; a world-turn that applied anything queues one `propose-consequences` job (input `occurrences`, the keys). On the CLI, in the workspace: `secondchair world turn <date> [--since <date>]` (refused in a live session; `--since` on the first one), `secondchair world forecast <date>` (writes nothing), `secondchair world decide <key> accept|reject|reschedule [--date <date>]`, `secondchair world undo <key> --reason <reason>` (with its cascade; the keys return to the queue) and `secondchair world pause|resume <front> <date>`.
 ## `frictions/`
 
-The per-moment friction report (TRC-04), the only trace-derived content the workspace keeps: one Markdown file per moment, named by the moment's `seq` on six digits, written by the Core from the raw behaviour traces ([foundry-bridge.md](foundry-bridge.md), "Behaviour traces"), which stay outside the workspace. It is rewritten whenever a gap arrives for that moment; the friction detectors (TRC-03) add their frictions to it. The front matter holds, so far, the trace gaps: traces lost because no GM client relayed them (TRC-05).
+The per-moment friction report (TRC-03, TRC-04), the only trace-derived content the workspace keeps: one Markdown file per moment, named by the moment's `seq` on six digits, written by the Core from the raw behaviour traces ([foundry-bridge.md](foundry-bridge.md), "Behaviour traces"), which stay outside the workspace. It is rewritten when a gap arrives for that moment, and once a user's first records of the next moment arrive, when the moment's traces are complete.
+
+The front matter holds:
+
+- `gaps`: traces lost because no GM client relayed them (TRC-05);
+- `gm_effort`: `interactions`, the moment's GM interactions in the action log (DEL-27; a Director's Desk gesture is one), and `manual_acts`, the GM's acts in the VTT read from their traces: rolls, moves, targeting, undos (Ctrl+Z) and a system adapter's acts, except the events SecondChair's own writes triggered (`secondchair: true`), so a Desk gesture counts once;
+- `table_friction`: how many frictions the players had; never part of GM effort;
+- `frictions`: each with its `detector`, the `user` and their `name`, `gm`, and the trace span it cites: `from` and `to`, the `t` of the first and last trace records it rests on.
+
+The detectors are a closed, deterministic list (TRC-03). Thresholds are the defaults below unless `friction_thresholds` in `workspace.yaml` overrides them.
+
+| Detector | Whose | Fires on | Thresholds (default) |
+|---|---|---|---|
+| `rules-lookup` | GM in live sessions, players | a compendium document opened (`window.open` of a `Compendium.` UUID) | |
+| `hunting` | GM, players | windows opened and closed with no act in between | `hunting_windows` (3) within `hunting_s` (30) |
+| `long-gm-creature-turn` | GM | a GM creature's turn (`turn` with `own`) until the next turn | longer than `gm_turn_s` (90) |
+| `manual-correction` | GM | an undo (Ctrl+Z, or the adapter's `undo`) or a cancelled move soon after an act, or the same roll formulas again | within `correction_s` (10) |
+| `dead-time` | GM | no input at all in a GM creature's turn | `dead_time_s` (20) |
+| `long-turn` | players | the player's own turn until the next turn | longer than `player_turn_s` (120) |
+| `cancelled-roll-dialog` | players | the adapter's `roll.cancel` | |
+| `rage-clicks` | players | clicks at one spot | `rage_clicks` (3) within `rage_s` (2) and `rage_px` (24) screen pixels |
+| `click-on-nothing` | players | a click on no element, or on the bare page | |
+| `late-targeting` | players | a `target` after the adapter's `action`, `strike` or `spell` | within `retarget_s` (10) |
+| `stumbling-input` | players | deletions while typing in a text field | `stumble_deletions` (5) within `stumble_s` (10) |
+
+Times are in seconds. The playbook `diagnose-frictions` (TRC-06), run on demand, reads a report and proposes delegation table changes; it never makes them.
 
 ```markdown
 ---
@@ -235,6 +261,23 @@ gaps:
   from: '2025-10-09T08:53:20Z'
   to: '2025-10-09T08:54:50Z'
   lost: 42
+gm_effort:
+  interactions: 4
+  manual_acts: 31
+table_friction: 1
+frictions:
+- detector: hunting
+  user: gM1aB3dE5fG7hI9j
+  name: Gamemaster
+  gm: true
+  from: 1760000010000
+  to: 1760000015000
+- detector: rage-clicks
+  user: aB3dE5fG7hI9jK1l
+  name: Alice
+  gm: false
+  from: 1760000160000
+  to: 1760000161000
 ---
 
 # Friction report: live-session (moment 2)
@@ -242,6 +285,20 @@ gaps:
 ## Trace gaps
 
 - Alice: 42 records lost from 2025-10-09T08:53:20Z to 2025-10-09T08:54:50Z, with no GM client to relay them (TRC-05).
+
+## GM effort
+
+35: 4 interactions with SecondChair (a Director's Desk gesture counts once) and 31 manual acts in the VTT.
+
+## GM frictions
+
+- hunting: Gamemaster, 2025-10-09T08:53:30.000Z to 2025-10-09T08:53:35.000Z.
+
+## Table friction
+
+Player frictions: watched over time, never part of GM effort.
+
+- rage-clicks: Alice, 2025-10-09T08:56:00.000Z to 2025-10-09T08:56:01.000Z.
 ```
 
 ## `capture/`
