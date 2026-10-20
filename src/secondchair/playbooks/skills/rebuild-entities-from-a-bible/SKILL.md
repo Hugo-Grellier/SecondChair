@@ -33,6 +33,7 @@ You were given a job id. If you were not given its contract, the GM asked you to
 3. For each entity not already in the vocabulary, call `create_entity` with:
    - `names`: its main name, as the bible spells it;
    - `aliases`: its other names, titles and short forms, if any;
+   - `kind`: `pc` for a player character, `npc` for another person, `faction` for a group or faction, `place`, `item` for a named thing, or `other`;
    - `description`: one or two sentences a player could read, describing what it looks like or is known to be. No secrets, no hidden motives, no statement the GM keeps from the players: what is true about an entity is recorded as facts later, not here;
    - `agent`: your name as an agent;
    - `job`: the job id.

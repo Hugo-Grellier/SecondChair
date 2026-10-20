@@ -408,6 +408,21 @@ def test_an_official_reference_stores_the_english_key_and_the_pack_only_on_colli
     assert path.name in capsys.readouterr().err
 
 
+def test_an_entity_may_carry_a_kind_and_an_entity_without_one_stays_valid(
+    ws: Workspace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    act(ws, "create_entity", names=["Ada Fen"], kind="pc")
+    entity(ws, "Mira Pell")
+    kinds = {e["names"][0]: e["kind"] for e in read(ws, "search_entities")}
+    assert kinds == {"Ada Fen": "pc", "Mira Pell": None}
+    assert "kind" in refused(ws, "create_entity", names=["Ghost"], kind="ghost")
+
+    [path] = [p for p in (ws.root / "canon/entities").glob("*.md") if "Ada" in p.read_text()]
+    path.write_text(path.read_text().replace("kind: pc", "kind: hero"))
+    assert main(["check", "-w", str(ws.root)]) == 1
+    assert path.name in capsys.readouterr().err
+
+
 # Hand edits (CAN-11), check (PKG-15) and upgrade (PKG-16)
 
 

@@ -193,7 +193,7 @@ What is true in the campaign's fiction, held by the Core. Ranked by authority: p
 _Avoid_: lore, truth (as the store's name)
 
 **Entity**:
-Something the fiction talks about (an NPC, a place, a faction, an item, a PC), with a stable identity, its names and a description. It holds no truth by itself: what is true about it is stated by facts.
+Something the fiction talks about (an NPC, a place, a faction, an item, a PC), with a stable identity, its names, an optional kind (pc, npc, faction, place, item or other) and a description. It holds no truth by itself: what is true about it is stated by facts.
 _Avoid_: sheet, page, record
 
 **Fact**:

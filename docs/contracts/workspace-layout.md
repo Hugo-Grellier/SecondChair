@@ -375,10 +375,13 @@ An entity carries identity only (CAN-02): YAML front matter, then its player-fac
 id: e-1a2b3c4d
 names: [Frère Ezren]
 aliases: [Ezren]
+kind: npc
 official_reference: null
 ---
 Un prêtre voûté.
 ```
+
+`kind` is `pc`, `npc`, `faction`, `place`, `item` or `other`, or null (or absent) until it is set; any other value is refused. An entity of kind `pc` is never a knower (CAN-13).
 
 `official_reference` (CAN-19) is null, or `{key, pack}`: `key` is the stable English key the System extension provides (PF2e: `system.slug`, falling back to `flags.babele.originalName`), never the translated name, which only ever goes in `names`; `pack` is the compendium pack id when the key collides across packs, null otherwise. The Core refuses a key that is not ASCII, or any other field. Example: `official_reference: {key: goblin-warrior, pack: null}` on an entity named `Gobelin guerrier`.
 
@@ -476,7 +479,7 @@ origin: {kind: source, source: bible.md, page: "B14"}
 ---
 ```
 
-- Knowers are the party as a whole (`party`; individual PCs are not knowers), an NPC or a faction. A record whose knower is a place is that place's **common knowledge**.
+- Knowers are the party as a whole (`party`; individual PCs are not knowers, so a record whose knower is an entity of kind `pc` is refused), an NPC or a faction. A record whose knower is a place is that place's **common knowledge**.
 - A disclosure (a VTT action with `cites`, [tool registration](tool-registration.md)) writes, once applied, one record per cited fact the party does not know yet (CAN-17): knower `party`, mode `knows`, `date` the current date of `time.yaml`, an `observation` origin whose `locator` is the disclosure's action log entry (`action-log/000012.yaml`), ranked played, and `session`, the live session it was disclosed in (null outside one). Each record is written by its own irreversible action entry. `session` is optional on other records.
 - Knowledge is closed-world: a knower holds only its own records, plus those of the factions it is a `member_of` and the places it `lives_in` (one level; a faction never inherits from its members). With a date, only relations valid then and records learned by then count. A fact held several ways takes its strongest mode (knows, then believes, then suspects).
 - A never-true fact is believed or suspected, never known. Records on retconned facts are ignored.

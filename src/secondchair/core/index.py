@@ -53,11 +53,13 @@ EVENT_KINDS = ("played", "offscreen")
 # an entity (an NPC, a faction, or a place whose knowledge is its common knowledge).
 PARTY = "party"
 MODES = ("knows", "believes", "suspects")  # strongest first
+# CAN-02: an entity's optional kind; absent (null) until set. A pc is never a knower (CAN-13).
+ENTITY_KINDS = ("pc", "npc", "faction", "place", "item", "other")
 
 _SCHEMA = """
 create table meta(key text primary key, value text);
 create table entities(id text primary key, names text, aliases text, official_reference text,
-                      description text);
+                      description text, kind text);
 create table facts(id text primary key, statement text, entities text, relation text,
                    relation_type text, valid_from text, valid_to text, from_key int, to_key int,
                    rank text, origin text, status text, admitted_by int, never_true int,
@@ -236,6 +238,8 @@ def knowledge_problem(k: dict, entities: dict, facts: dict, events: dict) -> str
     """Why a knowledge record cannot stand against canon, or None (CAN-13..15)."""
     if k["knower"] != PARTY and k["knower"] not in entities:
         return f"knower {k['knower']!r} is neither {PARTY!r} nor an entity"
+    if k["knower"] != PARTY and entities[k["knower"]].get("kind") == "pc":
+        return f"knower {k['knower']!r} is a PC: individual PCs are not knowers, the party is"
     if k["fact"] not in facts:
         return f"unknown fact {k['fact']!r}"
     if k.get("event") is not None and k["event"] not in events:
@@ -269,7 +273,15 @@ def _entity(front: dict, body: str) -> dict:
     _strings(front.get("aliases") or [], "aliases")
     if front.get("official_reference") is not None:
         official_reference(front["official_reference"])
+    entity_kind(front.get("kind"))
     return {**front, "description": body}
+
+
+def entity_kind(value: Any) -> str | None:
+    """An entity's kind (CAN-02): one of ENTITY_KINDS, or null until set."""
+    if value is not None and value not in ENTITY_KINDS:
+        raise CanonError(f"kind must be one of {', '.join(ENTITY_KINDS)}, or null")
+    return value
 
 
 def official_reference(value: Any) -> dict:
@@ -377,13 +389,14 @@ def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events,
     for e in entities.values():
         names = e["names"] + (e.get("aliases") or [])
         conn.execute(
-            "insert into entities values (?, ?, ?, ?, ?)",
+            "insert into entities values (?, ?, ?, ?, ?, ?)",
             (
                 e["id"],
                 json.dumps(e["names"]),
                 json.dumps(e.get("aliases") or []),
                 json.dumps(e.get("official_reference")),
                 e["description"],
+                e.get("kind"),
             ),
         )
         conn.execute("insert into entities_fts values (?, ?)", (e["id"], " ".join(names)))
