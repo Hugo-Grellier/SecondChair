@@ -1031,6 +1031,12 @@ def core_states(entries: list[dict]) -> dict[str, str | None]:
     """Each target's content as the Core last left it, replaying writes in the order they hit
     the workspace: an action when applied (at its approval, if any), an undo, a confirmation,
     a hand edit."""
+    return {target: content for target, (_, content) in last_writes(entries).items()}
+
+
+def last_writes(entries: list[dict]) -> dict[str, tuple[dict, str | None]]:
+    """Each target's last write the log knows, as `core_states`: the entry that made it (the
+    action, the undo or confirmation interaction, the hand edit) and the content it left."""
     by_id = {e["id"]: e for e in entries}
     writes = []
     for e in entries:
@@ -1038,14 +1044,14 @@ def core_states(entries: list[dict]) -> dict[str, str | None]:
             continue  # a VTT action writes no workspace file
         if e.get("kind") == "action" and e.get("status") in ("applied", "undone"):
             when = e["approval"]["interaction"] if e.get("approval") else e["id"]
-            writes.append((when, e.get("target"), e.get("after")))
+            writes.append((when, e.get("target"), e, e.get("after")))
         elif e.get("kind") == "hand_edit" or e.get("interaction") == "confirm":
-            writes.append((e["id"], e.get("target"), e.get("after")))
+            writes.append((e["id"], e.get("target"), e, e.get("after")))
         elif e.get("interaction") == "undo" and "op" not in by_id.get(e.get("entry"), {"op": 0}):
             undone = by_id[e["entry"]]
-            writes.append((e["id"], undone.get("target"), undone.get("before")))
+            writes.append((e["id"], undone.get("target"), e, undone.get("before")))
     writes.sort(key=lambda w: w[0])
-    return {target: content for _, target, content in writes if isinstance(target, str)}
+    return {target: (e, content) for _, target, e, content in writes if isinstance(target, str)}
 
 
 def log_hand_edits(ws: Workspace) -> list[dict]:

@@ -54,13 +54,19 @@ def gm_client(url: str, token: str) -> Generator[ClientConnection]:  # noqa: F81
         yield socket
 
 
-def realise(socket: ClientConnection) -> dict:
-    """Take the next scene the Core sends and report it realised."""
+def next_realise(socket: ClientConnection) -> dict:
+    """Take the next scene the Core sends."""
     request = {"type": "session"}
-    while request["type"] in ("session", "desk", "read"):  # told on connection, change
+    while request["type"] in ("session", "desk", "read", "ack"):  # told on connection, change
         request = json.loads(socket.recv(timeout=10))
         jsonschema.validate(request, SCHEMA)
     assert request["type"] == "realise"
+    return request
+
+
+def realise(socket: ClientConnection) -> dict:
+    """Take the next scene the Core sends and report it realised."""
+    request = next_realise(socket)
     report = {"scene": "s1", "summary": {"create": 3}, "actions": [], "errors": []}
     reply = {"type": "realised", "id": request["id"], "ok": True, "report": report}
     jsonschema.validate(reply, SCHEMA)
@@ -113,3 +119,52 @@ def test_with_no_gm_client_open_the_desired_state_waits_and_is_applied_on_connec
 
     with gm_client(bridge, token) as socket:  # every desired scene again on each connection
         assert realise(socket)["desired"] == changed
+
+
+def report_of(bridge: str) -> dict:  # noqa: F811
+    """The scene's report once the GM client's reply is recorded."""
+    for _ in range(50):
+        report = mcp(bridge, "scene_report", {"key": "cave"}).structured_content
+        if report["realised"]:
+            return report
+        time.sleep(0.1)
+    raise AssertionError("the realisation was never recorded")
+
+
+def test_a_realisation_carries_the_level_of_the_preparation_that_wrote_it(
+    bridge: str,  # noqa: F811
+    token: str,  # noqa: F811
+    workspace: Path,  # noqa: F811
+) -> None:
+    """DEL-19a: a GM hand edit, like an undo, has no level, so the ceiling does not bound it."""
+    prepare(bridge, CAVE)
+    with gm_client(bridge, token) as socket:
+        assert realise(socket)["level"] == "act-then-review"
+        edited = {**CAVE, "choices": {"boss": "keep"}}
+        (workspace / "scenes/cave.yaml").write_text(yaml.safe_dump(edited, sort_keys=False))
+        request = realise(socket)
+        assert (request["desired"], request["level"]) == (edited, None)
+
+
+def test_a_realisation_above_the_ceiling_is_reported_and_sent_again_when_it_changes(
+    bridge: str,  # noqa: F811
+    token: str,  # noqa: F811
+    workspace: Path,  # noqa: F811
+) -> None:
+    prepare(bridge, CAVE)
+    with gm_client(bridge, token) as socket:
+        request = next_realise(socket)
+        error = "Refused by this world's delegation ceiling (propose): asked at act-then-review."
+        refused = {"type": "realised", "id": request["id"], "ok": False, "error": error}
+        refused["reason"] = "ceiling"
+        jsonschema.validate(refused, SCHEMA)
+        socket.send(json.dumps(refused))
+        report = report_of(bridge)
+        assert (report["ok"], report["reason"], report["error"]) == (False, "ceiling", error)
+
+        change = {"user": "gm1", "before": "propose", "after": "act-then-review"}
+        envelope = {"id": "c1", "session": None, "at": "2026-10-20T20:00:00.000Z"}
+        envelope |= {"scene": None, "actor": None, "kind": "ceiling", "visibility": "gm"}
+        observation = {"type": "observation", "envelope": envelope | {"payload": change}}
+        socket.send(json.dumps(observation))
+        assert realise(socket)["scene"] == "cave"  # the GM raised the ceiling: tried again

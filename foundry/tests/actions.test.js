@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  aboveCeiling,
   CEILING,
   createActions,
   missingTranslation,
@@ -336,6 +337,13 @@ test("an action above the ceiling is refused as a ceiling refusal and nothing is
   assert.equal(!reply.ok && reply.reason, "ceiling");
   assert.match(reply.ok ? "" : reply.error, /ceiling \(propose\)/);
   assert.equal(docs["Scene.s.Token.t"].updates, 0);
+});
+
+test("a prepared scene is realised only at or under the ceiling, a GM's edit always", () => {
+  assert.match(aboveCeiling("propose", "act-then-review") ?? "", /ceiling \(propose\)/);
+  assert.equal(aboveCeiling("propose", "propose"), null);
+  assert.equal(aboveCeiling("manual", null), null); // a hand edit or an undo has no level
+  assert.match(aboveCeiling("propose", "nonsense") ?? "", /ceiling/);
 });
 
 test("an action at or under the ceiling, and the GM's undo, are taken", async () => {

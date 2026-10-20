@@ -41,6 +41,7 @@ You were given a job id. If you were not given its contract, the GM asked you to
 4. Call `scene_report` with the scene key.
    - `realised: false`: no GM client has connected since; the scene is realised when one does. Say so.
    - `pending: true`: the GM client has not realised this version yet. Call `scene_report` again a few times; if it stays pending, say the scene waits for a GM client.
+   - `reason: "ceiling"`: the world's delegation ceiling refused the realisation. Say so: the scene is realised once the GM raises the ceiling in Foundry's module settings.
    - Otherwise read `report`: what each object became (`create`, `update`, `noop`; `retouched` kept as the GM left it; `kept-deleted`, deleted in play and not recreated), each `conflict` (retouched in Foundry and changed in prep) and each error.
 5. Never settle a conflict or recreate a deleted object yourself. List them for the GM, with the reason, and the call that settles each: `prepare_scene` again with `choices` mapping the object key (`_scene` for the scene itself) to `keep` (Foundry's version), `overwrite` (the prep's) or `recreate`. Make that call only with the GM's answer.
 6. Call `finish_job` with the job id, then reply with the scene's summary, the conflicts and the errors.

@@ -1,5 +1,5 @@
 // secondchair-foundry: the active GM's browser dials the loopback Core (ADR 0010).
-import { CEILING, createActions, missingTranslation } from "./actions.js";
+import { aboveCeiling, CEILING, createActions, missingTranslation } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
 import { createDesk, deskHtml, esc } from "./desk.js";
@@ -456,10 +456,16 @@ async function worldActor(uuid) {
 /**
  * Realise a desired scene the Core sent, and report back (docs/contracts/foundry-bridge.md).
  * Reconciliation is idempotent, so a replayed request only finds nothing to do.
- * @param {{id: string, scene: string, desired: import("./scenes.js").Desired}} request
+ * The world's ceiling bounds it at the level of whoever last wrote it (DEL-19a).
+ * @param {{id: string, scene: string, desired: import("./scenes.js").Desired, level: string | null}} request
  */
-function realiseScene({ id, scene, desired }) {
+function realiseScene({ id, scene, desired, level }) {
   const run = realising.then(async () => {
+    const refusal = aboveCeiling(game.settings.get(MODULE, "ceiling"), level);
+    if (refusal) {
+      ui.notifications.warn(`SecondChair: scene "${scene}" not realised. ${refusal}`);
+      return { type: "realised", id, ok: false, error: refusal, reason: "ceiling" };
+    }
     try {
       const report = await realise(scene, desired, world);
       const { conflict = 0 } = report.summary;
