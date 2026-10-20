@@ -163,7 +163,9 @@ export function createActions({ resolve, store, adapter, ceiling, language, say,
       throw new Error(`${target} changed since: nothing was done.`);
     }
     await doc.update(params);
-    return { before, after: pick() };
+    // Not read back: on Foundry v14 a token's x/y still hold the old position when update()
+    // resolves, the movement API applies it later (#150).
+    return { before, after: { ...before, ...params } };
   }
 
   /**
