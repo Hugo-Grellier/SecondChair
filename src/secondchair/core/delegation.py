@@ -33,7 +33,14 @@ LEVELS = ("manual", "propose", "act-then-review", "autonomous")  # DEL-02, loose
 MOMENTS = ("prep", "live-session", "between-sessions")  # DEL-03
 REASONS = ("contradiction", "rules", "tone", "other")  # DEL-26
 OVERRIDABLE = ("rules_and_combat", "npcs", "disclosure")  # DEL-11
-
+# DEL-08, VIS-01: a v4 setting, not an architectural constraint; no other responsibility is capped.
+CAPS = {"narrative_direction": "propose"}
+# ADR 0009: for a world-turn job, the class of its effects, not the tool, decides the
+# responsibility that governs each of its actions.
+JOB_GOVERNED = ("living_world", "narrative_direction")
+_NEVER_DISCLOSES = (
+    "The living world never discloses (LW-08): what reaches the party goes through disclosure."
+)
 TABLE_FILE = "delegation.yaml"
 MOMENT_FILE = "moment.yaml"
 LOG_DIR = "action-log"
@@ -178,7 +185,7 @@ def effective_level(
     ws: Workspace, responsibility: str, moment: str, reversible: bool, entity: str | None = None
 ) -> str:
     """The table cell for the moment, lowered by the acting entity's overrides (DEL-12). An
-    irreversible action is held at propose (DEL-09)."""
+    irreversible action is held at propose (DEL-09), and so is narrative direction (DEL-08)."""
     level = _cell(ws, moment, responsibility).get("level")
     if level not in LEVELS:
         raise WorkspaceError(
@@ -186,6 +193,7 @@ def effective_level(
             f"{', '.join(LEVELS)}."
         )
     levels = [level] if reversible else [level, "propose"]
+    levels += [CAPS[responsibility]] if responsibility in CAPS else []
     levels += [
         o["level"]
         for o in overrides(ws)
@@ -270,14 +278,17 @@ def act(
 ) -> ActionResult:
     """Take one delegated action (ARC-04): refused at manual, held at propose as a call on the
     GM (DEL-30), applied above. An action for a started job is bound by the table of the job's
-    moment (ARC-23), logs the job's runner configuration (DEL-24) and blocks as the job does.
-    `hold` holds it at propose whatever the level, the call carrying it as its message (a
-    wrap's contradiction or blocking question, CAP-10)."""
+    moment (ARC-23), logs the job's runner configuration (DEL-24) and blocks as the job does. A
+    world-turn job's action is also governed by the job's responsibility, under which it is
+    logged (ADR 0009), at the stricter of the two levels (DEL-23); a living-world action never
+    discloses (LW-08). `hold` holds it at propose whatever the level, the call carrying it as
+    its message (a wrap's contradiction or blocking question, CAP-10)."""
     from secondchair.core import calls
 
     with locked(ws):
         moment, seq = current_moment(ws)
         table_moment, runner_configuration = moment, None
+        governing = [tool.responsibility]
         if job is not None:
             from secondchair.core import jobs  # it builds on this module
 
@@ -287,12 +298,27 @@ def act(
             table_moment = record["moment"]
             runner_configuration = record["attempts"][-1]["runner_configuration"]
             blocking = record.get("blocking", False)
-        cell = effective_level(ws, tool.responsibility, table_moment, tool.reversible)
+            if record["responsibility"] in JOB_GOVERNED:
+                governing.append(record["responsibility"])
+        responsibility = governing[-1]
+
+        def strictest(entity: str | None = None) -> tuple[str, str]:
+            return min(
+                (
+                    (effective_level(ws, r, table_moment, tool.reversible, entity), r)
+                    for r in governing
+                ),
+                key=lambda found: LEVELS.index(found[0]),
+            )
+
+        cell, which = strictest()
         if cell == "manual":
             raise DelegationError(
-                f"{tool.responsibility} is at manual in {table_moment}: agents take no action, "
+                f"{which} is at manual in {table_moment}: agents take no action, "
                 "they only answer when asked."
             )
+        if responsibility == "living_world" and tool.responsibility == "disclosure":
+            raise DelegationError(_NEVER_DISCLOSES)
         try:
             change, refusal = describe(), None
         except Contradiction as c:  # logged: a Core-detected contradiction with canon (MET-01)
@@ -300,13 +326,15 @@ def act(
         entity = getattr(change, "entity", None)
         if entity is not None and not isinstance(entity, str):
             raise DelegationError(f"{tool.name}: the acting entity must be an entity id")
-        level = effective_level(ws, tool.responsibility, table_moment, tool.reversible, entity)
+        if responsibility == "living_world" and discloses(change):
+            raise DelegationError(_NEVER_DISCLOSES)
+        level, which = strictest(entity)
         lowered = level != cell
         if hold is not None:
             level = min(level, "propose", key=LEVELS.index)
         if level == "manual":
             raise DelegationError(
-                f"An entity override sets {tool.responsibility} at manual for {entity}: agents "
+                f"An entity override sets {which} at manual for {entity}: agents "
                 "take no action for it, they only answer when asked."
             )
         if isinstance(change, VttAction):
@@ -324,7 +352,7 @@ def act(
             "moment": moment,
             "moment_seq": seq,
             "tool": tool.name,
-            "responsibility": tool.responsibility,
+            "responsibility": responsibility,
             "effective_level": level,
             "override_lowered": lowered,
             "entity": entity,
@@ -357,7 +385,7 @@ def act(
             calls.open_call(
                 ws,
                 kind="proposal",
-                responsibility=tool.responsibility,
+                responsibility=responsibility,
                 table_moment=table_moment,
                 blocking=blocking,
                 entry=logged["id"],
@@ -862,6 +890,18 @@ def _interaction(
 
 
 # Workspace effects and the log files
+
+
+def discloses(change: object) -> bool:
+    """Whether a change makes the party know a fact: a knowledge record whose knower is the
+    party (CAN-17), which only disclosure writes (LW-08)."""
+    from secondchair.core import index  # it builds on this module
+
+    if not isinstance(change, Change) or change.after is None:
+        return False
+    if not change.path.startswith(f"{index.KNOWLEDGE_DIR}/"):
+        return False
+    return index.split_doc(change.after)[0].get("knower") == index.PARTY
 
 
 def _target(ws: Workspace, relative: str) -> Path:
