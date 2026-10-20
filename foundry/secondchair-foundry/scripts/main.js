@@ -72,6 +72,19 @@ const plain = (html) =>
     .replace(/\s+/g, " ")
     .trim();
 
+/**
+ * Post a line to the chat, its id returned. The line is text: neither HTML nor Foundry's
+ * enrichers (@UUID[…], @Check[…], [[/r …]]), which would show or roll more.
+ * @param {Record<string, unknown>} data  who speaks it, or to whom it is whispered
+ * @param {string} line
+ */
+async function post(data, line) {
+  const text = esc(line).replace(/[@[]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const message = await ChatMessage.create({ ...data, content: `<p>${text}</p>` });
+  if (!message?.id) throw new Error("The line was not posted: nothing was said.");
+  return String(message.id);
+}
+
 /** The generic events captured during a live session; a system adapter adds its own (ARC-16). */
 function watch() {
   Hooks.on("createChatMessage", (/** @type {ChatMessageLike} */ msg) => {
@@ -347,17 +360,10 @@ Hooks.once("ready", () => {
         adapter: () => adapter,
         // Read at each request, so a change applies at once (DEL-19).
         ceiling: () => game.settings.get(MODULE, "ceiling"),
-        // In character, as the token, to the whole table. The line is text: neither HTML nor
-        // Foundry's enrichers (@UUID[…], @Check[…], [[/r …]]), which would show or roll more.
-        say: async (token, line) => {
-          const text = esc(line).replace(/[@[]/g, (c) => `&#${c.charCodeAt(0)};`);
-          const message = await ChatMessage.create({
-            speaker: ChatMessage.getSpeaker({ token }),
-            content: `<p>${text}</p>`,
-          });
-          if (!message?.id) throw new Error("The line was not posted: nothing was said.");
-          return String(message.id);
-        },
+        // In character, as the token, to the whole table.
+        say: (token, line) => post({ speaker: ChatMessage.getSpeaker({ token }) }, line),
+        // To one player only: a whisper, which capture observes as not seen by the table (CAP-08).
+        tell: (user, line) => post({ whisper: [user.id] }, line),
       });
       /** The calls due now the Desk already showed. @type {Set<number>} */
       let seen = new Set();

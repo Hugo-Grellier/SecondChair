@@ -72,6 +72,16 @@ def speak(
     )
 
 
+def whisper(user: str, line: str, cites: list[str] | None = None) -> VttAction:
+    """Whisper `line` to one player: a chat message only that user sees, a disclosure. `user` is
+    the player's Foundry UUID (User.<id>); `cites` the ids of the facts it tells. One player is
+    not the party: the facts are not marked known by the party, the wrap asks the GM who learned
+    them (CAP-08). Irreversible: held for the GM's approval unless the GM lifted the hold."""
+    return VttAction(
+        op="whisper", target=user, params={"content": line}, cites=cites or None, whisper=True
+    )
+
+
 def prepare_scene(
     key: str,
     scene: dict[str, Any],
@@ -173,6 +183,7 @@ def tools(ws: Workspace) -> list[Tool]:
             fn=publish_journal, responsibility="disclosure", delegated_action=True, reversible=False
         ),
         Tool(fn=speak, responsibility="disclosure", delegated_action=True, reversible=False),
+        Tool(fn=whisper, responsibility="disclosure", delegated_action=True, reversible=False),
         Tool(fn=prepare_scene, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=scene_report, responsibility="prep", delegated_action=False, reversible=True),
         # ponytail: a read sits under memory (canon and continuity), as the Core's own reads.

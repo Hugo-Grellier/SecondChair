@@ -91,6 +91,9 @@ class VttAction:
     # A disclosure's facts: the Core checks them, then marks them known by the party once the
     # action is taken (CAN-16, CAN-17). None for an action that shows the players nothing.
     cites: list[str] | None = None
+    # Shown to some of the table only: `cites` mark nothing known by the party; the wrap holds
+    # each as a call on the GM (CAP-08).
+    whisper: bool = False
     # Holds it at propose whatever the level, the call carrying this as its message: an action
     # only the GM resolves, which an agent may only propose (RUL-08).
     hold: str | None = None
