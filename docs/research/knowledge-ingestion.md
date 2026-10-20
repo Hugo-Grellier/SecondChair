@@ -40,6 +40,15 @@ So #190's skeleton exists: registration, separate local and model permissions, p
 
 Not yet. Multi-hop questions ("which deity's clergy runs the Westerhold harbour guild") are answered today by the host chaining `search_campaign_library` calls (ADR 0001 amendment). Canon already has typed relations and a knower graph in SQLite (`index.py`, `mystery.py`). Add a source-entity graph only if the benchmark below shows that hybrid plus agent chaining misses multi-hop answers the graph would find. If one is added, use SQLite adjacency tables in the existing machine-wide index, keyed by chunk id. Not Neo4j: it would break local-first and single-process (#184).
 
+A local-search survey from 2026-10-20, kept as an uncommitted research snapshot outside this repository, supports this. It reached four conclusions:
+
+- **[Graphify](https://github.com/Graphify-Labs/graphify) is not a passage index.** It extracts a knowledge graph with no embeddings and no vector store. It extracts from documents through the configured model backend, which may be remote, and its documentation shows no OCR or scanned-PDF support. So it can at most complement a lore graph. It cannot replace cited passage retrieval, and its extraction would have to respect the `model` permission (ADR 0001 amendment: extraction is a job).
+- **Embedded vector stores were compared:** [Qdrant local mode](https://qdrant.tech/documentation/quickstart/), [Chroma PersistentClient](https://docs.trychroma.com/docs/run-chroma/cloud-client), [LanceDB](https://docs.lancedb.com/) and [sqlite-vec](https://github.com/asg017/sqlite-vec). Qdrant and Chroma position their local modes for small datasets or testing. LanceDB's scope is broader than a campaign library needs. sqlite-vec fits the one-SQLite-file shape, but it is pre-v1 and its extension loading would need validation on the supported OS and Python matrix.
+- **Storage and embedding are separate decisions.** Sending passages to a remote embedding service is a different data flow from sending excerpts to a generative model. Today both stay local (Ollama) or are gated by `model`.
+- **OCR and page citations** need an explicit validation pass whatever store is chosen.
+
+Implication: keep #149's NumPy-over-SQLite store until the benchmark shows linear vector search is the bottleneck. Its ceiling is about 2–3 s per query at 800k passages. sqlite-vec is then the smallest step that keeps one file.
+
 ## Benchmark plan (R0, private corpus)
 
 - **Corpus**: the GM's own PF2e PDFs, with GM Core/Player Core and one Lost Omens setting book as a minimum, plus one purchased AP. Stored in `secondchair-bench-private` and referenced by a configured path (BEN-06). Never in CI.
