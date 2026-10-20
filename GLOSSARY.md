@@ -85,7 +85,7 @@ A point where held calls are shown to the GM: a pause the GM signals, or the end
 _Avoid_: pause (as the term), checkpoint
 
 **Safe default**:
-What happens to a call left unanswered at its deadline: a proposal is rejected, an exception takes no action; it is logged and shown again at the break. An irreversible action never takes effect by default.
+What happens to a call left unanswered at its deadline: a proposal is rejected, an exception takes no action; it is logged and shown again at the break. A call due at the break is shown at every break until answered and is defaulted only at the end of the moment. An irreversible action never takes effect by default.
 _Avoid_: fallback, timeout behaviour
 
 ## Building blocks

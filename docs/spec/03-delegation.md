@@ -105,5 +105,5 @@ A call is a pending proposal, a surfaced exception or a ceiling refusal.
 
 - **DEL-30** The Core gives every call a **deadline**: *now* if it blocks the current turn or scene, otherwise the next **break** (a pause the GM signals, or the end of the moment). The cell's deadline mode can force now or break.
 - **DEL-31** A blocking call forced to break takes its safe default at once and is shown at the break.
-- **DEL-32** **Safe default** at the deadline: a proposal is rejected, an exception takes no action; it is logged and shown again at the break. An irreversible action never takes effect by default.
+- **DEL-32** **Safe default** at the deadline: a proposal is rejected, an exception takes no action; it is logged and shown again at the break. An irreversible action never takes effect by default. A call due at the break is not defaulted at a break the GM signals: it is shown at every break until answered and takes its safe default only at the end of the moment (GM decision, 2026-10-20, [#98](https://github.com/Hugo-Grellier/SecondChair/issues/98)).
 - **DEL-33** A call held until the break is not an **interruption**. Interruptions are counted at the Core, identically on the test bench and with any Surface.
