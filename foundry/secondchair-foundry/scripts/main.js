@@ -405,6 +405,11 @@ Hooks.once("ready", () => {
     },
     onRefused: (refusal) =>
       ui.notifications.error(`SecondChair: ${refusal.message}`, { permanent: true }),
+    // Chromium holds the socket while its local-network prompt is open (PKG-11).
+    onPending: () =>
+      ui.notifications.warn(
+        "SecondChair: still waiting for the Core. If the browser asks whether this site may access apps and services on this device, allow it; if you missed the prompt, allow the site in the browser's site permissions and reload.",
+      ),
     onUnreachable: () =>
       ui.notifications.error(
         `SecondChair: cannot reach the Core at ${url}. Is \`secondchair serve\` running on this computer? If the browser asked whether this site may access local devices, allow it and reload.`,

@@ -37,6 +37,7 @@ function dial() {
     onWelcome: (welcome) => calls.push(`welcome ${welcome.campaign}`),
     onRefused: (refusal) => calls.push(`refused ${refusal.reason}`),
     onUnreachable: () => calls.push("unreachable"),
+    onPending: () => calls.push("pending"),
     WebSocketImpl: /** @type {typeof WebSocket} */ (/** @type {unknown} */ (FakeSocket)),
   });
   const socket = /** @type {FakeSocket} */ (FakeSocket.opened.at(-1));
@@ -76,4 +77,27 @@ test("a socket closed before any answer means the Core is unreachable", () => {
   const { socket, calls } = dial();
   socket.dispatchEvent(new Event("close"));
   assert.deepEqual(calls, ["unreachable"]);
+});
+
+test("a socket still pending after a few seconds is reported, without giving up", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { socket, calls } = dial();
+  t.mock.timers.tick(4999);
+  assert.deepEqual(calls, []);
+  t.mock.timers.tick(1);
+  assert.deepEqual(calls, ["pending"]);
+  socket.dispatchEvent(new Event("open"));
+  socket.reply({ type: "welcome", protocol: "0.1.0", campaign: "c1", campaign_language: "fr" });
+  assert.deepEqual(calls, ["pending", "welcome c1"]);
+});
+
+test("a socket that opens or closes in time is never reported as pending", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const opened = dial();
+  opened.socket.dispatchEvent(new Event("open"));
+  const closed = dial();
+  closed.socket.dispatchEvent(new Event("close"));
+  t.mock.timers.tick(10000);
+  assert.deepEqual(opened.calls, []);
+  assert.deepEqual(closed.calls, ["unreachable"]);
 });
