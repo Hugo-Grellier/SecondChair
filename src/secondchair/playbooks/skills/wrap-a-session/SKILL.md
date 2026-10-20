@@ -1,7 +1,7 @@
 ---
 name: wrap-a-session
 description: Wrap a played session into canon from its Sources (the GM's session notes), as candidate facts that quote the Source verbatim, through SecondChair. Use when running a SecondChair job whose playbook is wrap-a-session.
-license: AGPL-3.0-only
+license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve) and read access to the session's Sources.
 metadata:
   secondchair-responsibility: memory

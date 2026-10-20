@@ -1,7 +1,7 @@
 ---
 name: rebuild-entities-from-a-bible
 description: Rebuild a campaign's canon entities from a campaign bible, one entity per named person, place, group and notable thing, through SecondChair. Use when running a SecondChair job whose playbook is rebuild-entities-from-a-bible.
-license: AGPL-3.0-only
+license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve) and read access to the bible file.
 metadata:
   secondchair-responsibility: memory

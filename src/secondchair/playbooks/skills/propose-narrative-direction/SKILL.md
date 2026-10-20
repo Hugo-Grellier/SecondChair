@@ -1,7 +1,7 @@
 ---
 name: propose-narrative-direction
 description: Propose what happens when a situation the party engaged in reaches its deadline, as new narrative held for the GM's approval, through SecondChair. Use when running a SecondChair job whose playbook is propose-narrative-direction.
-license: AGPL-3.0-only
+license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve).
 metadata:
   secondchair-responsibility: narrative_direction

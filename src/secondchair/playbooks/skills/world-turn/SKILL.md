@@ -1,7 +1,7 @@
 ---
 name: world-turn
 description: Advance a campaign's living world to its current date after a wrap, through SecondChair's deterministic world-turn. Use when running a SecondChair job whose playbook is world-turn.
-license: AGPL-3.0-only
+license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve).
 metadata:
   secondchair-responsibility: living_world
