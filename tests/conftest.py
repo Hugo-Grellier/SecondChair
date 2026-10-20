@@ -18,7 +18,11 @@ def machine_config(tmp_path: Path) -> dict[str, str]:
     config_home = tmp_path / "config"
     (config_home / "secondchair").mkdir(parents=True)
     (config_home / "secondchair" / "config.yaml").write_text("port: 0\n")
-    return {**os.environ, "XDG_CONFIG_HOME": str(config_home)}
+    return {
+        **os.environ,
+        "XDG_CONFIG_HOME": str(config_home),
+        "XDG_DATA_HOME": str(tmp_path / "data"),
+    }
 
 
 @contextmanager

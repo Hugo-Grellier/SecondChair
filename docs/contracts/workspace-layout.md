@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
+Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAN-23, ARC-10, CAP-01, CAP-02, CAP-03, CAP-04, CAP-05, CAP-06, CAP-08, CAP-10, CAP-12, CAP-13, CAP-14, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, TRC-04, TRC-05, CAL-14, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16, LW-03, LW-04, LW-07, LW-13.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -19,6 +19,7 @@ my-campaign/
 ├── occurrences/       # one YAML file per world-turn occurrence: 000001.yaml, …
 ├── capture/           # one YAML file per candidate fact, named by its key
 ├── time.yaml          # the current date and each wrapped session's interval; written by the wrap
+├── frictions/         # one friction report per moment: 000001.md, …
 ├── canon/
 │   ├── entities/      # one Markdown file per entity: e-1a2b3c4d.md
 │   ├── facts/         # one Markdown file per fact: f-1a2b3c4d.md
@@ -33,7 +34,7 @@ my-campaign/
 └── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/: each prepared scene's last reconciliation report); git-ignored, rebuildable
 ```
 
-Later contracts add decisions and friction reports, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
+Later contracts add decisions, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
 
 ## `workspace.yaml`
 
@@ -214,6 +215,28 @@ rescheduled_date: null
 ```
 
 Keys: `<front>/tick@<date>`, `<front>/<step id>`, `<situation>/deadline@<date>`, `<front>/pause@<date>`, `<front>/resume@<date>`, and `<key>~<date>` for a rescheduled one. A rule effect is applied through the action log under living world, every entry carrying the key (`occurrence`); an `unless` tick queues a `settle-an-unless` job (input `occurrence`) and an engaged situation's deadline a `propose-narrative-direction` job; a world-turn that applied anything queues one `propose-consequences` job (input `occurrences`, the keys). On the CLI, in the workspace: `secondchair world turn <date> [--since <date>]` (refused in a live session; `--since` on the first one), `secondchair world forecast <date>` (writes nothing), `secondchair world decide <key> accept|reject|reschedule [--date <date>]`, `secondchair world undo <key> --reason <reason>` (with its cascade; the keys return to the queue) and `secondchair world pause|resume <front> <date>`.
+## `frictions/`
+
+The per-moment friction report (TRC-04), the only trace-derived content the workspace keeps: one Markdown file per moment, named by the moment's `seq` on six digits, written by the Core from the raw behaviour traces ([foundry-bridge.md](foundry-bridge.md), "Behaviour traces"), which stay outside the workspace. It is rewritten whenever a gap arrives for that moment; the friction detectors (TRC-03) add their frictions to it. The front matter holds, so far, the trace gaps: traces lost because no GM client relayed them (TRC-05).
+
+```markdown
+---
+moment: live-session
+seq: 2
+gaps:
+- user: aB3dE5fG7hI9jK1l
+  name: Alice
+  from: '2025-10-09T08:53:20Z'
+  to: '2025-10-09T08:54:50Z'
+  lost: 42
+---
+
+# Friction report: live-session (moment 2)
+
+## Trace gaps
+
+- Alice: 42 records lost from 2025-10-09T08:53:20Z to 2025-10-09T08:54:50Z, with no GM client to relay them (TRC-05).
+```
 
 ## `capture/`
 
@@ -451,6 +474,8 @@ The derived index (CAN-10): entities, facts, events and knowledge with their der
   Next to it, `foundry-token` (mode 0600) holds the token the Foundry module connects with, created by `secondchair token` ([foundry-bridge.md](foundry-bridge.md)).
 
   `runners` is keyed by tier only (`fast`, `standard`, `deep`); a tier with no entry has no runner, and its jobs wait for the GM to start them from their own agent host session. Each entry names a host, a model and an effort; model names appear only here (ARC-25). A host is a command template whose `{prompt}`, `{model}`, `{effort}`, `{playbooks}` (a block's playbook directory; an argument naming it is repeated for each installed block) and `{job}` are filled in; the built-in `claude` and `codex` templates run Claude Code (`claude -p`, with each block's playbooks as a plugin directory and only the SecondChair tools and file reads allowed) and Codex (`codex exec`) headless, both reaching the Core through the MCP configuration `secondchair host setup` prints. An entry whose command cannot be run or exits with an error is a failed attempt, and the next entry is tried.
+
+- **Behaviour traces** (TRC-04) are a Source kept by the Core in `$XDG_DATA_HOME/secondchair/traces/<campaign id>/<user id>.jsonl` (default `~/.local/share/secondchair/`), never in the workspace and never sent anywhere ([foundry-bridge.md](foundry-bridge.md), "Behaviour traces").
 
 - **Sources** (raw audio, full transcripts, Foundry worlds, rulebooks) stay outside both; the workspace only references them (PKG-12).
 

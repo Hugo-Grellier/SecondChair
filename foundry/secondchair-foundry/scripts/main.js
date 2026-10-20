@@ -3,8 +3,19 @@ import { CEILING, createActions } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
 import { MODULE, realise } from "./scenes.js";
+import { createOutbox, createRecorder, describe, keyInput } from "./traces.js";
 
 /** @typedef {import("./actions.js").Adapter} Adapter @typedef {import("./actions.js").Doc} Doc */
+
+const SOCKET = `module.${MODULE}`;
+
+/** The Core's socket while this GM client is connected to it, else null. */
+/** @type {WebSocket | null} */
+let core = null;
+
+/** This client's behaviour trace recorder (TRC-02), once the world is ready. */
+/** @type {ReturnType<typeof createRecorder> | null} */
+let recorder = null;
 
 /** The system adapter, once one registered (ARC-08); without it mechanical actions fail (ARC-09). */
 /** @type {Adapter | null} */
@@ -109,6 +120,11 @@ Hooks.once("init", () => {
     registerAdapter: (systemAdapter) => {
       adapter = systemAdapter;
     },
+    /**
+     * A system event for the behaviour traces, e.g. `pf2e.strike` (TRC-02).
+     * @param {string} event @param {Record<string, unknown>} [data]
+     */
+    trace: (event, data = {}) => recorder?.record("semantic", { ...data, event }),
   };
   // Client settings live in this browser only: the token never reaches the Foundry server.
   game.settings.register(MODULE, "token", {
@@ -128,6 +144,24 @@ Hooks.once("init", () => {
     type: Number,
     default: 7240,
     requiresReload: true,
+  });
+  // Consent to behaviour traces (TRC-01) is kept per user in this browser, so nobody else can
+  // give it. This setting is only its checkbox: `ready` aligns it with the user signed in here.
+  game.settings.register(MODULE, "traces", {
+    name: "Record my behaviour traces",
+    hint: "Lets SecondChair record how you use Foundry (clicks, mouse, keys outside text fields, windows, rolls; never what you type) on the GM's computer, to measure where the VTT gets in the way. Off by default. Unticking stops it and offers to erase what was recorded.",
+    scope: "client",
+    config: true,
+    type: Boolean,
+    default: false,
+    onChange: (value) => setConsent(Boolean(value)),
+  });
+  game.settings.register(MODULE, "moveHz", {
+    name: "Behaviour traces: mouse samples per second",
+    scope: "world",
+    config: true,
+    type: Number,
+    default: 10,
   });
   // The campaign this world is bound to (ARC-18), set by the Core's first welcome.
   game.settings.register(MODULE, "campaign", {
@@ -174,6 +208,7 @@ Hooks.once("init", () => {
 
 Hooks.once("ready", () => {
   ceiling = String(game.settings.get(MODULE, "ceiling"));
+  traces();
   // One GM connection at a time (PKG-08): only the active GM dials the Core.
   if (!isActiveGM()) return;
   const token = String(game.settings.get(MODULE, "token") ?? "");
@@ -218,7 +253,11 @@ Hooks.once("ready", () => {
           console.error("SecondChair:", error);
         }
       });
-      socket.addEventListener("close", () => capture.disconnect());
+      socket.addEventListener("close", () => {
+        capture.disconnect();
+        core = null;
+      });
+      core = socket;
       capture.connect((message) => socket.send(JSON.stringify(message)));
       if (campaign !== welcome.campaign) {
         await game.settings.set(MODULE, "campaign", welcome.campaign);
@@ -289,4 +328,197 @@ function realiseScene({ id, scene, desired }) {
   });
   realising = run;
   return run;
+}
+
+const consentKey = () => `${MODULE}.traces.${game.world.id}.${game.user.id}`;
+
+/** Whether the user signed in here consented, in this browser (TRC-01). */
+function consented() {
+  try {
+    return localStorage.getItem(consentKey()) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Show the table whether this user consents, through a flag only their own client writes. */
+async function showConsent() {
+  const on = consented();
+  if (Boolean(game.user.getFlag(MODULE, "traces")) !== on)
+    await game.user.setFlag(MODULE, "traces", on);
+}
+
+/** @param {boolean} on */
+async function setConsent(on) {
+  if (consented() === on) return;
+  try {
+    localStorage.setItem(consentKey(), on ? "1" : "0");
+  } catch {
+    ui.notifications.error("SecondChair: this browser cannot keep your consent.");
+    return;
+  }
+  await showConsent();
+  if (!on) await offerErase();
+}
+
+/** After a revocation, let the user erase all their past traces (TRC-01). */
+async function offerErase() {
+  const erase = await foundry.applications.api.DialogV2.confirm({
+    window: { title: "SecondChair: behaviour traces" },
+    content:
+      "<p>Recording stopped. Also erase all the behaviour traces already recorded for you?</p>",
+  });
+  if (!erase) return;
+  if (isActiveGM()) eraseFor(game.user.id);
+  else if (game.users.activeGM) game.socket.emit(SOCKET, { type: "erase" });
+  else erasedNotice(false);
+}
+
+/** @param {string} user */
+function eraseFor(user) {
+  const ok = core !== null;
+  core?.send(JSON.stringify({ type: "erase_traces", user }));
+  if (user === game.user.id) erasedNotice(ok);
+  else game.socket.emit(SOCKET, { type: "erased", user, ok });
+}
+
+/** @param {boolean} ok */
+function erasedNotice(ok) {
+  if (ok) ui.notifications.info("SecondChair: your behaviour traces are erased.");
+  else
+    ui.notifications.warn(
+      "SecondChair: the GM's client is not connected to SecondChair, so your traces cannot be erased now. Tick and untick the setting again once it is.",
+    );
+}
+
+/** Record this user's behaviour traces once they consent; the active GM also relays the table's. */
+function traces() {
+  // Players' traces reach the Core only through the active GM's client (TRC-05). Foundry hands
+  // module socket messages to every client; the others drop them unread. Who is the active GM
+  // can change, so it is asked at each send; a GM client that never dialed counts gaps.
+  const outbox = createOutbox({
+    ready: () => (isActiveGM() ? core !== null : game.users.activeGM !== null),
+    send: (user, records) =>
+      isActiveGM()
+        ? core?.send(
+            JSON.stringify({
+              type: "traces",
+              user,
+              name: game.users.get(user)?.name ?? user,
+              records,
+            }),
+          )
+        : game.socket.emit(SOCKET, { type: "traces", records }),
+  });
+  const rec = createRecorder({ consented, flush: (records) => outbox.push(game.user.id, records) });
+  recorder = rec;
+  setInterval(() => rec.flush(), 1000);
+
+  // Foundry passes the sender's user id, so a player cannot send traces as someone else.
+  game.socket.on(SOCKET, (/** @type {any} */ data, /** @type {string} */ sender) => {
+    if (isActiveGM() && data?.type === "traces" && Array.isArray(data.records))
+      outbox.push(sender, data.records);
+    else if (isActiveGM() && data?.type === "erase") eraseFor(sender);
+    else if (data?.type === "erased" && data.user === game.user.id) erasedNotice(data.ok);
+  });
+
+  // The checkbox follows the user signed in here; their flag follows their own consent.
+  if (game.settings.get(MODULE, "traces") !== consented())
+    game.settings.set(MODULE, "traces", consented());
+  showConsent();
+  Hooks.on("updateUser", (/** @type {{id: string}} */ user, /** @type {any} */ changes) => {
+    if (!changes.flags?.[MODULE]) return;
+    if (user.id === game.user.id) showConsent(); // a GM cannot consent for a player
+    ui.players?.render();
+  });
+  // The GM sees who consents in the players list.
+  Hooks.on("renderPlayers", (/** @type {unknown} */ _app, /** @type {any} */ html) => {
+    /** @type {HTMLElement | undefined} */
+    const root = html instanceof HTMLElement ? html : html?.[0];
+    for (const li of root?.querySelectorAll("[data-user-id]") ?? []) {
+      const id = /** @type {HTMLElement} */ (li).dataset.userId ?? "";
+      if (game.users.get(id)?.getFlag(MODULE, "traces"))
+        li.insertAdjacentHTML(
+          "beforeend",
+          ' <i class="fa-solid fa-circle-dot" title="Records behaviour traces (SecondChair)"></i>',
+        );
+    }
+  });
+
+  // Raw input (TRC-02), on the recorder's clock.
+  /** @param {Record<string, unknown>} data */
+  const input = (data) => rec.record("input", data);
+  /** @param {string} event @param {Record<string, unknown>} [data] */
+  const semantic = (event, data = {}) => rec.record("semantic", { ...data, event });
+  const onCanvas = () => {
+    const p = canvas?.ready ? canvas.mousePosition : null;
+    return p ? { x: Math.round(p.x), y: Math.round(p.y) } : null;
+  };
+  /** @param {MouseEvent} e */
+  const at = (e) => ({ x: e.clientX, y: e.clientY, canvas: onCanvas() });
+  /** @param {Event} e */
+  const target = (e) => describe(/** @type {any} */ (e.target));
+  const opts = { capture: true, passive: true };
+  document.addEventListener(
+    "pointerdown",
+    (e) => input({ input: "click", button: e.button, ...at(e), target: target(e) }),
+    opts,
+  );
+  let lastMove = 0;
+  document.addEventListener(
+    "pointermove",
+    (e) => {
+      const hz = Number(game.settings.get(MODULE, "moveHz")) || 10;
+      if (!document.hasFocus() || e.timeStamp - lastMove < 1000 / hz) return;
+      lastMove = e.timeStamp;
+      input({ input: "move", ...at(e) });
+    },
+    opts,
+  );
+  document.addEventListener(
+    "wheel",
+    (e) => input({ input: "wheel", dy: Math.round(e.deltaY), ...at(e) }),
+    opts,
+  );
+  document.addEventListener(
+    "dragstart",
+    (e) => input({ input: "drag", ...at(e), target: target(e) }),
+    opts,
+  );
+  document.addEventListener(
+    "drop",
+    (e) => input({ input: "drop", ...at(e), target: target(e) }),
+    opts,
+  );
+  document.addEventListener("keydown", (e) => input(keyInput(e)), opts);
+
+  // Semantic events (TRC-02); a system adapter adds its own through the module's `api.trace`.
+  // ponytail: no idle, undo, cancelled move or cancelled roll dialog event yet; detectors (#65)
+  // read idle from the input stream, the adapter reports system dialogs.
+  window.addEventListener("focus", () => semantic("focus"));
+  window.addEventListener("blur", () => semantic("blur"));
+  /** @param {any} app */
+  const windowOf = (app) => ({
+    window: app.id,
+    app: app.constructor.name,
+    document: app.document?.uuid ?? null,
+  });
+  Hooks.on("renderApplicationV2", (app, _el, _ctx, options) => {
+    if (options?.isFirstRender) semantic("window.open", windowOf(app));
+  });
+  Hooks.on("closeApplicationV2", (app) => semantic("window.close", windowOf(app)));
+  Hooks.on("createChatMessage", (/** @type {ChatMessageLike} */ msg, _options, userId) => {
+    if (userId === game.user.id && msg.rolls?.length)
+      semantic("roll", { formulas: msg.rolls.map((r) => r.formula) });
+  });
+  Hooks.on("targetToken", (/** @type {{id: string}} */ user, token, on) => {
+    if (user.id === game.user.id) semantic("target", { token: token.document.uuid, on });
+  });
+  Hooks.on("updateToken", (doc, changes, _options, userId) => {
+    if (userId === game.user.id && ("x" in changes || "y" in changes))
+      semantic("move", { token: doc.uuid });
+  });
+  Hooks.on("combatTurnChange", (/** @type {CombatLike} */ combat, _prior, current) =>
+    semantic("turn", { combat: combat.id, round: current.round, turn: current.turn }),
+  );
 }

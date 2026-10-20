@@ -27,9 +27,16 @@ declare const game: {
   };
   users: {
     activeGM: { id: string } | null;
-    get(id: string): { name: string; isGM: boolean } | undefined;
+    get(
+      id: string,
+    ): { name: string; isGM: boolean; getFlag(scope: string, key: string): unknown } | undefined;
   };
   world: { id: string };
+  socket: {
+    emit(event: string, data: unknown): void;
+    // Foundry passes the id of the user whose client emitted the message.
+    on(event: string, fn: (data: unknown, senderId: string) => unknown): void;
+  };
   modules: { get(id: string): object | undefined };
   scenes: {
     get(id: string): { uuid: string } | undefined;
@@ -76,7 +83,20 @@ interface CombatantLike {
   actor: { uuid: string } | null;
 }
 
+declare const canvas: { ready: boolean; mousePosition: { x: number; y: number } } | undefined;
+
+declare const foundry: {
+  applications: {
+    api: {
+      DialogV2: {
+        confirm(options: { window: { title: string }; content: string }): Promise<boolean>;
+      };
+    };
+  };
+};
+
 declare const ui: {
+  players?: { render(): unknown };
   notifications: Record<
     "info" | "warn" | "error",
     (message: string, options?: { permanent?: boolean }) => unknown
