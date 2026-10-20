@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -18,7 +19,7 @@ from mcp import Client
 
 from secondchair import cli
 from secondchair.cli import main
-from secondchair.core import workspace
+from secondchair.core import index, workspace
 from secondchair.core.server import build_server
 from secondchair.core.workspace import Workspace
 
@@ -329,6 +330,12 @@ def test_full_text_and_structured_search(ws: Workspace) -> None:
     assert len(read(ws, "search_facts", entity=tovan)) == 1
     assert len(read(ws, "search_facts")) == 2
     assert read(ws, "search_facts", text='"unbalanced (quote') == []
+
+
+def test_threads_of_one_process_rebuild_the_index_at_once(ws: Workspace) -> None:
+    """The bridge rebuilds from several worker threads; they shared one temporary file (#141)."""
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(lambda _: index.rebuild(ws), range(80)))
 
 
 def test_deleting_the_derived_index_and_running_check_gives_identical_results(
