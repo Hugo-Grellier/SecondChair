@@ -1,13 +1,13 @@
 ---
 name: rebuild-entities-from-a-bible
-description: Rebuild a campaign's canon from a campaign bible through SecondChair, one entity per named person, place, group and notable thing, then the bible's facts about them. Use when running a SecondChair job whose playbook is rebuild-entities-from-a-bible.
+description: Rebuild a campaign's canon from a campaign bible through SecondChair, one entity per named person, place, group and notable thing, then the bible's facts about them, who knows what at start and its mysteries. Use when running a SecondChair job whose playbook is rebuild-entities-from-a-bible.
 license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve) and read access to the bible file.
 metadata:
   secondchair-responsibility: memory
   secondchair-tier: standard
   secondchair-inputs: bible
-  secondchair-expected-output: One canon entity per named person, place, group or faction, and notable named thing of the bible, created with create_entity, with no duplicate of the campaign vocabulary; then the bible's facts, recorded with record_fact, citing the bible.
+  secondchair-expected-output: One canon entity per named person, place, group or faction, and notable named thing of the bible, created with create_entity, with no duplicate of the campaign vocabulary; then the bible's facts, recorded with record_fact, citing the bible; who knows or believes what at the campaign's start, with record_knowledge; and each mystery's graph, with record_mystery.
 ---
 
 # Rebuild entities from a bible
@@ -49,6 +49,14 @@ You were given a job id. If you were not given its contract, the GM asked you to
    - `agent` and `job` as above.
    Never copy a `CANARY-…` marker into a statement, and never record what someone knows as a statement about them.
 6. Read each result as in step 4.
-7. When everything is handled, call `finish_job` with the job id, then reply with the count of entities and of facts applied, pending and refused.
+7. Record who knows what at the campaign's start: for each fact the bible says someone knows, believes or suspects, call `record_knowledge` with:
+   - `knower`: the entity id of the NPC or faction who holds it, or of the place whose inhabitants all know it (common knowledge);
+   - `fact`: the id `record_fact` returned for it. Record a fact first when the bible states it only as someone's knowledge;
+   - `mode`: `knows`, or `believes` or `suspects`; a `never_true` fact can only be believed or suspected;
+   - `date`: the campaign's starting date, unless the bible says when they learned it;
+   - `origin`, `agent` and `job` as for `record_fact`.
+8. For each mystery the bible lays out, call `record_mystery` with the mystery's entity id and its graph, each clue's evidence and each conclusion a fact recorded first, with the ids the bible gives its conclusions, nodes and clues. Then call `check_mystery` and report its warnings. The mystery is prep, not memory: if prep is at manual, report it and go on.
+9. Read each result as in step 4.
+10. When everything is handled, call `finish_job` with the job id, then reply with the count of entities, of facts, of knowledge records and of mysteries applied, pending and refused.
 
 Do not invent entities or facts the bible does not state, and do not create the same entity or record the same fact twice.

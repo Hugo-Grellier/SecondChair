@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import yaml
+from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.session import MODERN_PROTOCOL_VERSIONS
 
 from secondchair.core import vtt
 from secondchair.core.tools import (
@@ -295,12 +297,19 @@ def wrap(ws: Workspace, tool: Tool) -> Callable[..., ActionResult]:
 
     @functools.wraps(tool.fn)
     def run(
-        *args: Any, agent: str, job: int | None = None, blocking: bool = False, **kwargs: Any
+        *args: Any,
+        agent: str,
+        ctx: Context | None = None,
+        job: int | None = None,
+        blocking: bool = False,
+        **kwargs: Any,
     ) -> ActionResult:
         with _for_agent():
+            job = session_job(ws, ctx, job)
             return act(ws, tool, agent, lambda: tool.fn(*args, **kwargs), job, blocking)
 
     added = [
+        inspect.Parameter("ctx", inspect.Parameter.KEYWORD_ONLY, annotation=Context),
         inspect.Parameter("agent", inspect.Parameter.KEYWORD_ONLY, annotation=str),
         inspect.Parameter(
             "job", inspect.Parameter.KEYWORD_ONLY, default=None, annotation=int | None
@@ -313,6 +322,8 @@ def wrap(ws: Workspace, tool: Tool) -> Callable[..., ActionResult]:
         parameters=[*signature.parameters.values(), *added], return_annotation=ActionResult
     )
     del run.__wrapped__  # the MCP schema comes from __signature__, not from the block's fn
+    # The SDK finds the Context parameter from the annotations, and leaves it out of the schema.
+    run.__annotations__ = {**tool.fn.__annotations__, "ctx": Context}
     run.__doc__ = (
         f"{inspect.getdoc(tool.fn) or ''}\n\n`agent`: your name as an agent, recorded in the "
         "action log for traceability only. `job`: the SecondChair job you are running, if any; "
@@ -321,6 +332,65 @@ def wrap(ws: Workspace, tool: Tool) -> Callable[..., ActionResult]:
         "proposal then calls on the GM at once instead of at the next break."
     )
     return run
+
+
+def session_job(ws: Workspace, ctx: Context | None, job: int | None) -> int | None:
+    """The job an agent session's delegated action is for (ARC-23a). A client that keeps an MCP
+    session (the handshake protocols) is bound to the job it starts, or first acts for, until
+    that job ends: its actions are for that job whether or not they pass `job`, and refused for
+    another one. A sessionless client (2026-07-28) has nothing to bind, so its actions without
+    `job` are refused while a world-turn job is started."""
+    from secondchair.core import jobs  # it builds on this module
+
+    if _session_state(ctx) is None:
+        started = [
+            j["id"]
+            for j in jobs.pending(ws)
+            if j["status"] == "started" and j["responsibility"] in JOB_GOVERNED
+        ]
+        if job is None and started:
+            raise DelegationError(
+                f"World-turn job {started[0]} is started: pass `job` to every delegated action "
+                "(none is taken outside a job meanwhile, ARC-23a)."
+            )
+        return job
+    bound = bound_job(ws, ctx)
+    if bound is None:
+        if job is not None and jobs.read(ws, job)["status"] == "started":
+            bind(ctx, job)
+        return job
+    if job is not None and job != bound:
+        raise DelegationError(f"This session runs job {bound}: finish it before job {job}.")
+    return bound
+
+
+def bound_job(ws: Workspace, ctx: Context | None) -> int | None:
+    """The started job this agent session is bound to, if it keeps a session and is bound."""
+    from secondchair.core import jobs  # it builds on this module
+
+    state = _session_state(ctx) or {}
+    bound = state.get(_BOUND)
+    if bound is not None and jobs.read(ws, bound)["status"] != "started":
+        del state[_BOUND]
+        bound = None
+    return bound
+
+
+def bind(ctx: Context | None, job: int) -> None:
+    """Bind an agent session, if it keeps one, to the job it has just started."""
+    if (state := _session_state(ctx)) is not None:
+        state[_BOUND] = job
+
+
+def _session_state(ctx: Context | None) -> dict[str, Any] | None:
+    """The per-session state of the client's MCP connection, or None for a sessionless client
+    (2026-07-28), whose every request gets a fresh connection, or a call outside MCP."""
+    if ctx is None or ctx.session.protocol_version in MODERN_PROTOCOL_VERSIONS:
+        return None
+    return ctx.session._connection.state  # the SDK exposes it to tools only through the session
+
+
+_BOUND = "secondchair.job"
 
 
 def wrap_read(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -1052,7 +1122,8 @@ def log_hand_edits(ws: Workspace) -> list[dict]:
     agent-proposal rank (CAN-11). The GM promotes one with `promote`."""
     with locked(ws):
         entries, _ = read_log(ws)
-        known = core_states(entries)
+        # Only canon files: the Core's other targets (scenes/, prep/) are not read as canon.
+        known = {t: c for t, c in core_states(entries).items() if t.startswith(f"{CANON_DIR}/")}
         current = {
             p.relative_to(ws.root).as_posix(): p.read_text()
             for p in sorted((ws.root / CANON_DIR).rglob("*.md"))
