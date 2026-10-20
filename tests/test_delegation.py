@@ -133,6 +133,15 @@ def test_undo_refuses_to_overwrite_a_hand_edit(ws: Workspace) -> None:
     assert len(log(ws)) == 1
 
 
+def test_the_gm_approves_several_pending_actions_in_one_command(ws: Workspace) -> None:
+    set_level(ws, "prep", "memory", "propose")
+    create_entity(ws)
+    call(ws, "create_entity", {**ENTITY, "names": ["Other"], "agent": "claude-prep"})
+
+    assert gm("approve", "1", "2", root=ws.root) == 0
+    assert len(entities(ws)) == 2
+
+
 def test_at_propose_the_entity_appears_only_after_cli_approval(ws: Workspace) -> None:
     set_level(ws, "prep", "memory", "propose")
 

@@ -151,6 +151,15 @@ test("a token move replies with where it goes, though Foundry v14 applies it aft
   assert.deepEqual(reply.ok && reply.after, { x: 400, y: 300 });
 });
 
+test("the reply's after-state holds only the fields the action sets, though Foundry adds _id to them (#165)", async () => {
+  const { docs, handle } = world();
+  const token = docs["Scene.s.Token.t"];
+  const update = token.update;
+  token.update = async (changes) => update.call(token, Object.assign(changes, { _id: "t" }));
+  const reply = await handle(move("r1", 400, 300));
+  assert.deepEqual(reply.ok && reply.after, { x: 400, y: 300 });
+});
+
 test("a replayed request id is applied once and gets the first reply", async () => {
   const { docs, handle } = world();
   const [first, second] = await Promise.all([

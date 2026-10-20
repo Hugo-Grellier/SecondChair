@@ -173,7 +173,8 @@ export function createActions({
     if (expect && Object.entries(expect).some(([k, v]) => before[k] !== v)) {
       throw new Error(`${target} changed since: nothing was done.`);
     }
-    await doc.update(params);
+    // A copy: Foundry adds the document's _id to the changes it is given (#165).
+    await doc.update({ ...params });
     // Not read back: on Foundry v14 a token's x/y still hold the old position when update()
     // resolves, the movement API applies it later (#150).
     return { before, after: { ...before, ...params } };

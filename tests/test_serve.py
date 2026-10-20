@@ -41,6 +41,14 @@ def test_serve_answers_on_loopback(served: int) -> None:
         }
 
 
+def test_serve_shows_the_review_page_to_a_browser(served: int) -> None:
+    request = urllib.request.Request(f"http://127.0.0.1:{served}/", headers={"Accept": "text/html"})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        assert "SecondChair review" in response.read().decode()
+    with urllib.request.urlopen(f"http://127.0.0.1:{served}/api/overview", timeout=5) as response:
+        assert json.load(response)["moment"] == "prep"
+
+
 def test_the_mcp_endpoint_refuses_a_foreign_host_header(served: int) -> None:
     request = urllib.request.Request(
         f"http://127.0.0.1:{served}/mcp",

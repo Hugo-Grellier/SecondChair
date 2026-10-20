@@ -20,6 +20,7 @@ from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Origin
 
 from secondchair.core.workspace import Workspace
+from secondchair_foundry.bridge import scene_level
 
 CAVE = {
     "scene": {"name": "Goblin cave", "width": 2000, "height": 1500},
@@ -81,6 +82,15 @@ def test_prep_writes_the_desired_state_in_the_workspace(ws: Workspace) -> None: 
     assert result.structured_content == {"entry": 1, "status": "applied"}
     assert yaml.safe_load((ws.root / "scenes/cave.yaml").read_text()) == CAVE
     assert log(ws)[0]["responsibility"] == "prep"
+
+
+def test_a_prepared_scene_is_not_read_as_a_hand_edit_of_canon(ws: Workspace) -> None:  # noqa: F811
+    call(ws, "prepare_scene", {"key": "cave", **CAVE, "agent": "claude-prep"})
+    call(ws, "search_entities", {"text": ""})  # rebuilds the index, logging hand edits
+
+    assert [e["kind"] for e in log(ws)] == ["action"]
+    path = ws.root / "scenes/cave.yaml"
+    assert scene_level(ws, path, path.read_text()) == "act-then-review"  # bounded by the ceiling
 
 
 def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F811

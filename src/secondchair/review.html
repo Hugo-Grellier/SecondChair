@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SecondChair review</title>
+<link rel="icon" href="data:,">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
+<style>
+:root {
+  --bg: #fbfaf7; --fg: #1f1d1a; --muted: #6b665e; --line: #e2ddd3; --card: #fff;
+  --accent: #7a3e12; --ins: #e6f4e4; --del: #fbe7e5; --warn: #fff3d6;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17161a; --fg: #ebe8e2; --muted: #a09a90; --line: #34313a; --card: #201f24;
+    --accent: #e3a46c; --ins: #1f3a24; --del: #46201f; --warn: #3d3218;
+  }
+}
+* { box-sizing: border-box; }
+a { color: var(--accent); }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 17px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { position: sticky; top: 0; z-index: 1; background: var(--bg); border-bottom: 1px solid var(--line);
+  padding: .5rem 1rem; display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: center; }
+header strong { margin-right: .5rem; }
+nav a { color: var(--muted); text-decoration: none; padding: .35rem .6rem; border-radius: 6px; }
+nav a.on { color: var(--fg); background: var(--card); border: 1px solid var(--line); }
+main { padding: 1rem; max-width: 1200px; margin: 0 auto; }
+.note { color: var(--muted); font-size: .9rem; }
+.banner { background: var(--warn); padding: .6rem .8rem; border-radius: 6px; margin-bottom: 1rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .8rem; }
+.stat b { display: block; font-size: 1.6rem; }
+.meta { color: var(--muted); font-size: .9rem; }
+.tag { display: inline-block; padding: 0 .4rem; border-radius: 4px; border: 1px solid var(--line); font-size: .85rem; }
+pre, code { font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+pre { overflow-x: auto; padding: .5rem; background: var(--bg); border-radius: 6px; margin: .4rem 0; }
+.diff span { display: block; white-space: pre-wrap; }
+.diff .i { background: var(--ins); } .diff .d { background: var(--del); } .diff .h { color: var(--muted); }
+.cmd { display: flex; gap: .5rem; align-items: center; }
+.cmd { margin: .3rem 0; }
+.cmd code { flex: 1; min-width: 0; padding: .3rem .5rem; background: var(--bg); border-radius: 4px; overflow-wrap: anywhere; }
+button, select, input { font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: .3rem .6rem; }
+.filters { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.prep { display: grid; grid-template-columns: 260px 1fr; gap: 1.5rem; }
+.tree a { display: block; color: var(--fg); text-decoration: none; padding: .2rem .4rem; border-radius: 4px; overflow-wrap: anywhere; }
+.tree a.on { background: var(--card); border: 1px solid var(--line); }
+.tree h4 { margin: .8rem 0 .2rem; color: var(--muted); font-weight: 600; font-size: .85rem; }
+.toc { font-size: .9rem; border-left: 3px solid var(--line); padding-left: .8rem; margin-bottom: 1rem; }
+.toc a { display: block; color: var(--muted); text-decoration: none; }
+.toc .l3 { padding-left: 1rem; }
+.doc { font: 20px/1.65 Georgia, "Iowan Old Style", serif; max-width: 42em; }
+.doc h1, .doc h2, .doc h3 { font-family: system-ui, sans-serif; line-height: 1.25; }
+.doc table { border-collapse: collapse; } .doc td, .doc th { border: 1px solid var(--line); padding: .25rem .5rem; }
+.doc blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding-left: 1rem; color: var(--muted); }
+table.list { border-collapse: collapse; width: 100%; } table.list td, table.list th { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+@media (max-width: 860px) { .prep { grid-template-columns: 1fr; } }
+@media print {
+  header, .tree, .no-print, .toc { display: none !important; }
+  body { background: #fff; color: #000; }
+  main { padding: 0; max-width: none; } .prep { display: block; }
+  .doc { font-size: 12pt; max-width: none; }
+  .doc h1, .doc h2, .doc h3 { break-after: avoid; }
+}
+</style>
+</head>
+<body>
+<header>
+  <strong>SecondChair</strong>
+  <nav id="tabs"></nav>
+  <span class="note" id="status"></span>
+</header>
+<main id="view"></main>
+<script>
+"use strict";
+const TABS = { overview: "Overview", review: "To review", changes: "Changes", prep: "Prep", canon: "Canon", jobs: "Jobs" };
+const view = document.getElementById("view");
+const state = { tab: "overview", file: null, page: 1, filters: {}, q: "", lastText: null };
+
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+async function api(path) {
+  const r = await fetch(path, { headers: { Accept: "application/json" } });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+
+function diff(lines) {
+  if (!lines.length) return "";
+  const cls = (l) => (l.startsWith("+") ? "i" : l.startsWith("-") ? "d" : l.startsWith("@@") ? "h" : "");
+  return `<pre class="diff">${lines.map((l) => `<span class="${cls(l)}">${esc(l) || " "}</span>`).join("")}</pre>`;
+}
+function commands(cmds) {
+  return Object.entries(cmds || {}).map(([name, c]) =>
+    `<div class="cmd"><span class="tag">${esc(name)}</span><code>${esc(c)}</code><button class="no-print" data-copy="${esc(c)}">Copy</button></div>`).join("");
+}
+function entry(e) {
+  const who = [e.tool, e.agent && `by ${e.agent}`, e.responsibility, e.effective_level].filter(Boolean).map(esc).join(" · ");
+  const extra = [e.interaction && `${e.interaction} of entry ${e.entry}`, e.reason && `reason: ${e.reason}`, e.error, e.refusal, e.rank && `rank ${e.rank}`]
+    .filter(Boolean).map(esc).join(" · ");
+  return `<div class="card">
+    <div><b>#${e.id}</b> <span class="tag">${esc(e.kind)}</span> ${e.status ? `<span class="tag">${esc(e.status)}</span>` : ""} ${who}</div>
+    <div class="meta">${esc(e.at)} · ${esc(e.moment)}${e.target ? ` · <code>${esc(e.target)}</code>` : ""}${e.reversible === false ? " · irreversible" : ""}${e.job ? ` · job ${e.job}` : ""}</div>
+    ${extra ? `<div class="meta">${extra}</div>` : ""}
+    ${diff(e.diff)}${commands(e.commands)}</div>`;
+}
+
+const render = {
+  async overview() {
+    const o = await api("/api/overview");
+    const stat = (label, v) => `<div class="card stat"><span class="meta">${label}</span><b>${esc(v ?? "—")}</b></div>`;
+    const n = o.next, steps = [];
+    if (n.date) steps.push(`The campaign has no current date: set it before play ${commands({ date: n.date })}`);
+    if (n.unwrapped_session) steps.push(`Session ${esc(n.unwrapped_session)} is not wrapped: what was played is not in canon yet. After its wrap job: ${commands({ wrap: n.wrap })}`);
+    for (const j of n.jobs) steps.push(`Job ${j.id} ${esc(j.status)}: ${esc(j.playbook)}${j.status === "queued" ? ` — <code>${esc(j.ask)}</code>` : ""}`);
+    if (n.approve) steps.push(`Awaiting your approval: entries ${n.pending_entries.join(", ")} (<a href="#review">To review</a>) ${commands({ approve: n.approve })}`);
+    if (o.open_calls) steps.push(`Open calls on you: ${o.open_calls} (<a href="#review">To review</a>)`);
+    if (!o.session && (n.handoff || !n.unwrapped_session)) steps.push(n.handoff
+      ? `Session ${n.next_session} is prepared: <a href="#prep" data-file="${esc(n.handoff)}">read its handoff</a>`
+      : `Session ${n.next_session} has no handoff yet: <code>ask your agent: "prepare session ${n.next_session}"</code>`);
+    const next = `<div class="card"><h2 style="margin-top:0">Next</h2>${steps.length ? `<ul>${steps.map((s) => `<li>${s}</li>`).join("")}</ul>` : "<p>Nothing waits on you.</p>"}</div>`;
+    return `${next}<div class="grid">
+      ${stat("Moment", o.moment)}${stat("Live session", o.session)}${stat("Campaign date", o.current_date)}
+      ${stat("Campaign language", o.campaign_language)}${stat("Pending proposals", o.pending)}${stat("Open calls", o.open_calls)}
+      ${stat("Jobs queued or started", o.unfinished_jobs)}${stat("Entities", o.counts.entities)}${stat("Facts", o.counts.facts)}${stat("Events", o.counts.events)}
+    </div><p class="meta">Workspace <code>${esc(o.workspace)}</code></p>`;
+  },
+  async review() {
+    const r = await api("/api/review");
+    const call = (c) => `<div class="card"><div><b>Call ${c.id}</b> <span class="tag">${esc(c.kind)}</span> ${esc(c.responsibility)} · due ${esc(c.deadline)}${c.blocking ? " · blocking" : ""}</div>
+      <div class="meta">${esc(c.at)} · ${esc(c.moment)}${c.job ? ` · job ${c.job}` : ""}</div>
+      ${c.message ? `<p>${esc(c.message)}</p>` : ""}${commands(c.commands)}${c.entry ? entry(c.entry) : ""}</div>`;
+    const callEntries = new Set(r.calls.filter((c) => c.entry).map((c) => c.entry.id));
+    const loose = r.pending.filter((e) => !callEntries.has(e.id));
+    return `<p class="banner">This page is read-only: it is not an authenticated Surface (ADR 0003, ARC-13). Approve, reject or undo by running the command shown in an interactive terminal, or from the Director's Desk.</p>
+      <h2>Open calls (${r.calls.length})</h2>${r.calls.map(call).join("") || "<p class='note'>No open call.</p>"}
+      ${loose.length ? `<h2>Other pending entries (${loose.length})</h2>${loose.map(entry).join("")}` : ""}`;
+  },
+  async changes() {
+    const q = new URLSearchParams({ page: state.page, ...state.filters });
+    const c = await api(`/api/changes?${q}`);
+    const select = (key, options) => `<select data-filter="${key}"><option value="">any ${key}</option>${options
+      .map((o) => `<option ${state.filters[key] === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+    return `<div class="filters no-print">${select("moment", c.moments)}${select("status", c.statuses)}${select("tool", c.tools)}
+      <button data-page="${c.page - 1}" ${c.page <= 1 ? "disabled" : ""}>Newer</button>
+      <span class="note">page ${c.page} / ${c.pages} · ${c.total} entries</span>
+      <button data-page="${c.page + 1}" ${c.page >= c.pages ? "disabled" : ""}>Older</button></div>
+      ${c.entries.map(entry).join("") || "<p class='note'>No entry.</p>"}`;
+  },
+  async prep() {
+    const p = await api("/api/prep");
+    if (!state.file && p.files.length) state.file = p.files.find((f) => f.endsWith("handoff.md")) || p.files[0];
+    if (!state.file && p.desired.length) state.file = `foundry:${p.desired[0].kind}/${p.desired[0].key}`;
+    const groups = {};
+    for (const f of p.files) (groups[f.slice(0, f.lastIndexOf("/"))] ??= []).push(f);
+    const tree = Object.entries(groups).map(([dir, fs]) => `<h4>${esc(dir)}/</h4>${fs.map((f) =>
+      `<a href="#prep" data-file="${esc(f)}" class="${f === state.file ? "on" : ""}">${esc(f.slice(dir.length + 1))}</a>`).join("")}`).join("");
+    const foundry = p.desired.map((d) => {
+      const id = `foundry:${d.kind}/${d.key}`;
+      const counts = [d.conflicts && `${d.conflicts} conflict${d.conflicts > 1 ? "s" : ""}`, d.errors && `${d.errors} error${d.errors > 1 ? "s" : ""}`].filter(Boolean).join(", ");
+      return `<a href="#prep" data-file="${esc(id)}" class="${id === state.file ? "on" : ""}">${esc(d.key)} <span class="meta">${esc(d.type || d.kind)} · ${esc(d.status)}${counts ? ` · ${esc(counts)}` : ""}</span></a>`;
+    }).join("");
+    let doc = "<p class='note'>No Markdown under prep/ or notes/ yet.</p>";
+    const picked = p.desired.find((d) => `foundry:${d.kind}/${d.key}` === state.file);
+    if (picked) {
+      const r = picked.report, rep = r?.report || {};
+      const conflicts = (rep.actions || []).filter((a) => a?.action === "conflict");
+      const errors = [r?.error, ...(rep.errors || []).map((e) => (typeof e === "string" ? e : JSON.stringify(e)))].filter(Boolean);
+      doc = `<h2>${esc(picked.kind)}/${esc(picked.key)}.yaml</h2>
+        <p><span class="tag">${esc(picked.type || picked.kind)}</span> <span class="tag">${esc(picked.status)}</span>${r?.reason ? ` <span class="meta">reason: ${esc(r.reason)}</span>` : ""}</p>
+        ${rep.summary ? `<p class="meta">${Object.entries(rep.summary).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(" · ")}</p>` : ""}
+        ${conflicts.length ? `<h3>Conflicts</h3><pre>${esc(JSON.stringify(conflicts, null, 2))}</pre>` : ""}
+        ${errors.length ? `<h3>Errors</h3><ul>${errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : ""}
+        ${rep.actions?.length ? `<details><summary>Actions (${rep.actions.length})</summary><pre>${esc(JSON.stringify(rep.actions, null, 2))}</pre></details>` : ""}
+        <details ${r ? "" : "open"}><summary>Desired state</summary><pre>${esc(picked.content)}</pre></details>`;
+      state.lastText = null;
+    } else if (state.file) {
+      const f = await api(`/api/file?path=${encodeURIComponent(state.file)}`);
+      doc = `<p class="meta">${esc(f.path)} <button class="no-print" onclick="print()">Print</button></p><div id="toc"></div><article class="doc" id="doc"></article>`;
+      state.lastText = f.text;
+    }
+    return `<div class="prep"><div class="tree">${tree}${foundry ? `<h4>In Foundry</h4>${foundry}` : ""}</div><div>${doc}</div></div>`;
+  },
+  async canon() {
+    return `<div class="filters no-print"><input id="q" type="search" placeholder="Search entities, facts, events" value="${esc(state.q)}" size="40"></div><div id="results">${await canonResults()}</div>`;
+  },
+  async jobs() {
+    const j = await api("/api/jobs");
+    const row = (x) => `<tr><td>${x.id}</td><td><span class="tag">${esc(x.status)}</span></td><td>${esc(x.playbook)}</td><td>${esc(x.responsibility)} · ${esc(x.moment)} · tier ${esc(x.tier)}</td>
+      <td>${Object.entries(x.inputs || {}).map(([k, v]) => `<div><b>${esc(k)}</b> <code>${esc(v)}</code></div>`).join("")}</td>
+      <td class="meta">${esc(x.at)}${x.attempts?.length ? `<br>last attempt ${esc(x.attempts.at(-1).outcome)}` : ""}</td></tr>`;
+    return j.jobs.length ? `<table class="list"><tr><th>#</th><th>Status</th><th>Playbook</th><th>Contract</th><th>Inputs</th><th>When</th></tr>${j.jobs.map(row).join("")}</table>` : "<p class='note'>No job.</p>";
+  },
+};
+
+async function canonResults() {
+  const c = await api(`/api/canon?q=${encodeURIComponent(state.q)}`);
+  const names = (e) => (e.names || []).join(", ");
+  return `<h2>Entities (${c.entities.length})</h2><table class="list">${c.entities.map((e) => `<tr><td><code>${esc(e.id)}</code></td><td><b>${esc(names(e))}</b>${e.aliases?.length ? ` <span class="meta">(${esc(e.aliases.join(", "))})</span>` : ""}</td><td>${esc(e.kind)}</td><td>${esc(e.description)}</td></tr>`).join("")}</table>
+    <h2>Facts (${c.facts.length})</h2><table class="list">${c.facts.map((f) => `<tr><td><code>${esc(f.id)}</code></td><td>${esc(f.statement)}${f.never_true ? " <span class='tag'>belief</span>" : ""}</td><td><span class="tag">${esc(f.rank)}</span></td>
+      <td class="meta">${esc(f.valid_from ?? "")} → ${esc(f.valid_to ?? "")}</td><td class="meta">${f.knowers.map((k) => `${esc(k.knower)} ${esc(k.mode)} (${esc(k.date)})`).join("<br>")}</td></tr>`).join("")}</table>
+    <h2>Events (${c.events.length})</h2><table class="list">${c.events.map((e) => `<tr><td><code>${esc(e.id)}</code></td><td>${esc(e.date)}</td><td>${esc(e.description)}</td><td><span class="tag">${esc(e.kind)}</span> <span class="tag">${esc(e.rank)}</span></td></tr>`).join("")}</table>`;
+}
+
+function renderDoc() {
+  const doc = document.getElementById("doc");
+  if (!doc || state.lastText == null) return;
+  if (window.marked && window.DOMPurify) doc.innerHTML = DOMPurify.sanitize(marked.parse(state.lastText));
+  else doc.innerHTML = `<pre>${esc(state.lastText)}</pre>`; // the CDN is unreachable: plain text
+  const heads = [...doc.querySelectorAll("h1, h2, h3")];
+  heads.forEach((h, i) => (h.id = `h-${i}`));
+  document.getElementById("toc").innerHTML = heads.length > 1
+    ? `<nav class="toc">${heads.map((h) => `<a class="l${h.tagName[1]}" href="#prep" data-jump="${h.id}">${esc(h.textContent)}</a>`).join("")}</nav>` : "";
+}
+
+let busy = false;
+async function show(quiet = false) {
+  if (busy) return;
+  busy = true;
+  document.getElementById("tabs").innerHTML = Object.entries(TABS).map(([k, v]) => `<a href="#${k}" class="${k === state.tab ? "on" : ""}">${v}</a>`).join("");
+  try {
+    if (state.tab === "prep" && quiet && state.file && !state.file.startsWith("foundry:")) { // keep the reader's place unless the file changed
+      const f = await api(`/api/file?path=${encodeURIComponent(state.file)}`).catch(() => null);
+      if (f && f.text === state.lastText) return;
+    }
+    if (state.tab === "canon" && quiet) { document.getElementById("results").innerHTML = await canonResults(); return; }
+    const html = await render[state.tab]();
+    const y = scrollY;
+    view.innerHTML = html;
+    renderDoc();
+    if (quiet) scrollTo(0, y);
+    document.getElementById("status").textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    document.getElementById("status").textContent = `error: ${e.message}`;
+  } finally {
+    busy = false;
+  }
+}
+
+function route() {
+  const tab = location.hash.slice(1);
+  if (TABS[tab]) state.tab = tab;
+  show();
+}
+addEventListener("hashchange", route);
+addEventListener("focus", () => show(true));
+setInterval(() => document.visibilityState === "visible" && show(true), 5000);
+view.addEventListener("click", (ev) => {
+  const t = ev.target.closest("[data-file],[data-page],[data-copy],[data-jump]");
+  if (!t) return;
+  if (t.dataset.file) { ev.preventDefault(); state.file = t.dataset.file; if (location.hash !== "#prep") location.hash = "prep"; else show(); scrollTo(0, 0); }
+  else if (t.dataset.page) { state.page = Number(t.dataset.page); show(); }
+  else if (t.dataset.copy) navigator.clipboard?.writeText(t.dataset.copy);
+  else if (t.dataset.jump) { ev.preventDefault(); document.getElementById(t.dataset.jump)?.scrollIntoView(); }
+});
+view.addEventListener("change", (ev) => {
+  const key = ev.target.dataset.filter;
+  if (key) { state.filters[key] = ev.target.value; if (!ev.target.value) delete state.filters[key]; state.page = 1; show(); }
+});
+let typing;
+view.addEventListener("input", (ev) => {
+  if (ev.target.id !== "q") return;
+  clearTimeout(typing);
+  typing = setTimeout(async () => { state.q = ev.target.value; document.getElementById("results").innerHTML = await canonResults(); }, 250);
+});
+route();
+</script>
+</body>
+</html>
