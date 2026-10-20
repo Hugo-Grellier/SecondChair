@@ -6,7 +6,7 @@ Not binding until the GM accepts it. Until then ADR 0010 and PKG-16 hold as writ
 
 **Amends [ADR 0010](0010-local-core-reached-by-the-gm-browser.md) (its upgrade consequence) and PKG-16 ([09](../spec/09-packaging.md#export-and-schema-evolution)).** ADR 0010 says an older schema blocks `serve` "until `secondchair upgrade` migrates it in place as a reviewable diff". PKG-16 says the same. On acceptance, PKG-16 becomes:
 
-> **PKG-16** `workspace.yaml` carries the schema version. A newer schema is refused. An older one blocks `serve` until `secondchair upgrade` migrates it: after a pre-upgrade snapshot, on a sibling copy swapped in by rename once `check` passes, with `--preview` showing the diff first. A destructive migration step runs only from an authenticated Surface with typed confirmation (ADR 0018).
+> **PKG-16** `workspace.yaml` carries the schema version. A newer schema is refused. An older one blocks `serve` until `secondchair upgrade` migrates it: after a pre-upgrade snapshot (skipped only when the GM passes `--no-snapshot`), on a sibling copy swapped in by two renames once `check` passes, with `--preview` showing the diff first. A destructive migration step runs only from an authenticated Surface with typed confirmation (ADR 0018).
 
 The reviewable diff survives, as `--preview` and as the git diff after the swap. "In place" no longer holds: the workspace directory is replaced, not edited.
 
@@ -34,8 +34,16 @@ Excluded, and why:
 - Each migration declares itself **additive** (new files or fields; nothing removed or rewritten) or **destructive** (it removes, rewrites or merges authoritative content).
 - `--preview` runs the migrations on a temporary copy and prints the diff. No migration touches the workspace before the GM has had the chance to see that diff.
 - A destructive step runs only from an authenticated Surface (an interactive terminal), with the GM typing the workspace name. This is the same bar as an irreversible approval (ADR 0003).
-- The migration runs on a sibling copy that replaces the workspace by a directory rename only once every step and `check` pass. An interrupted upgrade leaves the original untouched and a `<dir>.upgrading` copy to delete. `serve` refuses a workspace whose `.secondchair/upgrading` marker exists.
-- Rollback is a restore of the pre-upgrade snapshot. Nothing else.
+- **The copy.** `upgrade` refuses while `serve` runs on the workspace. It takes the workspace lock (`.secondchair/delegation.lock` of the original directory, #211/#213) and holds it until the swap ends. It writes `.secondchair/upgrading` in the original, which `serve` and `check` refuse to run past. It copies the workspace to `<dir>.upgrading`, **including `.git`** (history and the reviewable diff move with it) and excluding `.secondchair/` (rebuilt by `check`). Every migration step and `check` run on the copy. Then `.upgrading/.secondchair/upgrade-complete` is written.
+- **The swap is two renames**, since POSIX `rename` cannot replace a non-empty directory: (1) `<dir>` → `<dir>.pre-upgrade`, (2) `<dir>.upgrading` → `<dir>`. Between them nothing exists at `<dir>`. Linux `renameat2(RENAME_EXCHANGE)` and macOS `renamex_np(RENAME_SWAP)` close the window. They are optional, because the recovery below covers the portable path.
+- **Recovery.** Every command that opens a workspace first checks for the siblings:
+  - The upgrade was interrupted before (1): `<dir>` exists with the marker, plus a `.upgrading` copy. Delete the copy and remove the marker. The original is untouched.
+  - The window: `<dir>` is missing, and `.pre-upgrade` and `.upgrading` exist. If the copy carries `upgrade-complete`, finish (2). Otherwise rename `.pre-upgrade` back.
+  - Done: `<dir>` is the migrated copy and `.pre-upgrade` remains. It is reported, and kept until the GM deletes it. It is the fast rollback.
+  
+  No state leaves the authoritative workspace half migrated: each directory is either wholly old or wholly migrated and checked.
+- **Lock waiters.** A CLI process waiting on the lock holds the old inode, which after the swap lives in `.pre-upgrade`. `locked()` therefore re-checks, once it acquires the lock, that the lock file is still the one at `<dir>/.secondchair/delegation.lock` (same device and inode). If it is not, it releases and retries on the new directory. `serve` cannot be a waiter, because upgrade refuses while it runs.
+- Rollback: rename `<dir>.pre-upgrade` back while it exists, otherwise restore the pre-upgrade snapshot.
 
 **Software upgrades.** One qualified pair is supported at a time (Core tag × Foundry major × PF2e system major), as the handshake's protocol check already enforces. An upgrade of the tool is `uv tool install …@<tag>`, then `secondchair upgrade`.
 
