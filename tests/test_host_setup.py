@@ -59,7 +59,11 @@ def test_host_setup_prints_how_to_install_the_playbooks(
     home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     main(["host", "setup", "claude"])
-    assert f"claude plugin marketplace add {runner.PLAYBOOKS}" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"claude plugin marketplace add {runner.PLAYBOOKS}" in out
+    assert "claude plugin install secondchair@secondchair\n" in out
+    assert "claude plugin install secondchair-foundry@secondchair-foundry\n" in out  # ARC-10
     main(["host", "setup", "codex"])
-    skill = runner.SKILLS / "rebuild-entities-from-a-bible"
-    assert f"ln -sfn {skill} ~/.codex/skills/{skill.name}" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    for skill in runner.skills():
+        assert f"ln -sfn {skill} ~/.codex/skills/{skill.name}" in out

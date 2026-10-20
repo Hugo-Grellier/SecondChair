@@ -1,0 +1,13 @@
+{
+  "name": "secondchair-foundry",
+  "owner": { "name": "Hugo Grellier" },
+  "description": "SecondChair's Foundry VTT playbooks for Claude Code.",
+  "plugins": [
+    {
+      "name": "secondchair-foundry",
+      "source": "./",
+      "author": { "name": "Hugo Grellier" },
+      "description": "SecondChair's Foundry VTT playbooks: the procedures agents follow to realise prepared scenes in Foundry."
+    }
+  ]
+}

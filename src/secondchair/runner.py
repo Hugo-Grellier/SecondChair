@@ -8,6 +8,7 @@ template. Model names live only there, never in the Core or a playbook (ARC-25).
 import json
 import re
 import subprocess
+from importlib.metadata import entry_points
 from pathlib import Path
 
 import yaml
@@ -16,12 +17,13 @@ from secondchair.core import jobs
 from secondchair.core.workspace import Workspace
 
 # The Core's playbooks: a Claude Code plugin whose `skills/` is also the Codex skill bundle
-# (PKG-19). ponytail: Core playbooks only; other blocks register theirs when they ship one.
+# (PKG-19). Each block ships its own the same way, registered under PLAYBOOK_GROUP (ARC-21).
 PLAYBOOKS = Path(__file__).parent / "playbooks"
-SKILLS = PLAYBOOKS / "skills"
+PLAYBOOK_GROUP = "secondchair.playbooks"
 
 # Headless invocations; `{prompt}`, `{model}`, `{effort}`, `{playbooks}` and `{job}` are filled
-# in. The machine configuration's `hosts` overrides or adds templates.
+# in, and an argument naming `{playbooks}` is repeated for each block's playbook directory. The
+# machine configuration's `hosts` overrides or adds templates.
 HOSTS: dict[str, list[str]] = {
     "claude": [
         "claude",
@@ -31,8 +33,7 @@ HOSTS: dict[str, list[str]] = {
         "{model}",
         "--effort",
         "{effort}",
-        "--plugin-dir",
-        "{playbooks}",
+        "--plugin-dir={playbooks}",
         "--allowedTools",
         "mcp__secondchair Read",
     ],
@@ -53,13 +54,23 @@ class RunnerError(Exception):
     """A playbook, job or runner the runner cannot use, with a message for the GM."""
 
 
+def playbook_dirs() -> list[Path]:
+    """Every installed block's playbook directory, from the PLAYBOOK_GROUP entry points."""
+    return [Path(ep.load()) for ep in sorted(entry_points(group=PLAYBOOK_GROUP), key=str)]
+
+
+def skills() -> list[Path]:
+    """Every installed playbook's skill directory."""
+    return sorted((s for d in playbook_dirs() for s in (d / "skills").iterdir()), key=str)
+
+
 def playbook(name: str) -> dict[str, str]:
     """A playbook's SecondChair metadata, from its Agent Skills front matter."""
-    path = SKILLS / name / "SKILL.md"
-    if not path.is_file():
-        known = ", ".join(sorted(p.name for p in SKILLS.iterdir()))
+    found = [s / "SKILL.md" for s in skills() if s.name == name]
+    if not found:
+        known = ", ".join(sorted(s.name for s in skills()))
         raise RunnerError(f"No playbook {name!r}; known playbooks: {known}.")
-    front = yaml.safe_load(path.read_text().split("---", 2)[1])
+    front = yaml.safe_load(found[0].read_text().split("---", 2)[1])
     prefix = "secondchair-"
     return {k.removeprefix(prefix): v for k, v in front["metadata"].items() if k.startswith(prefix)}
 
@@ -138,11 +149,19 @@ def _launch(ws: Workspace, job: dict, config: dict[str, str], hosts: dict[str, l
         "prompt": prompt(job),
         "model": config["model"],
         "effort": config["effort"],
-        "playbooks": str(PLAYBOOKS),
         "job": str(job["id"]),
     }
+
     # One pass, so a value is never itself filled in; other braces stay as written.
-    argv = [re.sub(r"\{(\w+)\}", lambda m: values.get(m[1], m[0]), arg) for arg in template]
+    def fill(arg: str, playbooks: Path | None) -> str:
+        filled = {**values, "playbooks": str(playbooks)}
+        return re.sub(r"\{(\w+)\}", lambda m: filled.get(m[1], m[0]), arg)
+
+    argv = [
+        fill(arg, d)
+        for arg in template
+        for d in (playbook_dirs() if "{playbooks}" in arg else [None])
+    ]
     try:
         proc = subprocess.Popen(
             argv, cwd=ws.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True

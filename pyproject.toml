@@ -24,6 +24,10 @@ absalom = "secondchair_pf2e.calendar:ABSALOM"
 [project.entry-points."secondchair.connectors"]
 foundry = "secondchair_foundry.bridge:routes"
 
+[project.entry-points."secondchair.playbooks"]
+core = "secondchair.runner:PLAYBOOKS"
+foundry = "secondchair_foundry:PLAYBOOKS"
+
 [project.entry-points."secondchair.tools"]
 core = "secondchair.core.campaign:tools"
 foundry = "secondchair_foundry.tools:tools"

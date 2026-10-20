@@ -20,12 +20,14 @@ from secondchair.core import PROTOCOL_VERSION, delegation, observations, vtt
 from secondchair.core.machine import foundry_token
 from secondchair.core.vtt import CeilingRefusal, VttError
 from secondchair.core.workspace import Workspace
+from secondchair_foundry.tools import REPORTS_DIR, SCENES_DIR, digest
 
 PATH = "/foundry"
 BINDING_FILE = "foundry.yaml"
 HELLO_TIMEOUT = 10  # seconds the module has to say hello once the socket is open
 REPLY_TIMEOUT = 15  # seconds the GM client has to take an action and answer
-SESSION_POLL = 1  # seconds between two looks at the live session
+POLL = 1  # seconds between two looks at the live session, and at the desired scenes
+REALISE_TIMEOUT = 120  # seconds the GM client has to realise a scene (actor imports included)
 POLICY_VIOLATION = 1008
 NO_GM = (
     "No GM client is connected: open the campaign's world as GM in Foundry, with the SecondChair "
@@ -148,6 +150,7 @@ class Bridge:
         self.gm = socket
         self.loop = asyncio.get_running_loop()
         watch: asyncio.Task | None = None
+        realising: asyncio.Task | None = None
         try:
             await socket.send_json(
                 {
@@ -158,11 +161,14 @@ class Bridge:
                 }
             )
             watch = asyncio.create_task(self._watch_session(socket))
+            realising = asyncio.create_task(self._realise(socket))
             while True:
                 try:
                     message = json.loads(await socket.receive_text())
                     kind = message["type"]
-                    waiting = self.waiting.get(message["id"]) if kind == "reply" else None
+                    waiting = (
+                        self.waiting.get(message["id"]) if kind in ("reply", "realised") else None
+                    )
                 except ValueError, KeyError, TypeError:
                     continue  # not a message the Core waits for
                 if kind == "observation":
@@ -175,6 +181,8 @@ class Bridge:
             if watch is not None:
                 watch.cancel()
             self.gm = None
+            if realising is not None:
+                realising.cancel()
             for waiting in self.waiting.values():
                 if not waiting.done():
                     waiting.set_exception(VttError(NO_GM))
@@ -189,7 +197,7 @@ class Bridge:
             if session != last:
                 await socket.send_json({"type": "session", "session": session})
                 last = session
-            await asyncio.sleep(SESSION_POLL)
+            await asyncio.sleep(POLL)
 
     async def _observe(self, socket: WebSocket, envelope: object) -> None:
         """Record one observation durably, then acknowledge it so the module drops its copy."""
@@ -241,6 +249,38 @@ class Bridge:
                 str(reply.get("error") or f"The GM client sent a malformed reply: {reply}")
             )
         return before, after
+
+    async def _realise(self, socket: WebSocket) -> None:
+        """Send the GM client every desired scene it has not realised in this connection, then
+        each one prep changes, and record its report (ARC-10). With no GM client the desired
+        state waits: every connection starts by realising them all, which changes nothing in a
+        scene already realised. One scene at a time."""
+        sent: dict[str, str] = {}  # scene key -> digest of the desired state sent
+        reports = self.ws.root / REPORTS_DIR
+        # ponytail: polls the scenes directory; a file watcher if many scenes make it costly.
+        while True:
+            for path in sorted((self.ws.root / SCENES_DIR).glob("*.yaml")):
+                text = path.read_text()
+                if sent.get(path.stem) == digest(text):
+                    continue
+                sent[path.stem] = digest(text)
+                try:
+                    desired = yaml.safe_load(text)
+                    request = {"type": "realise", "id": uuid.uuid4().hex, "scene": path.stem}
+                    reply = await asyncio.wait_for(
+                        self._request(socket, {**request, "desired": desired}), REALISE_TIMEOUT
+                    )
+                    record = {k: reply[k] for k in ("ok", "report", "error") if k in reply}
+                except yaml.YAMLError as e:
+                    record = {"ok": False, "error": f"{path.name} is not valid YAML: {e}"}
+                except TimeoutError:
+                    record = {"ok": False, "error": "The GM client did not answer: check the VTT."}
+                except VttError:
+                    return  # the GM client left: the next connection realises it
+                reports.mkdir(parents=True, exist_ok=True)
+                record = {"desired": digest(text), **record}
+                (reports / f"{path.stem}.json").write_text(json.dumps(record, ensure_ascii=False))
+            await asyncio.sleep(POLL)
 
     async def _request(self, socket: WebSocket, request: dict) -> dict:
         waiting = asyncio.get_running_loop().create_future()

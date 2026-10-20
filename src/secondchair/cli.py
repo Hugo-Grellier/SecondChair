@@ -123,11 +123,9 @@ url = "{url}"
 
 PLAYBOOK_SETUP = {
     "claude": """
-Install the SecondChair playbooks (a Claude Code plugin) with:
+Install the SecondChair playbooks (one Claude Code plugin per block) with:
 
-  claude plugin marketplace add {playbooks}
-  claude plugin install secondchair@secondchair
-""",
+{plugins}""",
     "codex": """
 Install the SecondChair playbooks (a Codex skill bundle) with:
 
@@ -140,12 +138,16 @@ def host_setup(host: str) -> str:
     """The host configuration for the Core and its playbooks on this machine; never written
     anywhere (PKG-19)."""
     links = "".join(
-        f"  ln -sfn {skill} ~/.codex/skills/{skill.name}\n"
-        for skill in sorted(runner.SKILLS.iterdir())
+        f"  ln -sfn {skill} ~/.codex/skills/{skill.name}\n" for skill in runner.skills()
     )
+    plugins = ""
+    for playbooks in runner.playbook_dirs():
+        name = json.loads((playbooks / ".claude-plugin/plugin.json").read_text())["name"]
+        plugins += f"  claude plugin marketplace add {playbooks}\n"
+        plugins += f"  claude plugin install {name}@{name}\n"
     return HOST_SETUP[host].format(
         url=f"http://{LOOPBACK}:{configured_port()}{MCP_PATH}"
-    ) + PLAYBOOK_SETUP[host].format(playbooks=runner.PLAYBOOKS, links=links)
+    ) + PLAYBOOK_SETUP[host].format(plugins=plugins, links=links)
 
 
 def _calendar_arg(value: str) -> str | dict:

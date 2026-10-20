@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAP-01, CAP-02, CAP-03, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-16, ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, ARC-10, CAP-01, CAP-02, CAP-03, CAP-15, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -21,11 +21,12 @@ my-campaign/
 │   ├── events/        # one Markdown file per event: v-1a2b3c4d.md
 │   ├── mysteries/     # one Markdown file per mystery graph, named by the mystery entity's id
 │   └── knowledge/     # one Markdown file per knowledge record: k-1a2b3c4d.md
+├── scenes/            # one YAML file per prepared scene's desired state: goblin-cave.yaml
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
 ├── speakers.yaml      # the speaker table (CAP-02); written by the GM
 ├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
-└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on); git-ignored, rebuildable
+└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/: each prepared scene's last reconciliation report); git-ignored, rebuildable
 ```
 
 Later contracts add decisions and friction reports, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
@@ -326,6 +327,26 @@ from: [s-5e6f7a8b, s-9c0d1e2f]   # transcript: the audio Sources it was made fro
 
 The engine is `whisperx <audio> --output_dir <dir> --output_format json --language <lang> --hotwords <vocabulary>` unless the machine configuration's `transcription` gives another command list (placeholders `{audio}`, `{out_dir}`, `{language}`, `{hotwords}`; it writes `<out_dir>/<audio stem>.json` with WhisperX's `segments`). The Hugging Face token stays in the engine's environment (`HF_TOKEN`, PKG-14); SecondChair never reads or stores it.
 
+## `scenes/`
+
+One YAML file per prepared scene, named by its key (lowercase words joined by dashes): its **desired state**, what the scene must look like in the VTT after prep (ARC-10). It is not canon: prep is the Core's, realised in the VTT by reconciliation, which keeps what was played and what the GM retouched ([foundry-bridge.md](foundry-bridge.md#prepared-scenes-arc-10-bve-02)). `prepare_scene` writes it (prep, reversible); its format is `desired_scene` in [`foundry-bridge.schema.json`](foundry-bridge.schema.json), the Foundry connector giving the fields their meaning.
+
+```yaml
+# scenes/goblin-cave.yaml
+scene: {name: Goblin cave, width: 2000, height: 1500, grid: {size: 100}}
+items:
+  - key: boss
+    type: Token
+    actor: Compendium.pf2e.pathfinder-bestiary.Actor.aBcD1234
+    data: {name: Goblin boss, x: 100, y: 100, hidden: true}
+  - key: torch
+    type: AmbientLight
+    data: {x: 500, y: 500, config: {bright: 2, dim: 4}}
+choices: {torch: overwrite}   # the GM's calls on conflicts, optional
+```
+
+The GM may edit it by hand: the next GM client connection, or the running one within a second, realises the new version.
+
 ## Hand edits
 
 A hand edit of `canon/` bypasses the Core (CAN-11). When it rebuilds the index, the Core compares each Markdown file under `canon/` with the content it last left there (replaying applied actions, undos, confirmations and earlier hand edits in the order they hit the workspace) and logs each difference, a new, changed or deleted file, as one `kind: hand_edit` action log entry with the content before and after. The index ranks that content `agent_proposal`, whatever the file's front matter says. `secondchair promote <entry>` in an interactive terminal (an authenticated Surface, DEL-29) makes it a GM decision: the entry's `rank` becomes `gm_decision`, recorded as a `promote` GM interaction; the file itself is not rewritten. A promotion is refused once the file has changed again: the newer hand edit is the one to promote.
@@ -350,7 +371,7 @@ The derived index (CAN-10): entities, facts, events and knowledge with their der
 
   Next to it, `foundry-token` (mode 0600) holds the token the Foundry module connects with, created by `secondchair token` ([foundry-bridge.md](foundry-bridge.md)).
 
-  `runners` is keyed by tier only (`fast`, `standard`, `deep`); a tier with no entry has no runner, and its jobs wait for the GM to start them from their own agent host session. Each entry names a host, a model and an effort; model names appear only here (ARC-25). A host is a command template whose `{prompt}`, `{model}`, `{effort}`, `{playbooks}` (the playbooks' directory) and `{job}` are filled in; the built-in `claude` and `codex` templates run Claude Code (`claude -p`, with the playbooks as a plugin directory and only the SecondChair tools and file reads allowed) and Codex (`codex exec`) headless, both reaching the Core through the MCP configuration `secondchair host setup` prints. An entry whose command cannot be run or exits with an error is a failed attempt, and the next entry is tried.
+  `runners` is keyed by tier only (`fast`, `standard`, `deep`); a tier with no entry has no runner, and its jobs wait for the GM to start them from their own agent host session. Each entry names a host, a model and an effort; model names appear only here (ARC-25). A host is a command template whose `{prompt}`, `{model}`, `{effort}`, `{playbooks}` (a block's playbook directory; an argument naming it is repeated for each installed block) and `{job}` are filled in; the built-in `claude` and `codex` templates run Claude Code (`claude -p`, with each block's playbooks as a plugin directory and only the SecondChair tools and file reads allowed) and Codex (`codex exec`) headless, both reaching the Core through the MCP configuration `secondchair host setup` prints. An entry whose command cannot be run or exits with an error is a failed attempt, and the next entry is tried.
 
 - **Sources** (raw audio, full transcripts, Foundry worlds, rulebooks) stay outside both; the workspace only references them (PKG-12).
 

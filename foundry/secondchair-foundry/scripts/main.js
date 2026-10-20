@@ -2,6 +2,7 @@
 import { CEILING, createActions } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
+import { realise } from "./scenes.js";
 
 /** @typedef {import("./actions.js").Adapter} Adapter @typedef {import("./actions.js").Doc} Doc */
 
@@ -212,7 +213,8 @@ Hooks.once("ready", () => {
           else if (message.type === "ack") {
             if (!message.ok) console.error("SecondChair: observation refused:", message.error);
             capture.ack(message.id);
-          }
+          } else if (message.type === "realise")
+            socket.send(JSON.stringify(await realiseScene(message)));
         } catch (error) {
           // A malformed frame or a closed socket: the Core times the request out as failed.
           console.error("SecondChair:", error);
@@ -234,3 +236,59 @@ Hooks.once("ready", () => {
       ),
   });
 });
+
+/** Scenes are realised one at a time. */
+/** @type {Promise<unknown>} */
+let realising = Promise.resolve();
+
+/** The Foundry calls a realisation makes (scenes.js stays free of Foundry globals). */
+/** @type {import("./scenes.js").World} */
+const world = {
+  findScene: (key) => game.scenes.find((s) => s.flags?.[MODULE]?.scene === key) ?? null,
+  createScene: (data) => Scene.create({ navigation: false, ...data }),
+  tokenData: async (item) => {
+    const actor = await worldActor(/** @type {string} */ (item.actor));
+    return (await actor.getTokenDocument(item.data)).toObject();
+  },
+};
+
+/** A world Actor for a UUID, importing a compendium one once. @param {string} uuid */
+async function worldActor(uuid) {
+  const source = /** @type {any} */ (await fromUuid(uuid));
+  if (!source) throw new Error(`No Actor ${uuid} in this world or its compendiums.`);
+  if (!source.pack) return source;
+  const imported = game.actors.find((a) => a.flags?.[MODULE]?.source === uuid);
+  if (imported) return imported;
+  const data = game.actors.fromCompendium(source);
+  data.flags = { ...data.flags, [MODULE]: { source: uuid } };
+  return Actor.create(data);
+}
+
+/**
+ * Realise a desired scene the Core sent, and report back (docs/contracts/foundry-bridge.md).
+ * Reconciliation is idempotent, so a replayed request only finds nothing to do.
+ * @param {{id: string, scene: string, desired: import("./scenes.js").Desired}} request
+ */
+function realiseScene({ id, scene, desired }) {
+  const run = realising.then(async () => {
+    try {
+      const report = await realise(scene, desired, world);
+      const { conflict = 0 } = report.summary;
+      if (conflict || report.errors.length) {
+        ui.notifications.warn(
+          `SecondChair: scene "${desired.scene.name}" realised with ${conflict} conflict(s) and ${report.errors.length} error(s); ask your agent for the report.`,
+        );
+      }
+      return { type: "realised", id, ok: true, report };
+    } catch (err) {
+      return {
+        type: "realised",
+        id,
+        ok: false,
+        error: String(/** @type {Error} */ (err)?.message ?? err),
+      };
+    }
+  });
+  realising = run;
+  return run;
+}

@@ -1,6 +1,6 @@
 # Contract: the Foundry bridge and its handshake
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Messages: [`foundry-bridge.schema.json`](foundry-bridge.schema.json), with observations in [`event-envelope.schema.json`](event-envelope.schema.json), validated by the Python tests and the module's `node --test`. Requirements: ARC-06, ARC-07, ARC-16, ARC-17, ARC-18, CAP-03, CAP-08, PKG-07, PKG-08, PKG-09, PKG-10, PKG-14.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Messages: [`foundry-bridge.schema.json`](foundry-bridge.schema.json), with observations in [`event-envelope.schema.json`](event-envelope.schema.json), validated by the Python tests and the module's `node --test`. Requirements: ARC-06, ARC-07, ARC-10, ARC-16, ARC-17, ARC-18, CAP-03, CAP-08, BVE-02, PKG-07, PKG-08, PKG-09, PKG-10, PKG-14.
 
 ## Who dials whom
 
@@ -92,3 +92,30 @@ While a live session is open, the module captures what happens at the table as *
 - **Generic kinds**, captured by `secondchair-foundry`: `chat` (every chat message: author, speaker, text, flavor, whisper recipients' names, rolls' formula and total), `combat` (`start`, `round`, `turn`, `end`, with the combatant), `scene` (`activate`), and `ceiling` (above), the one kind also captured outside a live session. A system adapter's kinds are prefixed by its system id and their payload schemas ship with it.
 - **Visibility** (ARC-16): `players` when the whole table saw it; `gm` when it was not shown to the table (GM-only, a whisper even to a player, a hidden combatant's turn); `blind` for a blind roll. Only `players` attests what the party knows: the Core refuses a party knowledge record whose origin quotes a `gm` or `blind` observation (CAP-08: a whisper or a blind roll becomes a call held for the wrap).
 - **Durable capture** (transplanted from v3, BVE-02): the module keeps each envelope in the browser's local storage before sending it, and drops it only on its `ack`. Whatever is held (sent before a reload, or captured while the Core was unreachable) is resent on the next welcome. The Core appends each envelope to `observations/<session>.jsonl` in the workspace (`observations/outside-sessions.jsonl` for `session: null`), once per id, before acknowledging it, so a resent envelope is never recorded twice. An envelope the Core cannot take (malformed, or for a session not yet opened) is acknowledged with `ok: false` and an `error`, and the module drops it.
+
+### Prepared scenes (ARC-10, BVE-02)
+
+Prep holds a scene as a **desired state** in the workspace, `scenes/<key>.yaml` ([workspace layout](workspace-layout.md#scenes)), written by the delegated action `prepare_scene` (prep, reversible). Its format is the schema's `desired_scene`: the Scene's Foundry fields (`scene`, `name` required), the objects placed on it (`items`, each `{key, type, data}`, a Token also taking `actor`, the UUID of the world or compendium Actor it is made from), and the GM's `choices`.
+
+While a GM client is connected, the bridge sends it each desired scene it has not realised in this connection, then each one whose file changes (it looks every second), one at a time:
+
+```json
+{"type": "realise", "id": "4b7e…", "scene": "goblin-cave", "desired": {"scene": {"name": "Goblin cave"}, "items": [{"key": "boss", "type": "Token", "actor": "Compendium.pf2e.pathfinder-bestiary.Actor.x", "data": {"x": 100, "y": 100, "hidden": true}}]}}
+{"type": "realised", "id": "4b7e…", "ok": true, "report": {"scene": "aB3…", "summary": {"create": 2}, "actions": [{"action": "create", "key": "_scene"}, {"action": "create", "key": "boss"}], "errors": []}}
+```
+
+With no GM client the desired state waits: every connection starts by sending all of them, which changes nothing in a scene already realised. The Core keeps each scene's last report in `.secondchair/scenes/<key>.json`; the read `scene_report(key)` returns it, with `pending` when the desired state changed since. A compendium Actor is imported into the world once, the first time a token needs it.
+
+**Reconciliation**, transplanted from v3 and run by the module (`scenes.js`): the Scene and each object it places carry, in their `secondchair-foundry` flags, their key, the fingerprint of what prep asked for (`spec`) and of what was written, read back from Foundry with the play state left out (`local`). For each object:
+
+| Prep | In Foundry | Action |
+|---|---|---|
+| new | absent | `create` |
+| new | deleted since it was created (killed, picked up, removed by the GM) | `kept-deleted`, unless the GM chose `recreate` |
+| unchanged | unchanged | `noop` |
+| unchanged | retouched by the GM | `retouched`: kept |
+| changed | unchanged | `update`, leaving the play state as it is |
+| changed | retouched | `conflict`: kept until the GM chooses `keep` or `overwrite` |
+| removed | unchanged / retouched | `delete` / `conflict` |
+
+The **play state** is never compared nor rewritten: a token's position, elevation, rotation, visibility and actor delta, a door's state, a light, sound, tile or drawing's visibility, whether a region's behaviours are disabled. So a token the GM or a player moved stays where it is when prep changes it. A retouch is judged on the fields prep wrote only. The scene itself (`_scene`) is reconciled the same way, never deleted. An object that cannot be written is reported in `errors`; the others are still realised.
