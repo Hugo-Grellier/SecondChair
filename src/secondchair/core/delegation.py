@@ -1308,6 +1308,9 @@ CORE_PATHS = (
     ".agents",
     ".claude",
     ".secondchair-skills.json",
+    # Git's own: a hook written there would run code at the GM's next commit.
+    ".git",
+    ".gitignore",
 )
 
 
