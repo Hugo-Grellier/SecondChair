@@ -1,6 +1,6 @@
 # Contract: campaign workspace layout
 
-Workspace schema version: **1**. Requirements: ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, LIC-09, PKG-13, PKG-15, PKG-16.
+Workspace schema version: **1**. Requirements: ARC-17a, ARC-23, ARC-26, ARC-27, CAN-01, CAN-02, CAN-03, CAN-04, CAN-05, CAN-06, CAN-07, CAN-08, CAN-10, CAN-11, CAN-12, CAN-13, CAN-14, CAN-15, CAN-16, BVE-02, CAN-18, CAL-01, CAL-02, CAL-03, CAL-04, DEL-11, DEL-13, DEL-16, LIC-09, PKG-13, PKG-15, PKG-16.
 
 A **campaign workspace** is a directory the GM chooses, outside the tool repository, optionally inside a private repository of their own (LIC-09). It is the source of truth for one campaign and its full export (PKG-15). `secondchair init <dir> --language <bcp47> --calendar <name | file.yaml>` creates it; `secondchair serve <dir>` serves it.
 
@@ -105,6 +105,21 @@ between-sessions:
   # … the prep base profile
 ```
 
+### Entity overrides
+
+An optional `overrides` list lowers the level for one **acting entity** on `npcs`, `rules_and_combat` or `disclosure` (DEL-10, DEL-11), keyed on that entity's canon id, never inherited by a faction. `moment` restricts it to one moment; null applies it to every moment (DEL-13). It holds until the GM removes it.
+
+```yaml
+overrides:
+  - {entity: e-1a2b3c4d, responsibility: npcs, level: manual, moment: null}
+  - {entity: e-1a2b3c4d, responsibility: disclosure, level: propose, moment: live-session}
+```
+
+- The effective level of an action whose acting entity has overrides is the lowest of the cell and the overrides that match its responsibility and moment (DEL-12); the irreversible hold applies on top.
+- `secondchair override add` (any terminal) or an agent's `add_entity_override` (quoting the GM) adds one and takes effect at once; adding over an override of the same entity, responsibility and moment keeps the lower level, so adding never loosens. `secondchair override remove`, from an interactive terminal only, removes one (DEL-14). Each is an `add_override` or `remove_override` GM interaction in the action log (DEL-27).
+- When an override lands, the entity's open calls (the proposal's action entry, else its job, names the entity) and queued jobs (their `entity`) for that responsibility, in a moment the override covers, are `withdrawn`: the same safe default as a passed deadline, logged as a `safe_default` entry carrying the `add_override` entry as `override`, and never shown at the break (DEL-16). Actions already applied stay undoable one by one.
+- When entities merge at the wrap, the merged entity's overrides follow the surviving one and the most restrictive wins (DEL-17; `delegation.merge_overrides`).
+
 ## `moment.yaml`
 
 ```yaml
@@ -123,7 +138,7 @@ An action taken for a job carries the job's id (`job`) and the runner configurat
 
 ## `jobs/`
 
-One YAML file per job, named by its id on six digits, following [`job.schema.json`](job.schema.json): the job contract (playbook, inputs, expected output, responsibility, moment, tier, campaign language, vocabulary), whether its call blocks and its deadline when queued in a live session (ARC-28), its status (`queued`, `started`, `done`, `missed`) and every start attempt with the runner configuration used. `secondchair jobs queue <playbook> --input <name>=<value>` writes it; `secondchair jobs` lists the jobs queued or started; `secondchair jobs run` starts the queued ones with the runner configuration.
+One YAML file per job, named by its id on six digits, following [`job.schema.json`](job.schema.json): the job contract (playbook, inputs, expected output, responsibility, moment, tier, campaign language, vocabulary), whether its call blocks and its deadline when queued in a live session (ARC-28), the acting entity it works for, if any (`entity`), its status (`queued`, `started`, `done`, `missed`, `withdrawn`) and every start attempt with the runner configuration used. `secondchair jobs queue <playbook> --input <name>=<value>` writes it; `secondchair jobs` lists the jobs queued or started; `secondchair jobs run` starts the queued ones with the runner configuration.
 
 ## `calls/`
 
@@ -143,7 +158,7 @@ interruption: true      # due now during a live session (DEL-33)
 entry: 4                # a proposal's action log entry
 job: null
 message: null           # an exception's text
-status: open            # open, answered or defaulted
+status: open            # open, answered, defaulted or withdrawn (by an entity override)
 shown: false            # a defaulted call shown again at a break
 ```
 

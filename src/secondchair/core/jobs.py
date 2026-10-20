@@ -40,11 +40,13 @@ def queue(
     tier: str,
     blocking: bool = False,
     entities: list[str] | None = None,
+    entity: str | None = None,
 ) -> dict:
     """Queue a job in the current moment; the Core starts nothing itself (ARC-23). A live job
     gets the deadline of the call it prepares as its latency cap (ARC-28); a blocking one forced
     to break misses it at once (DEL-31). Its vocabulary is that of the entity ids it is about, or
-    the whole campaign vocabulary (CAN-22)."""
+    the whole campaign vocabulary (CAN-22). `entity` is the acting entity the job works for,
+    whose override withdraws it while queued (DEL-16)."""
     from secondchair.core import calls  # it builds on this module
 
     if tier not in TIERS:
@@ -70,6 +72,7 @@ def queue(
                 "campaign_language": ws.campaign_language,
                 "vocabulary": canon.vocabulary(ws, entities),
                 "blocking": blocking,
+                "entity": entity,
                 "deadline": due,
                 "status": "queued",
                 "attempts": [],

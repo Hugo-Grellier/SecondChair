@@ -25,7 +25,8 @@
         "tool": {"type": "string", "description": "The registered tool that took the action."},
         "responsibility": {"enum": ["prep", "memory", "vtt_operations", "rules_and_combat", "living_world", "npcs", "narrative_direction", "disclosure"]},
         "effective_level": {"enum": ["propose", "act-then-review", "autonomous"], "description": "Manual refuses the action: nothing is logged."},
-        "override_lowered": {"type": "boolean", "description": "Whether an entity override lowered the level."},
+        "override_lowered": {"type": "boolean", "description": "Whether an entity override of the acting entity lowered the level (DEL-12)."},
+        "entity": {"type": ["string", "null"], "description": "The acting entity's canon id, as the tool declared it (DEL-10); null when the action has none. Absent from entries written before entity overrides."},
         "reversible": {"type": "boolean", "description": "As declared at tool registration."},
         "agent": {"type": "string", "description": "The acting agent, as it names itself; traceability only (ARC-22)."},
         "source": {"type": ["string", "null"]},
@@ -74,7 +75,7 @@
       "required": ["interaction", "entry", "channel", "authenticated", "quote", "reason"],
       "properties": {
         "kind": {"const": "gm_interaction"},
-        "interaction": {"enum": ["approve", "reject", "undo", "confirm", "promote"], "description": "promote makes a hand edit a GM decision (CAN-11), from an authenticated Surface only; confirm promotes a fact or event recorded from the GM's words to the gm_decision rank (CAN-09, DEL-29); it is accepted only from an authenticated Surface and rewrites `target` from `before` to `after`."},
+        "interaction": {"enum": ["approve", "reject", "undo", "confirm", "promote", "add_override", "remove_override"], "description": "add_override and remove_override add or remove an entity override (DEL-14, DEL-27), carried in `override`, with `entry` null; removing one is accepted only from an authenticated Surface. promote makes a hand edit a GM decision (CAN-11), from an authenticated Surface only; confirm promotes a fact or event recorded from the GM's words to the gm_decision rank (CAN-09, DEL-29); it is accepted only from an authenticated Surface and rewrites `target` from `before` to `after`."},
         "entry": {"type": ["integer", "null"], "description": "The action entry acted on; for confirm, the action or hand_edit entry that wrote the confirmed file, null when none did; for promote, the hand_edit entry promoted."},
         "target": {"type": "string", "description": "confirm only: the canon file it rewrites."},
         "before": {"type": "string", "description": "confirm only: that file's content before."},
@@ -82,11 +83,27 @@
         "channel": {"enum": ["cli", "via agent"], "description": "The Surface it came through."},
         "authenticated": {"type": "boolean", "description": "Whether that Surface was authenticated (ARC-13): the CLI in an interactive terminal."},
         "quote": {"type": ["string", "null"], "description": "The GM's quoted words when relayed by an agent."},
-        "reason": {"enum": ["contradiction", "rules", "tone", "other", null], "description": "The rejection reason (DEL-26), required for reject and undo."}
+        "reason": {"enum": ["contradiction", "rules", "tone", "other", null], "description": "The rejection reason (DEL-26), required for reject and undo."},
+        "override": {
+          "type": "object",
+          "description": "add_override and remove_override only: the override added (at the level it holds after the addition, never looser than before) or removed.",
+          "required": ["entity", "responsibility", "level", "moment"],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {"type": "string"},
+            "responsibility": {"enum": ["rules_and_combat", "npcs", "disclosure"]},
+            "level": {"enum": ["manual", "propose", "act-then-review", "autonomous"]},
+            "moment": {"enum": ["prep", "live-session", "between-sessions", null]}
+          }
+        }
       },
       "if": {"properties": {"interaction": {"const": "confirm"}}},
-      "then": {"required": ["target", "before", "after"], "properties": {"authenticated": {"const": true}}},
-      "else": {"properties": {"entry": {"type": "integer"}, "target": false, "before": false, "after": false}},
+      "then": {"required": ["target", "before", "after"], "properties": {"authenticated": {"const": true}, "override": false}},
+      "else": {
+        "if": {"properties": {"interaction": {"enum": ["add_override", "remove_override"]}}},
+        "then": {"required": ["override"], "properties": {"entry": {"type": "null"}, "target": false, "before": false, "after": false}},
+        "else": {"properties": {"entry": {"type": "integer"}, "target": false, "before": false, "after": false, "override": false}}
+      },
       "unevaluatedProperties": false
     },
     "hand_edit": {
@@ -104,13 +121,14 @@
     },
     "safe_default": {
       "allOf": [{"$ref": "#/$defs/common"}],
-      "description": "A deadline passed unanswered (DEL-32, ARC-28): a proposal is rejected, an exception takes no action, a live job is missed. Shown again at the break.",
+      "description": "A deadline passed unanswered (DEL-32, ARC-28): a proposal is rejected, an exception takes no action, a live job is missed. Shown again at the break. Also a call or queued job an entity override withdrew (DEL-16), which is not shown at the break.",
       "required": ["call", "entry", "job"],
       "properties": {
         "kind": {"const": "safe_default"},
         "call": {"type": ["integer", "null"], "description": "The defaulted call (call.schema.json); null for a live job that missed its deadline."},
         "entry": {"type": ["integer", "null"], "description": "The proposal's action entry, now rejected; null otherwise."},
-        "job": {"type": ["integer", "null"], "description": "The job the call came from, or the live job that missed its deadline."}
+        "job": {"type": ["integer", "null"], "description": "The job the call came from, or the live job that missed its deadline or was withdrawn."},
+        "override": {"type": ["integer", "null"], "description": "The add_override entry that withdrew the call or queued job (DEL-16); null when a deadline passed. Absent from entries written before entity overrides."}
       },
       "unevaluatedProperties": false
     }

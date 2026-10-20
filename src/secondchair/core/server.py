@@ -54,11 +54,12 @@ def build_server(ws: Workspace) -> MCPServer:
             },
         )
     # A GM interaction relayed by an agent: neither a read nor a delegated action (DEL-27).
-    server.add_tool(
-        delegation.approve_proposal(ws),
-        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
-        meta={"secondchair/gm_interaction": True},
-    )
+    for fn in (delegation.approve_proposal(ws), delegation.override_tool(ws)):
+        server.add_tool(
+            fn,
+            annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+            meta={"secondchair/gm_interaction": True},
+        )
     # A session taking and closing a queued job (ARC-29): job state, not canon.
     for fn in jobs.agent_tools(ws):
         server.add_tool(

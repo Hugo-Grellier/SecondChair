@@ -1,6 +1,6 @@
 # Contract: tool registration and the Core's MCP endpoint
 
-Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-29, PKG-05, PKG-06, PKG-19.
+Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements: ARC-01, ARC-02, ARC-03, ARC-04, CAN-12, DEL-09, DEL-10, DEL-14, DEL-18, DEL-21, DEL-28, ARC-17, ARC-17a, ARC-19, ARC-21, ARC-23, ARC-29, PKG-05, PKG-06, PKG-19.
 
 ## The MCP endpoint
 
@@ -67,6 +67,7 @@ def create_note(title: str) -> Change:
 | `path` | string | The workspace file the action writes, relative to the workspace root. |
 | `after` | string or null | The file's new content; null deletes it. |
 | `source` | string or null | What the action draws on, recorded in the log (DEL-24). |
+| `entity` | string or null | The **acting entity**'s canon id (the NPC who speaks, the creature that strikes), never the entity the action is about; null (the default) when nothing acts, such as scene prep or a world-turn (DEL-10). Entity overrides key on it. |
 
 An action that acts in the VTT returns a `VttAction` instead, which the Core logs and has the VTT connector take ([foundry-bridge.md](foundry-bridge.md#actions-arc-04-arc-07-arc-09)). The Core reads none of its fields; the connector gives them their meaning.
 
@@ -85,6 +86,7 @@ def move_token(token: str, x: int, y: int) -> VttAction:
 | `target` | string | The document acted on, as the connector names it (a Foundry UUID). |
 | `params` | object | The fields to set. |
 | `source` | string or null | As for `Change`. |
+| `entity` | string or null | As for `Change`. |
 
 The log entry of a VTT action carries `op`, and the fields the VTT reported `before` and `after` it. A VTT action the VTT did not take is a **failed action**: logged with status `failed` and its `error`, and returned to the agent as an MCP error. The Foundry connector registers `move_token` and `set_door` (VTT operations, reversible).
 
@@ -98,6 +100,8 @@ The Core adds a required `agent` string argument to every delegated action's MCP
 
 An irreversible action is held at propose (DEL-09) and only an authenticated Surface approves it (DEL-29).
 
+The effective level is the table cell for the moment, lowered by every **entity override** of the action's acting entity for that responsibility and moment (DEL-12; [workspace layout](workspace-layout.md#entity-overrides)); the log entry records the `entity` and whether an override lowered the level (`override_lowered`). An override at manual refuses the action like a manual cell.
+
 A delegated action's `fn` that finds its change would contradict canon raises `secondchair.core.tools.Contradiction(path, message)`. The Core writes nothing, logs the action with `status: refused` and the message as `refusal` (a continuity error, MET-01), and returns an MCP error.
 
 The Core's own delegated actions are all under memory and reversible: `create_entity`, `record_fact`, `correct_fact`, `record_event` and `record_knowledge` ([workspace layout](workspace-layout.md#canonfacts)).
@@ -107,7 +111,9 @@ The mystery graph adds `record_mystery`, under prep and reversible ([workspace l
 
 `approve_proposal(entry, gm_words)` is served by the Core itself, outside block registration, with `_meta: {"secondchair/gm_interaction": true}`. An agent calls it only when the GM approved a pending reversible action in conversation, quoting the GM's words; the approval is logged "via agent" with the quote (DEL-28). An irreversible action cannot be approved this way.
 
-On the CLI, in the workspace (or with `-w <workspace>`): `secondchair approve <entry>`, `secondchair reject <entry> --reason <reason>`, `secondchair log undo <entry> --reason <reason>`, the reason one of contradiction, rules, tone, other (DEL-26), and `secondchair moment <prep|live-session|between-sessions>`, which needs an interactive terminal (DEL-03a). The log records whether each GM interaction came from an interactive terminal (`authenticated`).
+`add_entity_override(entity, responsibility, level, gm_words, moment)` is served the same way: an agent calls it when the GM asks in conversation to lower the level for one acting entity, quoting the GM's words; it is logged "via agent" (DEL-14). There is no tool to remove an override: loosening needs an authenticated Surface.
+
+On the CLI, in the workspace (or with `-w <workspace>`): `secondchair approve <entry>`, `secondchair reject <entry> --reason <reason>`, `secondchair log undo <entry> --reason <reason>`, the reason one of contradiction, rules, tone, other (DEL-26), and `secondchair moment <prep|live-session|between-sessions>`, which needs an interactive terminal (DEL-03a), and `secondchair override add <entity> <responsibility> <level> [--moment <moment>]` and `secondchair override remove <entity> <responsibility> [--moment <moment>]`, the latter from an interactive terminal only (DEL-14). The log records whether each GM interaction came from an interactive terminal (`authenticated`).
 
 Approving or undoing a VTT action needs the GM client, which only the `serve` process holds. The CLI therefore relays those two gestures to `POST /gm` on the Core serving the campaign, found through `.secondchair/serve.json`: `{"gesture": "approve" | "undo", "entry", "reason", "authenticated", "workspace"}` with `Authorization: Bearer <token>`, the token `secondchair token` prints. The Core refuses a wrong token (401), a malformed gesture (400) and another workspace's gesture (409), and answers a refused gesture with 409 and its message. With no Core serving the campaign, the CLI says to run `secondchair serve`.
 
