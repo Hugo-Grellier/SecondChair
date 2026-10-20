@@ -46,6 +46,7 @@ ORIGIN_KEYS = {
     "gm": ("words",),
     "source": ("source", "page"),
     "job": ("job",),
+    "rule": ("fact", "key"),  # a world-turn effect: the rule fact and its occurrence key
 }
 EVENT_KINDS = ("played", "offscreen")
 # CAN-13, CAN-14: the party as a whole is a knower with this reserved id; every other knower is
@@ -59,7 +60,8 @@ create table entities(id text primary key, names text, aliases text, official_re
                       description text);
 create table facts(id text primary key, statement text, entities text, relation text,
                    relation_type text, valid_from text, valid_to text, from_key int, to_key int,
-                   rank text, origin text, status text, admitted_by int, never_true int);
+                   rank text, origin text, status text, admitted_by int, never_true int,
+                   state text);
 create table fact_entities(fact text, entity text);
 create table events(id text primary key, date text, kind text, description text, opens text,
                     closes text, replaces text, replaced_by text, status text, rank text,
@@ -89,6 +91,8 @@ def rank_of(origin: Any, authenticated: bool) -> str:
     Surface (DEL-29), anything else is an agent proposal."""
     if not isinstance(origin, dict) or origin.get("kind") not in ORIGIN_KEYS:
         raise CanonError(f"origin needs a kind among {', '.join(ORIGIN_KEYS)}.")
+    if origin["kind"] == "rule" and not authenticated:
+        raise CanonError("Only the world-turn writes a rule effect; cite your own origin.")
     for key in ORIGIN_KEYS[origin["kind"]]:
         if not (isinstance(origin.get(key), str) and origin[key].strip()):
             raise CanonError(f"A {origin['kind']} origin needs a non-empty {key!r}.")
@@ -166,6 +170,7 @@ def rebuild(ws: Workspace) -> list[str]:
 def _fingerprint(ws: Workspace) -> str:
     # ponytail: hashes every canon and log file on each query; mtimes if campaigns grow large.
     digest = hashlib.sha256((ws.root / "workspace.yaml").read_bytes())
+    digest.update(_SCHEMA.encode())  # a newer Core with new columns rebuilds the index
     for top in ("canon", LOG_DIR):
         for p in sorted((ws.root / top).rglob("*")):
             if p.is_file():
@@ -307,6 +312,13 @@ def _fact(calendar: Calendar, relations: set[str], front: dict, body: str) -> di
         raise CanonError("never_true must be true or false")
     if front.get("never_true") and (front.get("valid_from") or front.get("valid_to")):
         raise CanonError("a never-true fact (a belief, CAN-15) has no validity")
+    state = front.get("state")
+    if state is not None:
+        from secondchair.core import world  # it builds on this module
+
+        world.check_state(calendar, state)  # a hand edit too: the world-turn reads its shape
+        if state["of"] not in front["entities"]:
+            raise CanonError("a state fact's of is one of its entities")
     return {**front, "statement": body}
 
 
@@ -390,7 +402,7 @@ def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events,
             )
         )
         conn.execute(
-            "insert into facts values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "insert into facts values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 f["id"],
                 f["statement"],
@@ -406,6 +418,7 @@ def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events,
                 fact_status,
                 f["admitted_by"],
                 bool(f.get("never_true")),
+                json.dumps(f.get("state")),
             ),
         )
         conn.executemany(
@@ -513,7 +526,7 @@ def search_facts(
         {
             **{
                 k: v
-                for k, v in _decode(r, "entities", "relation", "origin").items()
+                for k, v in _decode(r, "entities", "relation", "origin", "state").items()
                 if k not in ("from_key", "to_key", "relation_type")
             },
             "never_true": bool(r["never_true"]),

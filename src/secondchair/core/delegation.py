@@ -40,6 +40,8 @@ LOG_DIR = "action-log"
 JOBS_DIR = "jobs"
 CALLS_DIR = "calls"
 OBSERVATIONS_DIR = "observations"
+OCCURRENCES_DIR = "occurrences"  # the world-turn's occurrences (world.py)
+WORLD_FILE = "living-world.yaml"  # the world-turn's cursor
 
 # The base profiles (DEL-06), in RESPONSIBILITIES order; every cell's deadline mode is auto.
 _PROFILE_LEVELS = {
@@ -238,6 +240,7 @@ def act(
     describe: Callable[[], Change],
     job: int | None = None,
     blocking: bool = False,
+    occurrence: str | None = None,
 ) -> ActionResult:
     """Take one delegated action (ARC-04): refused at manual, held at propose as a call on the
     GM (DEL-30), applied above. An action for a started job is bound by the table of the job's
@@ -302,6 +305,7 @@ def act(
             **effect,
             "status": "pending" if level == "propose" else "applied",
             "approval": None,
+            **({"occurrence": occurrence} if occurrence is not None else {}),
         }
         if refusal is not None:
             entry.update(status="refused", refusal=refusal)
@@ -739,17 +743,17 @@ def promote(ws: Workspace, entry_id: int, channel: str, authenticated: bool) -> 
 
 
 def check(ws: Workspace) -> list[str]:
-    """One message per invalid delegation table, moment, action log, job or call file."""
+    """One message per invalid delegation table, moment, action log, job, call or occurrence
+    file."""
     from secondchair.core import calls
 
     errors = read_log(ws)[1]
-    for p in sorted((ws.root / JOBS_DIR).glob("*.yaml")) + sorted(
-        (ws.root / CALLS_DIR).glob("*.yaml")
-    ):
-        try:
-            _read_yaml(p)
-        except WorkspaceError as e:
-            errors.append(str(e))
+    for d in (JOBS_DIR, CALLS_DIR, OCCURRENCES_DIR):
+        for p in sorted((ws.root / d).glob("*.yaml")):
+            try:
+                _read_yaml(p)
+            except WorkspaceError as e:
+                errors.append(str(e))
     try:
         current_moment(ws)
     except WorkspaceError as e:
@@ -836,6 +840,8 @@ def _target(ws: Workspace, relative: str) -> Path:
         JOBS_DIR,
         CALLS_DIR,
         OBSERVATIONS_DIR,
+        OCCURRENCES_DIR,
+        WORLD_FILE,
         STATE_DIR,
     ):
         raise DelegationError(f"{relative!r} belongs to the Core; no delegated action writes it.")

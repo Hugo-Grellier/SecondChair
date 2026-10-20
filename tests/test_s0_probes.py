@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from secondchair.bench import s0
-from secondchair.core import canon, delegation, index, knowledge, mystery, workspace
+from secondchair.core import canon, delegation, index, jobs, knowledge, mystery, workspace, world
 from secondchair.core.workspace import Workspace
 
 SAMPLE = Path(__file__).parents[1] / "sample-campaign"
@@ -331,3 +331,89 @@ def test_the_s0_report_measures_language_drift_without_blocking_it(tmp_path: Pat
     assert 0 < drift["share"] < 1
     assert report["passed"]  # tracked, never gated
     assert drift == s0.score_probes(ws, GOLD, {})["language_drift"]  # deterministic
+
+
+# Living-world probes (BEN-07): each world_turn_probes case from a fresh rebuild.
+
+WORLD = (
+    "Toll Squeeze",
+    "Silt Choke",
+    "Inspect the Chain",
+    "Replace the Rope",
+    "Find the Satchel",
+)
+
+
+def state(ws: Workspace, of: str, key: str, value: object, page: str) -> str:
+    return record(
+        ws,
+        f"{of} {key}: {value}",
+        page,
+        entities=[of],
+        state={"of": of, "key": key, "value": value},
+    )
+
+
+def rebuild_world(tmp_path: Path, with_b17: bool = True) -> tuple[Workspace, dict[str, str]]:
+    """The bible's living-world paragraphs (B07-B09, B15-B17), written through the Core."""
+    ws, ids, _ = rebuild(tmp_path)
+    for name in WORLD:
+        act(ws, "create_entity", names=[name])
+    ids = {e["names"][0]: e["id"] for e in index.search_entities(ws)}
+    for front, carrier, who, unless, step, page in (
+        ("Toll Squeeze", "Lock Council", "Mira Pell", None, "draft-toll-increase", "B15"),
+        (
+            "Silt Choke",
+            "Reed Union",
+            "Tovan Reed",
+            "the bypass is open",
+            "prepare-dredging-petition",
+            "B16",
+        ),
+    ):
+        rule = {"carrier": ids[carrier], "participants": [ids[who]], "capacity": 4}
+        rule |= {"every": "1w", "anchor": START, "unless": unless}
+        state(ws, ids[front], "front", rule, page)
+        state(ws, ids[front], "clock", 0, page)
+        state(ws, ids[front], "agenda", {"id": step, "when": {"clock_gte": 2}}, page)
+    for name, stage, deadline, who, page in (
+        ("Inspect the Chain", "active", "0302-05-01", [], "B07"),
+        ("Replace the Rope", "available", "0302-06-03", [ids["Orin Doss"]], "B08"),
+        ("Find the Satchel", "available", None, [], "B09"),
+    ):
+        value = {"stage": stage, "deadline": deadline, "participants": who}
+        state(ws, ids[name], "situation", value, page)
+    if with_b17:
+        closed = record(ws, "The bypass is closed.", "B17", valid_from=START)
+        for knower in ("party", ids["Tovan Reed"], ids["Reed Union"]):
+            learn(ws, knower, closed)
+    return ws, ids
+
+
+@pytest.mark.parametrize("case", ["pristine-one-week", "pristine-two-weeks", "unresolved-unless"])
+def test_s0_scores_its_living_world_clock_probes(tmp_path: Path, case: str) -> None:
+    [spec] = [c for c in GOLD["world_turn_probes"] if c["id"] == case]
+    ws, _ = rebuild_world(tmp_path, with_b17=spec["initial"] != "bible-with-B17-omitted")
+    delegation.change_moment(ws, spec["moment"])
+    bypass = [f["id"] for f in index.search_facts(ws, text="bypass is closed")]
+
+    world.world_turn(ws, spec["now"], since=spec["cursor"])
+    for r in world.occurrences(ws):  # the settle-an-unless jobs, as the assumptions say
+        if r["status"] == "queued" and r["class"] == "derived":
+            jobs.start(ws, r["job"], {"host": "h", "model": "m", "effort": "e"}, manual=True)
+            world.settle_unless(ws, r["key"], False if bypass else None, bypass, r["job"])
+
+    report = s0.score_world_turn(ws, GOLD, case)
+    assert report["probes"]["clocks"]
+    assert report["probes"] == dict.fromkeys(report["probes"], True)
+    assert report["unscored"] == []
+
+
+def test_a_wrong_clock_fails_its_living_world_probe(tmp_path: Path) -> None:
+    ws, _ = rebuild_world(tmp_path)
+    world.world_turn(ws, "0302-05-01", since=START)  # the Silt Choke tick is never settled
+
+    report = s0.score_world_turn(ws, GOLD, "pristine-one-week")
+
+    assert report["probes"]["clocks"] is False
+    assert report["probes"]["unless_evidence"] is False

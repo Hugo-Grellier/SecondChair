@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from secondchair.core import delegation, index
+from secondchair.core import delegation, index, world
 from secondchair.core.index import EVENT_KINDS, EVENTS_DIR, FACTS_DIR, RANKS, CanonError
 from secondchair.core.tools import Change, Contradiction, Tool
 from secondchair.core.workspace import Workspace
@@ -84,6 +84,7 @@ def tools(ws: Workspace) -> list[Tool]:
         valid_from: str | None,
         valid_to: str | None,
         never_true: bool = False,
+        state: dict[str, Any] | None = None,
     ) -> str:
         if not statement.strip():
             raise CanonError("A fact needs a statement in the campaign language.")
@@ -99,6 +100,9 @@ def tools(ws: Workspace) -> list[Tool]:
                     f"extension registers it; known: {', '.join(sorted(types))}."
                 )
             involved += [relation["subject"], relation["object"]]
+        if state is not None:
+            state, refs = world.check_state(ws.calendar, state)
+            involved += [state["of"], *refs]
         if unknown := [e for e in involved if e not in known]:
             raise CanonError(f"Unknown entities {unknown}; create them first.")
         if never_true and (valid_from or valid_to):
@@ -114,6 +118,7 @@ def tools(ws: Workspace) -> list[Tool]:
             "rank": rank,
             "origin": origin,
             **({"never_true": True} if never_true else {}),
+            **({"state": state} if state is not None else {}),
         }
         return index.join_doc(front, statement.strip())
 
@@ -125,6 +130,7 @@ def tools(ws: Workspace) -> list[Tool]:
         valid_from: str | None = None,
         valid_to: str | None = None,
         never_true: bool = False,
+        state: dict[str, Any] | None = None,
     ) -> Change:
         """Record a fact: one statement in the campaign language about the given entity ids.
         `origin` is its provenance and sets its rank: {"kind": "observation", "quote", "locator"}
@@ -137,10 +143,16 @@ def tools(ws: Workspace) -> list[Tool]:
         kin_of) or one a System extension registers. `valid_from` / `valid_to` are campaign
         dates (YYYY-MM-DD, YYYY-MM or YYYY); leave them empty when an event opens or closes it.
         `never_true` records a false statement someone believes (a belief): it has no validity,
-        no event opens it, and knowers can only believe or suspect it (record_knowledge)."""
+        no event opens it, and knowers can only believe or suspect it (record_knowledge).
+        `state` makes it a living-world state fact (a front or a situation, read by the
+        world-turn): {"of": entity id, "key": ..., "value": ...} with key and value one of
+        "front" {carrier, participants, capacity, every (7d, 1w), ticks, anchor (date),
+        unless (text or null), active}, "clock" (an integer), "agenda" {id, when: {date} or
+        {clock_gte}, status: pending}, "situation" {stage: available|active|resolved|expired,
+        deadline (date or null), participants}. The statement says the same in words."""
         fact_id = f"f-{secrets.token_hex(4)}"
         after = fact_doc(
-            fact_id, statement, entities, origin, relation, valid_from, valid_to, never_true
+            fact_id, statement, entities, origin, relation, valid_from, valid_to, never_true, state
         )
         return Change(path=f"{FACTS_DIR}/{fact_id}.md", after=after, source=_source(origin))
 
@@ -153,6 +165,7 @@ def tools(ws: Workspace) -> list[Tool]:
         valid_from: str | None = None,
         valid_to: str | None = None,
         never_true: bool = False,
+        state: dict[str, Any] | None = None,
     ) -> Change:
         """Correct a wrongly recorded fact in place, with no event: the arguments are its whole
         new version, as for record_fact. Refused when the fact was played, or ranks above your
@@ -168,7 +181,7 @@ def tools(ws: Workspace) -> list[Tool]:
         if _outranks(current["rank"], rank):
             raise Contradiction(path, f"{fact} ranks {current['rank']}, above this {rank}.")
         after = fact_doc(
-            fact, statement, entities, origin, relation, valid_from, valid_to, never_true
+            fact, statement, entities, origin, relation, valid_from, valid_to, never_true, state
         )
         return Change(path=path, after=after, source=_source(origin))
 
