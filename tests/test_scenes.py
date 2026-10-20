@@ -57,7 +57,7 @@ def gm_client(url: str, token: str) -> Generator[ClientConnection]:  # noqa: F81
 def realise(socket: ClientConnection) -> dict:
     """Take the next scene the Core sends and report it realised."""
     request = {"type": "session"}
-    while request["type"] in ("session", "desk"):  # told on each connection and change
+    while request["type"] in ("session", "desk", "read"):  # told on connection, change
         request = json.loads(socket.recv(timeout=10))
         jsonschema.validate(request, SCHEMA)
     assert request["type"] == "realise"

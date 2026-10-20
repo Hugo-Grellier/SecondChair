@@ -1,0 +1,47 @@
+{
+  "id": "secondchair-foundry-pf2e",
+  "title": "SecondChair for Pathfinder Second Edition",
+  "description": "The PF2e system adapter of SecondChair: it plugs into the SecondChair module to give the GM's local SecondChair the rules context, official names in the campaign language and the Absalom Reckoning calendar sync. Requires the SecondChair module; sends nothing to any AI service by itself.",
+  "version": "0.1.0",
+  "compatibility": {
+    "minimum": "14",
+    "verified": "14",
+    "maximum": "14"
+  },
+  "authors": [
+    {
+      "name": "Hugo Grellier",
+      "url": "https://github.com/Hugo-Grellier"
+    }
+  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "pf2e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "8",
+          "verified": "8.6.1",
+          "maximum": "8"
+        }
+      }
+    ],
+    "requires": [
+      {
+        "id": "secondchair-foundry",
+        "type": "module",
+        "manifest": "https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry/module.json",
+        "compatibility": {
+          "minimum": "0.1.0"
+        }
+      }
+    ]
+  },
+  "esmodules": ["scripts/main.js"],
+  "url": "https://github.com/Hugo-Grellier/SecondChair",
+  "manifest": "https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry-pf2e/module.json",
+  "download": "https://github.com/Hugo-Grellier/SecondChair/releases/download/secondchair-foundry-pf2e-v0.1.0/secondchair-foundry-pf2e.zip",
+  "license": "LICENSE",
+  "readme": "https://github.com/Hugo-Grellier/SecondChair/blob/main/foundry/README.md",
+  "bugs": "https://github.com/Hugo-Grellier/SecondChair/issues"
+}

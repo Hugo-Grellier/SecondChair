@@ -7,7 +7,7 @@ to the GM whose client holds the bridge, which the token authenticates. It holds
 
 import json
 
-from secondchair.core import calls, canon, delegation, index, knowledge
+from secondchair.core import calls, canon, delegation, index, knowledge, vtt
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.workspace import Workspace, WorkspaceError
@@ -83,6 +83,9 @@ def take(ws: Workspace, message: dict) -> dict:
             result["pile"] = [_call(ws, c) for c in calls.take_break(ws)]
         elif name == "start_session":
             delegation.start_session(ws)
+            # The VTT follows: the current date pushed into its clock (CAL-11).
+            if pushed := vtt.session_started():
+                result["message"] = pushed
         elif name == "end_session":
             delegation.end_session(ws)
         elif name == "voice":  # tightening, in force at once; withdraws its calls (DEL-14, 16)

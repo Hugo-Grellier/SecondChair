@@ -1154,7 +1154,7 @@ def _for_agent() -> Generator[None]:
     """Refusals reach the agent with their message, not as a crash (whose text MCP hides)."""
     try:
         yield
-    except (DelegationError, WorkspaceError, ValueError) as e:
+    except (DelegationError, WorkspaceError, ValueError, vtt.VttError) as e:
         raise ToolError(str(e)) from e
 
 

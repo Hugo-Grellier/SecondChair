@@ -8,10 +8,11 @@ A prepared scene is a desired state in the workspace, realised by the bridge.
 import hashlib
 import json
 import re
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 import yaml
 
+from secondchair.core import index, vtt
 from secondchair.core.tools import Change, Tool, VttAction
 from secondchair.core.workspace import STATE_DIR, Workspace
 
@@ -108,6 +109,29 @@ def _check(key: str, desired: dict[str, Any]) -> None:
             raise ValueError(f"{k}: only a Token takes an `actor`, an Actor's UUID.")
 
 
+class OfficialName(TypedDict):
+    name: str | None
+    official_reference: dict[str, str | None]
+
+
+def official_name(key: str, pack: str | None = None) -> OfficialName:
+    """The name official game content (a creature, a spell, an item) has in the GM's own install,
+    in the campaign language, to offer as a new entity's name (CAN-20), with the official
+    reference to store on it. `key` is the System extension's stable English key (PF2e: the
+    item's or actor's slug, else its English name); `pack` the compendium pack, needed only when
+    the key is in several. `name` is null when the entry has no translation: then propose a name
+    or ask the GM, never translate an official name yourself (CAN-21)."""
+    found = vtt.read("official_name", {"key": key, "pack": pack})
+    try:
+        reference = index.official_reference({"key": found["key"], "pack": found["pack"]})
+        name = found["name"]
+        if name is not None and not (isinstance(name, str) and name.strip()):
+            raise TypeError
+    except (KeyError, TypeError, index.CanonError) as e:
+        raise vtt.VttError(f"The GM client sent a malformed official name: {found}") from e
+    return {"name": name, "official_reference": reference}
+
+
 def tools(ws: Workspace) -> list[Tool]:
     def scene_report(key: str) -> dict[str, Any]:
         """How a prepared scene was last realised in Foundry: `realised`, then `pending` (the
@@ -137,4 +161,6 @@ def tools(ws: Workspace) -> list[Tool]:
         ),
         Tool(fn=prepare_scene, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=scene_report, responsibility="prep", delegated_action=False, reversible=True),
+        # ponytail: a read sits under memory (canon and continuity), as the Core's own reads.
+        Tool(fn=official_name, responsibility="memory", delegated_action=False, reversible=True),
     ]

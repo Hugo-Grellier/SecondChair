@@ -1,7 +1,11 @@
 // The module's side of a VTT action (docs/contracts/foundry-bridge.md, "Actions").
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CEILING, createActions } from "../secondchair-foundry/scripts/actions.js";
+import {
+  CEILING,
+  createActions,
+  missingTranslation,
+} from "../secondchair-foundry/scripts/actions.js";
 
 import { validMessage as valid } from "./schema.js";
 
@@ -52,6 +56,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
     store,
     adapter: () => adapter,
     ceiling: () => ceiling,
+    language: () => "fr",
   });
   /** @param {object} request */
   const handle = async (request) => {
@@ -65,9 +70,21 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
     assert.ok(valid(reply), JSON.stringify(valid.errors));
     return reply;
   };
+  /** @param {object} request */
+  const read = async (request) => {
+    const message = /** @type {import("../secondchair-foundry/scripts/actions.js").Read} */ ({
+      type: "read",
+      ...request,
+    });
+    assert.ok(valid(message), JSON.stringify(valid.errors));
+    const reply = await actions.read(message);
+    assert.ok(valid(reply), JSON.stringify(valid.errors));
+    return reply;
+  };
   return {
     docs,
     handle,
+    read,
     store,
     reload: () =>
       createActions({
@@ -75,6 +92,7 @@ function world({ adapter = null, ceiling = CEILING.default } = {}) {
         store,
         adapter: () => adapter,
         ceiling: () => ceiling,
+        language: () => "fr",
       }),
   };
 }
@@ -268,4 +286,77 @@ test("at the manual ceiling no action is taken", async () => {
     level: "propose",
   });
   assert.equal(!reply.ok && reply.reason, "ceiling");
+});
+
+test("a read goes to the system adapter with the campaign language, outside the queue", async () => {
+  /** @type {unknown[]} */
+  const asked = [];
+  const adapter = {
+    ops: {},
+    reads: {
+      official_name: async (/** @type {object} */ params, /** @type {object} */ context) => {
+        asked.push(params, context);
+        return { name: "Gobelin guerrier", key: "goblin-warrior", pack: null };
+      },
+    },
+  };
+  const { read, store } = world({ adapter });
+  const reply = await read({ id: "q", op: "official_name", params: { key: "goblin-warrior" } });
+  assert.deepEqual(reply, {
+    type: "reply",
+    id: "q",
+    ok: true,
+    result: { name: "Gobelin guerrier", key: "goblin-warrior", pack: null },
+  });
+  assert.deepEqual(asked, [{ key: "goblin-warrior" }, { language: "fr" }]);
+  assert.deepEqual(store.load(), []);
+});
+
+test("a read with no system adapter, or one it does not know, is refused", async () => {
+  for (const adapter of [null, { ops: {}, reads: {} }]) {
+    const { read } = world({ adapter });
+    const reply = await read({ id: "q", op: "rules_context", params: {} });
+    assert.equal(reply.ok, false);
+  }
+});
+
+test("a mechanical action reaches the adapter with its target, which it resolves itself", async () => {
+  /** @type {unknown[]} */
+  const targets = [];
+  const adapter = {
+    ops: {
+      set_date: async (/** @type {string} */ target) => {
+        targets.push(target);
+        return { before: { date: "4725-03-01" }, after: { date: "4725-05-12" } };
+      },
+    },
+  };
+  const { handle } = world({ adapter });
+  const reply = await handle({
+    id: "c",
+    op: "set_date",
+    target: "time",
+    params: { calendar: "absalom", date: "4725-05-12" },
+    expect: null,
+    level: null,
+  });
+  assert.equal(reply.ok, true);
+  assert.deepEqual(targets, ["time"]);
+});
+
+test("a campaign language whose translation module is inactive refuses the connection", () => {
+  const adapter = { ops: {}, translations: { fr: "pf2-fr" } };
+  const active = (/** @type {string} */ id) => id === "pf2-fr";
+  assert.match(String(missingTranslation(adapter, "fr", () => false)), /pf2-fr/);
+  assert.match(String(missingTranslation(adapter, "fr-CA", () => false)), /pf2-fr/);
+  assert.equal(missingTranslation(adapter, "fr", active), null);
+  // No module for German; no adapter at all.
+  assert.equal(
+    missingTranslation(adapter, "de", () => false),
+    null,
+  );
+  assert.equal(
+    missingTranslation(null, "fr", () => false),
+    null,
+  );
 });

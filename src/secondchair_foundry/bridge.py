@@ -10,13 +10,22 @@ import hmac
 import json
 import sys
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from secondchair.core import PROTOCOL_VERSION, delegation, knowledge, observations, traces, vtt
+from secondchair.core import (
+    PROTOCOL_VERSION,
+    capture,
+    delegation,
+    knowledge,
+    observations,
+    traces,
+    vtt,
+)
 from secondchair.core.index import CanonError
 from secondchair.core.machine import foundry_token
 from secondchair.core.vtt import CeilingRefusal, VttError
@@ -35,6 +44,8 @@ NO_GM = (
     "No GM client is connected: open the campaign's world as GM in Foundry, with the SecondChair "
     "module enabled."
 )
+RULES_CONTEXT = "rules_context"  # recorded at the start of each moment and when it changes
+CLOCK_TARGET = "time"  # what `set_date` acts on: the world clock, not a document
 
 
 class Refused(Exception):
@@ -65,6 +76,7 @@ class Bridge:
         self.gm: WebSocket | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.waiting: dict[str, asyncio.Future[dict]] = {}  # replies awaited, by request id
+        self.rules_context: tuple[int, object] | None = None  # (moment seq, last one recorded)
 
     @property
     def binding_path(self) -> Path:
@@ -198,9 +210,12 @@ class Bridge:
     async def _watch(self, socket: WebSocket) -> None:
         """Tell the GM client the live session id, now and whenever `secondchair session` opens
         or ends one, so it captures observations tagged with it (CAP-03, DEL-03); and send the
-        Director's Desk its state whenever the moment or the calls due now change (ARC-14)."""
+        Director's Desk its state whenever the moment or the calls due now change (ARC-14); and
+        record the rules context now and at the start of each moment (RUL-22)."""
         last_session: object = ...
         last_desk: object = ...
+        last_seq = None
+        reading: set[asyncio.Task] = set()  # rules context reads, never holding up the rest
         while True:
             # ponytail: polls moment.yaml and calls/ every second; events in the first second of
             # a session are missed, and the poll reads every call: index calls if they pile up.
@@ -220,6 +235,11 @@ class Bridge:
                 if now != last_desk:
                     await self._send_desk(socket)
                     last_desk = now
+                if now[0][1] != last_seq:  # a new moment: its rules context
+                    last_seq = now[0][1]
+                    task = asyncio.create_task(asyncio.to_thread(self._record_rules_context))
+                    reading.add(task)
+                    task.add_done_callback(reading.discard)
             except (WorkspaceError, CanonError, OSError) as e:  # keep the session id flowing
                 print(f"SecondChair: Director's Desk not refreshed: {e}", file=sys.stderr)
             await asyncio.sleep(POLL)
@@ -239,8 +259,69 @@ class Bridge:
             await socket.send_json(result)
             await self._send_desk(socket)
 
+    def _record_rules_context(self) -> None:
+        """Read the rules context from the GM client and record it, unless this moment already
+        recorded the same one (RUL-22). Without a system adapter there is none."""
+        try:
+            context = self.read(RULES_CONTEXT, {})
+        except VttError:
+            return
+        if isinstance(context, dict):
+            self._record(RULES_CONTEXT, context)
+
+    def _record(self, kind: str, payload: dict) -> None:
+        """Record an observation the Core makes itself through the GM client, as the module's
+        are recorded; a rules context only when it changed in this moment. Called from a
+        worker thread."""
+        seq = delegation.current_moment(self.ws)[1]
+        if kind == RULES_CONTEXT:
+            if self.rules_context == (seq, payload):
+                return
+            self.rules_context = (seq, payload)
+        envelope = {
+            "id": uuid.uuid4().hex,
+            "session": delegation.current_session(self.ws),
+            "at": datetime.now(UTC).isoformat(),
+            "scene": None,
+            "actor": None,
+            "kind": kind,
+            "visibility": "gm",
+            "payload": payload,
+        }
+        try:
+            if problem := observations.record(self.ws, envelope):
+                print(f"SecondChair: {kind} not recorded: {problem}", file=sys.stderr)
+        except OSError as e:
+            print(f"SecondChair: {kind} not recorded: {e}", file=sys.stderr)
+
+    def session_started(self) -> str:
+        """The Core's `vtt.session_started`: push the campaign's current date into a synced
+        calendar's world clock as a prep desired state, keeping Foundry's time of day, and
+        record that clock as the session's start (CAL-10, CAL-11, CAL-14)."""
+        calendar = self.ws.calendar.name
+        if calendar is None:  # a declared calendar has no VTT sync (CAL-10)
+            return ""
+        date = capture.time(self.ws)["current_date"]
+        if date is None:
+            return (
+                "The campaign has no current date (`secondchair date <date>`): the VTT clock was "
+                "not pushed."
+            )
+        try:
+            before, after = self.perform(
+                "set_date", CLOCK_TARGET, {"calendar": calendar, "date": date}, None, None
+            )
+        except VttError as e:  # a failed action: the VTT did not take it (CAL-13)
+            return f"The current date {date} was not pushed to the VTT clock: {e}"
+        self._record(capture.CLOCK, after)
+        return f"VTT clock set from {before.get('date')} to {date}, keeping its time of day."
+
     async def _observe(self, socket: WebSocket, envelope: object) -> None:
         """Record one observation durably, then acknowledge it so the module drops its copy."""
+        if isinstance(envelope, dict) and envelope.get("kind") == RULES_CONTEXT:
+            # A rules setting changed in Foundry: what the next moment's context is compared to.
+            seq = delegation.current_moment(self.ws)[1]
+            self.rules_context = (seq, envelope.get("payload"))
         try:
             problem = await asyncio.to_thread(observations.record, self.ws, envelope)
         except OSError as e:
@@ -304,6 +385,25 @@ class Bridge:
             )
         return before, after
 
+    def read(self, op: str, params: dict) -> object:
+        """Ask the GM client what only the VTT knows (the Core's `vtt.read`), such as an
+        official name from the GM's install (CAN-20). Called from a worker thread."""
+        socket, loop = self.gm, self.loop
+        if socket is None or loop is None:
+            raise VttError(NO_GM)
+        request = {"type": "read", "id": uuid.uuid4().hex, "op": op, "params": params}
+        future = asyncio.run_coroutine_threadsafe(self._request(socket, request), loop)
+        try:
+            reply = future.result(REPLY_TIMEOUT)
+        except TimeoutError:
+            future.cancel()
+            raise VttError(f"The GM client did not answer within {REPLY_TIMEOUT} s.") from None
+        if reply.get("ok") is not True or "result" not in reply:
+            raise VttError(
+                str(reply.get("error") or f"The GM client sent a malformed reply: {reply}")
+            )
+        return reply["result"]
+
     async def _realise(self, socket: WebSocket) -> None:
         """Send the GM client every desired scene it has not realised in this connection, then
         each one prep changes, and record its report (ARC-10). With no GM client the desired
@@ -362,5 +462,5 @@ def routes(ws: Workspace) -> list[BaseRoute]:
     """The `secondchair.connectors` entry point: the bridge served next to the MCP endpoint,
     plugged into the Core as the VTT that takes its VTT actions."""
     bridge = Bridge(ws)
-    vtt.connect(bridge.perform)
+    vtt.connect(bridge.perform, bridge.read, bridge.session_started)
     return [WebSocketRoute(PATH, bridge.endpoint)]

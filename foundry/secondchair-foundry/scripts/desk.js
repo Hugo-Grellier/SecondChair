@@ -7,7 +7,7 @@
  * @typedef {{id: number, kind: string, responsibility: string, deadline: string, status: string, entry: number | null, message: string | null, detail: string | null, reversible: boolean | null}} DeskCall
  * @typedef {{npc: string, name: string, goal: string, line: string, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean}} ActingCue
  * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null}} DeskState
- * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[]}} Result
+ * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */
 
 /** The rejection reasons, a closed list (DEL-26). */

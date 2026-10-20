@@ -13,7 +13,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import BaseRoute
 
-from secondchair.core import PROTOCOL_VERSION, capture, delegation, jobs, machine, world
+from secondchair.core import PROTOCOL_VERSION, capture, delegation, jobs, machine, vtt, world
 from secondchair.core.delegation import DelegationError
 from secondchair.core.tools import RegistrationError, load_tools
 from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
@@ -93,13 +93,20 @@ def build_server(ws: Workspace) -> MCPServer:
             return JSONResponse({"error": "Wrong or missing token."}, status_code=401)
         try:
             body = await request.json()
-            gesture, entry, auth = body["gesture"], body["entry"], body["authenticated"]
+            gesture = body["gesture"]
+            if gesture == "session_start":  # the GM started a live session: the VTT follows
+                entry, auth = 0, True
+            else:
+                entry, auth = body["entry"], body["authenticated"]
             if type(entry) is not int or type(auth) is not bool:
                 raise TypeError
         except ValueError, KeyError, TypeError:
             return JSONResponse({"error": "Malformed gesture."}, status_code=400)
         if body.get("workspace") != str(ws.root.resolve()):
             return JSONResponse({"error": f"This Core serves {ws.root}."}, status_code=409)
+        if gesture == "session_start":  # CAL-11
+            message = await run_in_threadpool(vtt.session_started)
+            return JSONResponse({"ok": True, "message": message})
         gestures = {
             "approve": lambda: delegation.approve(ws, entry, "cli", auth),
             "undo": lambda: delegation.undo(ws, entry, str(body.get("reason")), "cli", auth),

@@ -6,7 +6,7 @@ The ordinal arithmetic is v3's (`pf2e-open-campaign`, `tools/bible/dates.py`), g
 """
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from importlib.metadata import entry_points
 from typing import Any
 
@@ -44,6 +44,9 @@ class Calendar:
     anchor: str  # a full date ...
     anchor_weekday: int  # ... and its weekday, 1-based
     era: str
+    # The System extension's name for it (`absalom`), None when declared inline. Only a named
+    # calendar is synced with a VTT (CAL-10); the name is not part of its identity.
+    name: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if not self.months:
@@ -242,7 +245,7 @@ def _named(name: Any) -> Calendar:
     calendar = found[name].load()
     if not isinstance(calendar, Calendar):
         raise CalendarError(f"The calendar entry point {name!r} is not a Calendar.")
-    return calendar
+    return replace(calendar, name=name)
 
 
 def _no_other_keys(mapping: Any, allowed: set[str]) -> None:

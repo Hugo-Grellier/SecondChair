@@ -9,8 +9,39 @@
  * @typedef {{type: "reply", id: string, ok: true, before: Fields, after: Fields} | {type: "reply", id: string, ok: false, error: string, reason?: "ceiling"}} Reply
  * @typedef {{documentName: string, update(changes: Fields): Promise<unknown>} & Record<string, unknown>} Doc
  * @typedef {{id: string, status: "running" | "done", reply?: Reply}} Handled
- * @typedef {{ops: Record<string, (doc: Doc, params: Fields, expect: Fields | null) => Promise<{before: Fields, after: Fields}>>}} Adapter
+ * @typedef {{type: "read", id: string, op: string, params: Fields}} Read
+ * @typedef {{type: "reply", id: string, ok: true, result: unknown} | {type: "reply", id: string, ok: false, error: string}} ReadReply
+ * @typedef {import("./capture.js").Event} Event
  */
+
+/**
+ * A system adapter (ARC-08), registered through the `secondchairFoundryInit` hook.
+ * @typedef {object} Adapter
+ * @property {Record<string, (target: string, params: Fields, expect: Fields | null) => Promise<{before: Fields, after: Fields}>>} ops
+ *   mechanical actions; each resolves its own target, a UUID or what the op documents
+ * @property {Record<string, (params: Fields, context: {language: string}) => Promise<unknown>>} [reads]
+ *   what only the VTT knows (rules_context, official_name)
+ * @property {Record<string, string>} [translations]  campaign language -> the translation module it requires (CAN-21)
+ * @property {(emit: (event: Event) => void) => void} [observe]  start capturing its observations
+ */
+
+/**
+ * Why the connector must not start for this campaign language, or null (CAN-21): the adapter
+ * declares the official translation module the language needs, and it is not active.
+ * @param {Adapter | null} adapter
+ * @param {string} language  the campaign language, a BCP 47 tag
+ * @param {(id: string) => boolean} active  whether a module is active in this world
+ */
+export function missingTranslation(adapter, language, active) {
+  const translations = adapter?.translations ?? {};
+  const required = translations[language] ?? translations[language.split("-")[0].toLowerCase()];
+  if (!required || active(required)) return null;
+  return (
+    `This campaign is in "${language}": install and enable the module "${required}", the ` +
+    "official translation its game system needs, then reload. SecondChair stays disconnected " +
+    "until then."
+  );
+}
 
 /** The library's generic actions: one document type, the fields they may set, a dotted path for
  * a nested one (ARC-07). reveal_token and publish_journal are disclosures (DEL-09). */
@@ -55,8 +86,9 @@ const KEPT = 200;
  * @param {{load(): unknown[], save(list: Handled[]): Promise<unknown>}} args.store  handled requests, kept across reloads
  * @param {() => Adapter | null} args.adapter  the system adapter, if one registered
  * @param {() => unknown} args.ceiling  the world's ceiling setting
+ * @param {() => string} args.language  the campaign language
  */
-export function createActions({ resolve, store, adapter, ceiling }) {
+export function createActions({ resolve, store, adapter, ceiling, language }) {
   /** @type {Map<string, Promise<Reply>>} */
   const inflight = new Map();
   /** @type {Promise<unknown>} */
@@ -82,8 +114,6 @@ export function createActions({ resolve, store, adapter, ceiling }) {
         `Refused by this world's delegation ceiling (${ceiling()}): the action was asked at ${level}.`,
       );
     }
-    const doc = await resolve(target);
-    if (!doc) throw new Error(`No document ${target} in this world.`);
     if (!Object.hasOwn(GENERIC, op)) {
       const ops = adapter()?.ops;
       if (!ops) {
@@ -92,8 +122,10 @@ export function createActions({ resolve, store, adapter, ceiling }) {
         );
       }
       if (!Object.hasOwn(ops, op)) throw new Error(`Unknown action "${op}".`);
-      return ops[op](doc, params, expect);
+      return ops[op](target, params, expect);
     }
+    const doc = await resolve(target);
+    if (!doc) throw new Error(`No document ${target} in this world.`);
     const { documentName, fields } = GENERIC[/** @type {keyof typeof GENERIC} */ (op)];
     if (doc.documentName !== documentName) {
       throw new Error(`${target} is a ${doc.documentName}, not a ${documentName}.`);
@@ -109,6 +141,23 @@ export function createActions({ resolve, store, adapter, ceiling }) {
     }
     await doc.update(params);
     return { before, after: pick() };
+  }
+
+  /**
+   * Answer a read. It changes nothing: neither queued nor recorded, so a replay reads again.
+   * @param {Read} request @returns {Promise<ReadReply>}
+   */
+  async function read({ id, op, params }) {
+    try {
+      const reads = adapter()?.reads;
+      if (!reads) throw new Error(`No system adapter is installed to read "${op}".`);
+      if (!Object.hasOwn(reads, op)) throw new Error(`Unknown read "${op}".`);
+      const result = await reads[op](params, { language: language() });
+      return { type: "reply", id, ok: true, result };
+    } catch (err) {
+      const error = String(/** @type {Error} */ (err)?.message ?? err);
+      return { type: "reply", id, ok: false, error };
+    }
   }
 
   /** @param {Request} request @returns {Promise<Reply>} */
@@ -152,5 +201,5 @@ export function createActions({ resolve, store, adapter, ceiling }) {
     return run;
   }
 
-  return { handle };
+  return { handle, read };
 }

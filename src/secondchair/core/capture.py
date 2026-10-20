@@ -26,7 +26,8 @@ from typing import Any
 
 import yaml
 
-from secondchair.core import calls, canon, delegation, index, jobs, knowledge
+from secondchair.core import calls, canon, delegation, index, jobs, knowledge, observations
+from secondchair.core.calendar import CalendarError
 from secondchair.core.delegation import (
     ActionResult,
     DelegationError,
@@ -43,6 +44,7 @@ CAPTURE_DIR = "capture"
 TIME_FILE = "time.yaml"
 PLAYBOOK = "wrap-a-session"
 WORLD_TURN = "world-turn"
+CLOCK = "clock"  # a VTT clock observation, its payload {"date": a full date, ...} (CAL-12)
 CLASSES = (  # CAP-10
     "certain",
     "duplicate",
@@ -293,6 +295,33 @@ def time(ws: Workspace) -> dict:
     return {"current_date": data.get("current_date"), "sessions": data.get("sessions") or {}}
 
 
+def set_current_date(ws: Workspace, date: str) -> str:
+    """Set the current date: a GM gesture (CAL-14, LW-05), outside the wrap."""
+    try:
+        date = ws.calendar.canonical(date)
+    except CalendarError as e:
+        raise DelegationError(f"Not a date of the campaign calendar: {e}") from e
+    with locked(ws):
+        data = time(ws)
+        data["current_date"] = date
+        _write_time(ws, data)
+    return date
+
+
+def observed_interval(ws: Workspace, session: int) -> dict[str, str] | None:
+    """The session's fictional interval as the VTT clock observed it: its first and last clock
+    observation in that live session, None when none was (CAL-14)."""
+    dates = [
+        o["payload"]["date"]
+        for o in observations.of_session(ws, session)
+        if o["kind"] == CLOCK and isinstance(o["payload"].get("date"), str)
+    ]
+    try:
+        return _interval(ws, dates[0], dates[-1]) if dates else None
+    except CalendarError, CanonError:
+        return None  # a clock set back by hand: the GM gives the interval
+
+
 def report_interval(ws: Workspace, job: int, start: str, end: str, quote: str) -> dict:
     """The session's fictional interval as the job's Source states it, quoted (CAL-14)."""
     record, session = _wrap_job(ws, job)
@@ -347,20 +376,31 @@ def wrap(
         noted = data["sessions"].get(session, {})
         if noted.get("wrapped"):
             raise DelegationError(f"Session {session} is already wrapped.")
-        if not (end or noted.get("end")):
+        by_gm = start is not None or end is not None
+        observed = observed_interval(ws, session)  # the VTT clock proposes (CAL-14)
+        if by_gm or noted.get("end"):
+            end = end or noted["end"]
+            interval = _interval(ws, start or noted.get("start") or end, end)
+            source = "gm" if by_gm else "notes"
+            if not by_gm and observed and observed != interval:
+                raise DelegationError(
+                    f"Session {session}: the notes give {interval['start']} to "
+                    f"{interval['end']}, the VTT clock observed {observed['start']} to "
+                    f"{observed['end']}. Give the interval (--start, --end)."
+                )
+        elif observed:
+            interval, source = observed, "clock"
+        else:
             raise DelegationError(
                 f"Session {session}'s interval is unknown: give its end date (--end)."
             )
-        by_gm = start is not None or end is not None
-        end = end or noted["end"]
-        interval = _interval(ws, start or noted.get("start") or end, end)
         now = data["current_date"]
         if now and index.date_key(ws.calendar, interval["end"]) < index.date_key(ws.calendar, now):
             raise DelegationError(f"The session ends on {interval['end']}, before {now}.")
         data["current_date"] = interval["end"]
         data["sessions"][session] = {
             **interval,
-            "from": "gm" if by_gm else "notes",
+            "from": source,
             "wrapped": True,
         }
         _write_time(ws, data)
