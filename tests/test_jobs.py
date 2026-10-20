@@ -506,3 +506,11 @@ def test_the_model_name_check_catches_model_names() -> None:
     for text in ("model: sonnet", "use gpt-5", "o3-mini", "claude-opus-4"):
         assert MODEL_NAME.search(text), text
     assert not MODEL_NAME.search("tier: standard, host: claude, effort: high")
+
+
+def test_the_codex_template_lets_exec_call_the_secondchair_tools() -> None:
+    """`codex exec` never asks, so without this a tool needing approval is refused (#94); the
+    Core's delegation table still decides what each call does."""
+    template = runner.HOSTS["codex"]
+    at = template.index('mcp_servers.secondchair.default_tools_approval_mode="approve"')
+    assert template[at - 1] == "-c"

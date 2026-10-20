@@ -44,6 +44,10 @@ HOSTS: dict[str, list[str]] = {
         "{model}",
         "-c",
         'model_reasoning_effort="{effort}"',
+        # `exec` never asks, so a tool needing approval is refused: the Core's delegation table,
+        # not the host, decides what a SecondChair tool may do (ARC-04).
+        "-c",
+        'mcp_servers.secondchair.default_tools_approval_mode="approve"',
         "--skip-git-repo-check",
         "{prompt}",
     ],
