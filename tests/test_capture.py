@@ -11,7 +11,7 @@ import pytest
 import yaml
 from mcp import Client
 
-from secondchair import cli
+from secondchair import cli, runner
 from secondchair.cli import main
 from secondchair.core import capture, delegation, index, jobs, workspace, world
 from secondchair.core.server import build_server
@@ -312,6 +312,7 @@ def test_after_the_wrap_the_current_date_is_the_session_end_and_a_world_turn_is_
     world_turn = summary["job"]
     assert (world_turn["playbook"], world_turn["responsibility"]) == ("world-turn", "living_world")
     assert world_turn["inputs"] == {"until": "4726-01-02", "since": "4726-01-01"}
+    assert world_turn["tier"] == runner.playbook("world-turn")["tier"]  # the playbook's (ARC-25)
     assert world_turn["status"] == "queued"
     jobs.start(ws, world_turn["id"], {"host": "h", "model": "m", "effort": "e"}, manual=True)
     assert capture.turn(ws, world_turn["id"]) == []  # no front yet
