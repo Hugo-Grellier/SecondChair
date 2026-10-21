@@ -86,8 +86,13 @@ def abandoned_prep(log: Path) -> list[str]:
     return [p for p in prep["prepared"] if p not in used]
 
 
-_FRONT_MATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
+_FRONT_MATTER = re.compile(r"\A﻿?\s*---[ \t]*\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def _loose(value: str) -> str:
+    """Regex for a value where '-', '_' and ' ' are interchangeable."""
+    return r"[-_ ]+".join(re.escape(w) for w in re.split(r"[-_\s]+", value.strip()))
 
 
 def blind(candidates: list[dict], out: Path, key: Path, seed: int) -> dict[str, str]:
@@ -95,22 +100,37 @@ def blind(candidates: list[dict], out: Path, key: Path, seed: int) -> dict[str, 
 
     A candidate is `{"id", "provenance": {model, host, tier, ...}, "text"}`. Each is written to
     `out/<letter>.md` with front matter and HTML comments dropped and every provenance value
-    redacted from the body; the letters follow a seeded shuffle of the id-sorted candidates, so
-    the same input and seed give the same files. The sealed key (letter -> id, provenance) goes
-    to `key`, which must lie outside `out` so a reviewer's folder never holds it.
-    Returns letter -> id.
+    redacted from the body (longest first; '-', '_' and ' ' match each other); the letters follow
+    a seeded shuffle of the id-sorted candidates, so the same input and seed give the same files.
+    The sealed key (letter -> id, provenance) goes to `key`, which must lie outside `out` so a
+    reviewer's folder never holds it. Everything is validated before the first write; `out` must
+    be absent or empty. Returns letter -> id.
     """
-    if out.resolve() in key.resolve().parents:
+    if len(candidates) > 26:  # ponytail: letters A-Z, enough for the three-way comparison
+        raise ValueError(f"at most 26 candidates, got {len(candidates)}")
+    ids = [c["id"] for c in candidates]
+    if len(set(ids)) != len(ids):
+        raise ValueError("candidate ids must be unique")
+    for c in candidates:
+        for k, v in c["provenance"].items():
+            if not isinstance(v, str | int | float | bool):
+                raise ValueError(f"provenance {k!r} of {c['id']} must be a scalar")
+            if 0 < len(str(v).strip()) < 3:
+                raise ValueError(f"provenance {k!r} of {c['id']} is too short to redact safely")
+    if out.resolve() == key.resolve() or out.resolve() in key.resolve().parents:
         raise ValueError("the sealed key must live outside the rendered folder")
+    if out.exists() and any(out.iterdir()):
+        raise ValueError(f"{out} is not empty")
     ordered = sorted(candidates, key=lambda c: c["id"])
     random.Random(seed).shuffle(ordered)
     out.mkdir(parents=True, exist_ok=True)
     sealed: dict[str, dict] = {}
     for i, c in enumerate(ordered):
-        letter = chr(ord("A") + i)  # ponytail: A-Z, enough for the three-way comparison
+        letter = chr(ord("A") + i)
         body = _COMMENT.sub("", _FRONT_MATTER.sub("", c["text"]))
-        for value in map(str, c["provenance"].values()):
-            body = re.sub(re.escape(value), "[redacted]", body, flags=re.I)
+        values = {str(v).strip() for v in c["provenance"].values() if str(v).strip()}
+        for value in sorted(values, key=len, reverse=True):
+            body = re.sub(_loose(value), "[redacted]", body, flags=re.I)
         (out / f"{letter}.md").write_text(f"# Candidate {letter}\n\n{body.strip()}\n")
         sealed[letter] = {"id": c["id"], "provenance": c["provenance"]}
     key.write_text(yaml.safe_dump(sealed, sort_keys=True))

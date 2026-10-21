@@ -52,15 +52,65 @@ def test_blind_render_hides_provenance_and_seals_key_apart(tmp_path) -> None:
     for p in out.iterdir():
         text = p.read_text().lower()
         assert text.startswith("# candidate") and "ember court" in text
+        assert "<!--" not in text and "---" not in text
         assert not any(w in text for w in ("opus", "sonnet", "onepass", "codex", "deep", "model:"))
     sealed = yaml.safe_load(key.read_text())
     assert {k: v["id"] for k, v in sealed.items()} == letters
-    assert sealed["A"]["provenance"]["model"] in {"opus-x", "sonnet-y", "onepass-z"}
-    with pytest.raises(ValueError):
-        editorial.blind(_cands(), out, out / "key.yaml", seed=7)
+    by_id = {c["id"]: c for c in _cands()}
+    for entry in sealed.values():
+        assert entry["provenance"] == by_id[entry["id"]]["provenance"]
 
 
-def test_blind_order_is_stable_per_seed_and_input_order(tmp_path) -> None:
-    run = lambda c, s, n: editorial.blind(c, tmp_path / n, tmp_path / f"{n}.yaml", seed=s)  # noqa: E731
-    assert run(_cands(), 1, "a") == run(list(reversed(_cands())), 1, "b")
-    assert any(run(_cands(), s, f"s{s}") != run(_cands(), 1, f"t{s}") for s in range(2, 12))
+def test_blind_refuses_bad_key_and_bad_input_before_writing(tmp_path) -> None:
+    out = tmp_path / "out"
+    for key in (out, out / "key.yaml", out / "sub" / "key.yaml"):
+        with pytest.raises(ValueError, match="outside"):
+            editorial.blind(_cands(), out, key, seed=1)
+    many = [{"id": f"c{i}", "provenance": {}, "text": "x"} for i in range(27)]
+    bad = [
+        many,
+        [{"id": "a", "provenance": {}, "text": "x"}] * 2,
+        [{"id": "a", "provenance": {"m": ["x"]}, "text": "x"}],
+        [{"id": "a", "provenance": {"m": "ab"}, "text": "x"}],
+    ]
+    for cands in bad:
+        with pytest.raises(ValueError):
+            editorial.blind(cands, out, tmp_path / "k.yaml", seed=1)
+    assert not out.exists() and not (tmp_path / "k.yaml").exists()
+    out.mkdir()
+    (out / "stale.md").write_text("old")
+    with pytest.raises(ValueError, match="not empty"):
+        editorial.blind(_cands(), out, tmp_path / "k.yaml", seed=1)
+
+
+def test_blind_redacts_loosely_longest_first_and_handles_front_matter_shapes(tmp_path) -> None:
+    c = {
+        "id": "a",
+        "provenance": {"model": "opus", "full": "Opus 4", "blank": "  "},
+        "text": "﻿ \r\n---\r\nmodel: Opus_4\r\n---\r\nBy opus-4 and OPUS.\r\n",
+    }
+    editorial.blind([c], tmp_path / "o", tmp_path / "k.yaml", seed=0)
+    text = (tmp_path / "o/A.md").read_text()
+    assert "opus" not in text.lower() and "model:" not in text
+    assert text.count("[redacted]") == 2  # 'opus-4' is one match, not '[redacted]-4'
+    eof = {"id": "b", "provenance": {}, "text": "---\nsecret: yes\n---"}
+    editorial.blind([eof], tmp_path / "p", tmp_path / "k2.yaml", seed=0)
+    assert "secret" not in (tmp_path / "p/A.md").read_text()
+
+
+def test_blind_value_only_in_front_matter_and_order_stable(tmp_path) -> None:
+    fm = {"id": "z", "provenance": {"model": "zeta-9"}, "text": "---\nmodel: zeta-9\n---\nBody."}
+    editorial.blind([fm], tmp_path / "f", tmp_path / "fk.yaml", seed=0)
+    assert "zeta" not in (tmp_path / "f/A.md").read_text()
+    a, b = tmp_path / "a", tmp_path / "b"
+    la = editorial.blind(_cands(), a, tmp_path / "a.yaml", seed=1)
+    lb = editorial.blind(list(reversed(_cands())), b, tmp_path / "b.yaml", seed=1)
+    assert la == lb
+    files = lambda d: {p.name: p.read_text() for p in d.iterdir()}  # noqa: E731
+    assert files(a) == files(b)
+    assert (tmp_path / "a.yaml").read_text() == (tmp_path / "b.yaml").read_text()
+    other = [
+        editorial.blind(_cands(), tmp_path / f"s{s}", tmp_path / f"s{s}.yaml", seed=s)
+        for s in range(2, 12)
+    ]
+    assert any(o != la for o in other)
