@@ -658,3 +658,65 @@ test("prep keeps only the module's flags, never its identity ones, nor any updat
   const toggle = { key: "r", type: "Region", data: { behaviors: [{ type: "toggleBehavior" }] } };
   assert.throws(() => guardedScene(scene([toggle]), deps), /toggleBehavior/);
 });
+
+test("compendium_snapshot sends pack metadata only, never descriptions (LIC-12)", async () => {
+  const reads = genericReads({
+    browse: async () => ({}),
+    imageSize: async () => ({ width: 1, height: 1 }),
+    documents: () => null,
+    system: () => ({ id: "pf2e", version: "7.1.0", translation: "Traduction" }),
+    packs: () => [
+      {
+        collection: "pf2e.bestiary",
+        documentName: "Actor",
+        getIndex: async () => [
+          {
+            _id: "a1",
+            name: "Grik",
+            type: "npc",
+            img: "g.webp",
+            system: {
+              slug: "grik",
+              details: { level: { value: 2 }, publicNotes: "SECRET TEXT" },
+              description: { value: "SECRET TEXT" },
+              traits: { rarity: "rare", value: ["goblin"] },
+              publication: { title: "Monster Core", remaster: true },
+            },
+          },
+          { _id: "a2", name: "Plain", type: "hazard" },
+        ],
+      },
+    ],
+  });
+
+  const snapshot = /** @type {any} */ (await reads.compendium_snapshot({}));
+
+  assert.deepEqual(snapshot.system, { id: "pf2e", version: "7.1.0", translation: "Traduction" });
+  assert.deepEqual(snapshot.entries, [
+    {
+      uuid: "Compendium.pf2e.bestiary.Actor.a1",
+      slug: "grik",
+      name: "Grik",
+      type: "npc",
+      pack: "pf2e.bestiary",
+      level: 2,
+      rarity: "rare",
+      traits: ["goblin"],
+      publication: "Monster Core",
+      remaster: true,
+    },
+    {
+      uuid: "Compendium.pf2e.bestiary.Actor.a2",
+      slug: null,
+      name: "Plain",
+      type: "hazard",
+      pack: "pf2e.bestiary",
+      level: null,
+      rarity: null,
+      traits: null,
+      publication: null,
+      remaster: null,
+    },
+  ]);
+  assert.ok(!JSON.stringify(snapshot).includes("SECRET"));
+});
