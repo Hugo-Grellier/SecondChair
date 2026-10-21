@@ -10,7 +10,7 @@ from contextlib import closing
 from pathlib import Path
 
 import jsonschema
-from test_canon import JOB, SCHEMA, act, read, refused, ws  # noqa: F401 (ws is a fixture)
+from test_canon import JOB, SCHEMA, act, call, read, refused, ws  # noqa: F401 (ws is a fixture)
 
 from secondchair.core import delegation, index
 from secondchair.core.index import FACTS_DIR, INDEX_FILE
@@ -92,3 +92,53 @@ def test_a_forged_origin_is_refused_at_the_same_seam(ws: Workspace) -> None:  # 
     assert found["rank"] == "agent_proposal"
     # TODO(#232): once admission lands, an observation origin whose quote the Core cannot find
     # is refused here too (ADR 0015); on main it still ranks played.
+
+
+def test_a_crash_between_apply_and_append_is_one_hand_edit_at_the_next_rebuild(
+    ws: Workspace,  # noqa: F811
+    monkeypatch,
+) -> None:
+    """Stage 0 of ADR 0023: the file is written, the process dies before the log entry exists.
+    The Markdown stays authoritative; the next rebuild logs one `hand_edit` at agent_proposal,
+    once, and the fact is served. Nothing is applied twice."""
+
+    class Crash(Exception):
+        pass
+
+    append = delegation._append
+
+    def die_before_logging(ws: Workspace, entry: dict, *args, **kwargs):
+        if entry.get("kind") == "action":
+            raise Crash
+        return append(ws, entry, *args, **kwargs)
+
+    logged_before, _ = delegation.read_log(ws)
+    with monkeypatch.context() as crashed:
+        crashed.setattr(delegation, "_append", die_before_logging)
+        outcome = call(
+            ws, "record_fact", agent="claude-prep", statement=STATEMENT, entities=[], origin=JOB
+        )
+        assert outcome.is_error
+
+    # The write happened, the log did not: the canon file is the only record.
+    [written] = facts(ws)
+    assert delegation.read_log(ws)[0] == logged_before
+    text = written.read_text()
+
+    # The next read rebuilds: one hand edit, ranked agent_proposal, holding the file as written.
+    index.connect(ws).close()
+    logged, errors = delegation.read_log(ws)
+    assert errors == []
+    [edit] = [e for e in logged if e not in logged_before]
+    assert edit["kind"] == "hand_edit"
+    assert (edit["rank"], edit["before"], edit["after"]) == ("agent_proposal", None, text)
+    assert edit["target"] == written.relative_to(ws.root).as_posix()
+
+    # Another rebuild, and a recovery, add nothing; the file is untouched and still one fact.
+    index.connect(ws).close()
+    with delegation.locked(ws):
+        assert delegation.recover(ws) == []
+    assert delegation.read_log(ws)[0] == logged
+    assert facts(ws) == [written] and written.read_text() == text
+    [found] = read(ws, "search_facts", text="ferry Saltmere")
+    assert found["rank"] == "agent_proposal"
