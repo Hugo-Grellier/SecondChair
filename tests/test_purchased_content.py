@@ -40,7 +40,7 @@ def configure(entries: list[dict]) -> None:
 
 def reached(ws: Workspace, job: dict) -> str:
     """Everything a job's agent is handed: the contract, and each input file it may read."""
-    found = [runner.prompt(job)]
+    found = [runner.prompt(ws, job)]
     for value in job["inputs"].values():
         path = Path(value)
         files = [path] if path.is_file() else path.rglob("*") if path.is_dir() else []
