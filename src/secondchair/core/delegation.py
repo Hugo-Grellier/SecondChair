@@ -1429,6 +1429,7 @@ def _apply(ws: Workspace, entry: dict, state: str) -> None:
         )
     content = entry[state]
     if content is None:
+        _forget(path.parent)
         path.unlink()
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1445,14 +1446,34 @@ def _append(ws: Workspace, entry: dict, directory: str = LOG_DIR) -> dict:
     (ws.root / directory).mkdir(exist_ok=True)
     entry = {"id": _next_id(ws, directory), "at": datetime.now(UTC).isoformat(), **entry}
     _save(ws, entry, directory)
+    if ws.root.resolve() in _held.__dict__.get("roots", ()):  # _save dropped it: only ours is new
+        _FILE_IDS[str((ws.root / directory).resolve())] = entry["id"]
     return entry
+
+
+# Highest file id per directory, kept for one lock hold only (nobody else writes meanwhile) and
+# dropped by every write or removal in that directory (`_write`, `_put`, `_revert`), so the glob
+# runs once per directory per hold instead of once per append.
+_FILE_IDS: dict[str, int] = {}
+
+
+def _forget(directory: Path) -> None:
+    _FILE_IDS.pop(str(directory.resolve()), None)
 
 
 def _next_id(ws: Workspace, directory: str) -> int:
     """The next record id in `directory`, past the ids a pending journal holds for it."""
     from secondchair.core import journal  # layer 5, applied through this module (ADR 0023)
 
-    ids = [int(p.stem) for p in (ws.root / directory).glob("*.yaml") if p.stem.isdigit()]
+    key = str((ws.root / directory).resolve())
+    top = _FILE_IDS.get(key) if ws.root.resolve() in _held.__dict__.get("roots", ()) else None
+    if top is None:
+        top = max(
+            (int(p.stem) for p in (ws.root / directory).glob("*.yaml") if p.stem.isdigit()),
+            default=0,
+        )
+        _FILE_IDS[key] = top
+    ids = [top]
     ids += [
         int(Path(w["path"]).stem)
         for _, j in journal._journals(ws)
@@ -1541,6 +1562,7 @@ def locked(ws: Workspace | Path) -> Generator[None]:
                 yield
             finally:
                 held.discard(root)
+                _FILE_IDS.clear()
             return
 
 
@@ -1552,6 +1574,7 @@ def _recovered(ws: Workspace) -> None:
 def _write(path: Path, text: str) -> None:
     """Write `path` whole or not at all, durably: a temporary file synced, renamed over it, and
     the directory synced (ADR 0016)."""
+    _forget(path.parent)
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w") as f:
         f.write(text)

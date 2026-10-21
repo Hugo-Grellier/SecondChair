@@ -300,3 +300,18 @@ def test_the_core_paths_name_what_their_owners_write() -> None:
         campaign_skill.MANIFEST,
     ):
         assert owned in delegation.CORE_PATHS, owned
+
+
+def test_next_id_stays_monotonic_unique_across_holds_writes_and_recovery(ws: Workspace) -> None:
+    with delegation.locked(ws):
+        ids = [delegation._append(ws, {"kind": "t"})["id"] for _ in range(30)]
+        assert ids == list(range(1, 31))
+        delegation._save(ws, {"id": 99, "kind": "t"})  # a write the cache did not make
+        assert delegation._append(ws, {"kind": "t"})["id"] == 100
+        delegation._log_path(ws, 100).unlink()
+        delegation._forget(delegation._log_path(ws, 100).parent)  # what _apply and _put do
+        assert delegation._append(ws, {"kind": "t"})["id"] == 100
+    delegation._log_path(ws, 150).write_text("id: 150\n")  # another process, between holds
+    with delegation.locked(ws):  # the first acquisition recovers
+        assert delegation._append(ws, {"kind": "t"})["id"] == 151
+    assert len(list((ws.root / delegation.LOG_DIR).glob("*.yaml"))) == 34
