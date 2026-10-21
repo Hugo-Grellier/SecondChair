@@ -190,6 +190,30 @@ def test_the_desk_shows_the_active_npcs_acting_cue(ws: Workspace) -> None:
     assert found["does_not_know"] == [{"id": relay, "statement": "A cracked relay rings the bell."}]
 
 
+def test_a_cue_posture_is_optional_gm_only_direction_outside_the_audience_guard(
+    ws: Workspace,
+) -> None:
+    tovan, bell, relay = npc_who_knows(ws)
+    cue(ws, tovan, "It only rings when the nights are dry.", [bell])
+    assert "posture" not in state(ws)["cue"]
+
+    # Posture names a fact Tovan does not hold, yet it is not audience content: not refused.
+    shown = cue(
+        ws,
+        tovan,
+        "It only rings when the nights are dry.",
+        [bell],
+        posture="A cracked relay, afraid",
+    )
+    assert not shown.is_error, shown
+    assert state(ws)["cue"]["posture"] == "A cracked relay, afraid"
+
+    # The guard still applies to the line alone.
+    refused = cue(ws, tovan, "A cracked relay rings it.", [relay], posture="calm")
+    assert refused.is_error
+    assert state(ws)["cue"]["posture"] == "A cracked relay, afraid"  # unchanged
+
+
 def test_while_a_turn_driver_is_active_the_cue_shows_no_agent_proposal(ws: Workspace) -> None:
     tovan, bell, _relay = npc_who_knows(ws)
     cue(ws, tovan, "It only rings when the nights are dry.", [bell])

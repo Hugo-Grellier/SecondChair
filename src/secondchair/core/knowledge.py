@@ -98,10 +98,12 @@ def show_cue(
     cites: list[str],
     knows: list[str] | None = None,
     does_not_know: list[str] | None = None,
+    posture: str | None = None,
 ) -> dict[str, Any]:
     """Make `npc`'s acting cue the active one the Director's Desk shows (DEL-15, ARC-14): its
     line goes through `guard` (CAN-16), every fact it knows must be held, every fact it does not
-    know must not be. A read: it is shown whatever the NPC's level, manual included."""
+    know must not be. `posture` is GM-only direction, never audience content, so it skips `guard`.
+    A read: it is shown whatever the NPC's level, manual included."""
     names = {e["id"]: e["names"] for e in index.search_entities(ws)}
     if npc not in names:
         raise CanonError(f"No NPC {npc!r} in canon.")
@@ -129,6 +131,8 @@ def show_cue(
             for f in dict.fromkeys(does_not_know or [])
         ],
     }
+    if posture:
+        cue["posture"] = posture
     # ponytail: one active cue in derived state, replaced by the next and kept until then (a
     # stale NPC id included); a cue per NPC, cleared at the end of a moment, if needed.
     written = ws.root / f"{CUE_FILE}.{secrets.token_hex(4)}"  # never read half written
@@ -242,15 +246,18 @@ def tools(ws: Workspace) -> list[Tool]:
         cites: list[str],
         knows: list[str] | None = None,
         does_not_know: list[str] | None = None,
+        posture: str | None = None,
     ) -> dict[str, Any]:
         """Show the GM, on the Director's Desk, what they need to voice the NPC `npc` (its
         entity id) right now: its `goal`, a `line` it could say, written in the campaign
         language and citing in `cites` the ids of the facts it uses, the ids of further facts it
         `knows` and of facts it `does_not_know` that the GM must not let slip. Refused when the
         line fails the audience check (as for check_audience_content), a fact it knows is not
-        held by the NPC, or a fact it does not know is. It replaces the active cue and is shown
+        held by the NPC, or a fact it does not know is. `posture`, optional, is a few words on the
+        NPC's emotional state: GM-only direction shown under the goal, never audience content, so
+        it is not checked as a line. It replaces the active cue and is shown
         whatever the NPC's delegation level, since it is a read."""
-        return show_cue(ws, npc, goal, line, cites, knows, does_not_know)
+        return show_cue(ws, npc, goal, line, cites, knows, does_not_know, posture)
 
     return [
         Tool(fn=show_acting_cue, responsibility="npcs", delegated_action=False, reversible=True),

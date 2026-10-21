@@ -141,6 +141,19 @@ test("the active NPC's acting cue offers I voice this one, then Hand back", () =
   assert.match(none, /No acting cue/);
 });
 
+test("the acting cue shows its posture under the goal only when given", () => {
+  const cue = /** @type {NonNullable<DeskState["cue"]>} */ (STATE.cue);
+  const without = deskHtml({ isGM: true, state: STATE, pile: null, ceiling: "propose" });
+  assert.doesNotMatch(without, /Wary/);
+  const withPosture = { ...STATE, cue: { ...cue, posture: "Wary <b>and</b> tired" } };
+  assert.ok(valid(withPosture), JSON.stringify(valid.errors));
+  const html = deskHtml({ isGM: true, state: withPosture, pile: null, ceiling: "propose" });
+  assert.match(
+    html,
+    /Keep the party away[\s\S]*<em>Wary &lt;b&gt;and&lt;\/b&gt; tired<\/em>[\s\S]*dry nights/,
+  );
+});
+
 test("while a turn driver is active the acting cue shows no agent's line", () => {
   const cue = /** @type {NonNullable<DeskState["cue"]>} */ (STATE.cue);
   const driven = { ...STATE, turn_driver: "pf2e-combater", cue: { ...cue, line: null } };
