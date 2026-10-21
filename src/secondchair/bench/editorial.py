@@ -7,6 +7,8 @@ Core logged for a job (ARC-27, no token counts exist yet) and the size of the GM
 """
 
 import difflib
+import random
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -82,3 +84,34 @@ def abandoned_prep(log: Path) -> list[str]:
     prep = yaml.safe_load(log.read_text())["prep"]
     used = set(prep["used"])
     return [p for p in prep["prepared"] if p not in used]
+
+
+_FRONT_MATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def blind(candidates: list[dict], out: Path, key: Path, seed: int) -> dict[str, str]:
+    """Render candidates into one template for blind human review (#182, decision 25).
+
+    A candidate is `{"id", "provenance": {model, host, tier, ...}, "text"}`. Each is written to
+    `out/<letter>.md` with front matter and HTML comments dropped and every provenance value
+    redacted from the body; the letters follow a seeded shuffle of the id-sorted candidates, so
+    the same input and seed give the same files. The sealed key (letter -> id, provenance) goes
+    to `key`, which must lie outside `out` so a reviewer's folder never holds it.
+    Returns letter -> id.
+    """
+    if out.resolve() in key.resolve().parents:
+        raise ValueError("the sealed key must live outside the rendered folder")
+    ordered = sorted(candidates, key=lambda c: c["id"])
+    random.Random(seed).shuffle(ordered)
+    out.mkdir(parents=True, exist_ok=True)
+    sealed: dict[str, dict] = {}
+    for i, c in enumerate(ordered):
+        letter = chr(ord("A") + i)  # ponytail: A-Z, enough for the three-way comparison
+        body = _COMMENT.sub("", _FRONT_MATTER.sub("", c["text"]))
+        for value in map(str, c["provenance"].values()):
+            body = re.sub(re.escape(value), "[redacted]", body, flags=re.I)
+        (out / f"{letter}.md").write_text(f"# Candidate {letter}\n\n{body.strip()}\n")
+        sealed[letter] = {"id": c["id"], "provenance": c["provenance"]}
+    key.write_text(yaml.safe_dump(sealed, sort_keys=True))
+    return {k: v["id"] for k, v in sealed.items()}
