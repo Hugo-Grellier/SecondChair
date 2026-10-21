@@ -3,6 +3,7 @@
 PKG-07, PKG-08, PKG-09, ARC-18."""
 
 import asyncio
+import contextlib
 import json
 import queue
 import stat
@@ -23,6 +24,7 @@ import pytest
 import yaml
 from conftest import Serving
 from mcp import Client
+from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Origin
 
@@ -585,6 +587,15 @@ def test_a_situation_card_reaches_the_gm_desk_only(
         say(sockets[0], {"type": "gesture", "id": "g1", "gesture": "situation"})
         while not (received[-1]["type"] == "desk" and received[-1].get("situation")):
             received.append(inbox.get(timeout=10))
+        # A second client, even with the token, is refused while the GM's holds the bridge.
+        with connect(bridge, origin=Origin("https://foundry.example")) as second:
+            second.send(json.dumps(hello(token)))
+            heard = []
+            with contextlib.suppress(ConnectionClosed):  # until the Core closes it
+                while True:
+                    heard.append(json.loads(second.recv(timeout=5)))
+        assert [m["type"] for m in heard] == ["refused"]
+        assert SECRET not in json.dumps(heard)
         time.sleep(1.5)  # whatever else the Core sends meanwhile
         while not inbox.empty():
             received.append(inbox.get())

@@ -7,7 +7,7 @@
  * @typedef {{id: number, kind: string, responsibility: string, deadline: string, status: string, entry: number | null, message: string | null, detail: string | null, reversible: boolean | null}} DeskCall
  * @typedef {{npc: string, name: string, goal: string, posture?: string, line: string | null, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean, as_of?: CueAsOf}} ActingCue
  * @typedef {{moment: number, session: number | null, observation: string | null, scene: string | null, round: number | null, turn: number | null, at: string}} CueAsOf
- * @typedef {{id: string, statement: string, mode: string}} CardFact
+ * @typedef {{id: string, statement: string, mode: string, party_mode?: string}} CardFact
  * @typedef {{as_of: CueAsOf, scene: string | null, acting: string | null, npcs: {id: string, name: string, shared: CardFact[], secret: CardFact[]}[], handoff: string[], calls: {id: number, kind: string, deadline: string, text: string}[]}} SituationCard
  * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
@@ -44,11 +44,21 @@ export function createDesk({ send, isGM, onChange }) {
   let pile = null;
   let count = 0;
   let closed = false;
+  // Whether the GM opened the situation card: a view preference of this window, not domain
+  // state, kept across re-renders; collapsed by default (ARC-14) and again once withdrawn.
+  let cardOpen = false;
   /** @type {Map<string, (result: Result) => void>} */
   const waiting = new Map();
   return {
     get state() {
       return state;
+    },
+    get cardOpen() {
+      return cardOpen;
+    },
+    /** The GM opened or collapsed the situation card. @param {boolean} open */
+    setCardOpen(open) {
+      cardOpen = open;
     },
     get pile() {
       return pile;
@@ -94,6 +104,7 @@ export function createDesk({ send, isGM, onChange }) {
     receive(message) {
       if (message.type === "desk") {
         state = /** @type {DeskState} */ (message);
+        if (!state.situation) cardOpen = false;
         onChange();
         return true;
       }
@@ -151,19 +162,30 @@ const factsHtml = (facts, none) =>
 /**
  * The situation card the GM pulled (#188 D1): GM only, assembled by the Core with no model,
  * withdrawn by the Core once play moves on. Plain words and an empty-state line in each part.
- * @param {SituationCard | null | undefined} card
+ * Collapsed unless the GM opened it, with the scene and whose turn in its summary.
+ * @param {SituationCard | null | undefined} card @param {boolean} open
  */
-function situationHtml(card) {
+function situationHtml(card, open) {
   const pull = `<p><button type="button" data-action="gesture" data-gesture="situation">${card ? "Refresh" : "Show the situation"}</button> <kbd>Shift</kbd>+<kbd>S</kbd></p>`;
   if (!card)
     return `<p>A read of the scene: who is here, what the party knows, what to keep secret.</p>\n${pull}`;
+  // A fact the party only suspects or believes is not one it knows: listed apart, said so.
+  /** @param {CardFact[]} facts */
+  const doubted = (facts) =>
+    facts.length
+      ? `<p>The party only suspects or believes:</p>
+<ul>${facts.map((f) => `<li>${esc(f.statement)} <em>(the party ${esc(f.party_mode)} it)</em></li>`).join("")}</ul>\n`
+      : "";
   const npcs = card.npcs.length
     ? card.npcs
         .map(
           (n) => `<h4>${esc(n.name)}</h4>
 <p>The party knows:</p>
-${factsHtml(n.shared, "Nothing they know.")}
-<p>Keep secret (the party does not know):</p>
+${factsHtml(
+  n.shared.filter((f) => f.party_mode === "knows"),
+  "Nothing they know.",
+)}
+${doubted(n.shared.filter((f) => f.party_mode !== "knows"))}<p>Keep secret (the party does not know):</p>
 ${factsHtml(n.secret, "Nothing.")}`,
         )
         .join("\n")
@@ -174,9 +196,8 @@ ${factsHtml(n.secret, "Nothing.")}`,
   const calls = card.calls.length
     ? `<ul>${card.calls.map((c) => `<li>${esc(c.kind)}${c.deadline === "now" ? " · due now" : " · at the break"}: ${esc(c.text)}</li>`).join("")}</ul>`
     : "<p>Nothing waiting about them.</p>";
-  return `<details class="secondchair-card" open>
-<summary><strong>GM only</strong> · ${ageHtml(card.as_of)}</summary>
-<p>Scene: ${card.scene ? esc(card.scene) : "none seen yet"}${card.acting ? ` · Turn: <strong>${esc(card.acting)}</strong>` : ""}</p>
+  return `<details class="secondchair-card"${open ? " open" : ""}>
+<summary><strong>GM only</strong> · Scene: ${card.scene ? esc(card.scene) : "none seen yet"}${card.acting ? ` · Turn: <strong>${esc(card.acting)}</strong>` : ""} · ${ageHtml(card.as_of)}</summary>
 <h4>Who is here</h4>
 ${npcs}
 <h4>From your handoff</h4>
@@ -208,9 +229,9 @@ ${list(cue.does_not_know)}
 
 /**
  * The Desk's content: nothing at all for a user who is not a GM.
- * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown}} args
+ * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown, cardOpen?: boolean}} args
  */
-export function deskHtml({ isGM, state, pile, ceiling }) {
+export function deskHtml({ isGM, state, pile, ceiling, cardOpen = false }) {
   if (!isGM) return "";
   if (!state) return "<p>Waiting for the Core…</p>";
   const live = state.moment === "live-session";
@@ -231,7 +252,7 @@ export function deskHtml({ isGM, state, pile, ceiling }) {
 <h3>Due now</h3>
 ${callsHtml(state.calls, "Nothing due now.")}
 <h3>Situation</h3>
-${situationHtml(state.situation)}
+${situationHtml(state.situation, cardOpen)}
 <h3>Acting cue</h3>
 ${state.turn_driver ? `<p><em>${esc(state.turn_driver)} runs the GM creatures' turns: agents stay silent.</em></p>\n` : ""}${cueHtml(state.cue)}
 ${

@@ -844,17 +844,27 @@
                                 "knows",
                                 "believes",
                                 "suspects"
-                              ]
+                              ],
+                              "description": "How the NPC holds it."
+                            },
+                            "party_mode": {
+                              "enum": [
+                                "knows",
+                                "believes",
+                                "suspects"
+                              ],
+                              "description": "How the party holds it: one that only suspects or believes it does not know it."
                             }
                           },
                           "required": [
                             "id",
                             "statement",
-                            "mode"
+                            "mode",
+                            "party_mode"
                           ],
                           "additionalProperties": false
                         },
-                        "description": "Facts the NPC holds that the party holds too."
+                        "description": "Facts the NPC holds that the party holds too, each with how the party holds it."
                       },
                       "secret": {
                         "type": "array",

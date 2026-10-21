@@ -203,12 +203,18 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
       state: desk?.state ?? null,
       pile: desk?.pile ?? null,
       ceiling,
+      cardOpen: desk?.cardOpen ?? false,
     });
   }
 
   /** @param {unknown} result @param {HTMLElement} content */
   _replaceHTML(result, content) {
     content.innerHTML = String(result);
+    // The GM's open or collapsed situation card outlives the next re-render.
+    const card = content.querySelector("details.secondchair-card");
+    card?.addEventListener("toggle", () =>
+      desk?.setCardOpen(/** @type {HTMLDetailsElement} */ (card).open),
+    );
   }
 }
 

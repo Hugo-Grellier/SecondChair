@@ -249,7 +249,15 @@ const CARD = {
     {
       id: "e-1",
       name: "Tovan Reed",
-      shared: [{ id: "f-2", statement: "The bell rings on dry nights.", mode: "knows" }],
+      shared: [
+        {
+          id: "f-2",
+          statement: "The bell rings on dry nights.",
+          mode: "knows",
+          party_mode: "knows",
+        },
+        { id: "f-5", statement: "Tovan hid the relay.", mode: "knows", party_mode: "suspects" },
+      ],
       secret: [
         { id: "f-4", statement: "The vault key hides under the <b>altar</b>.", mode: "knows" },
       ],
@@ -262,13 +270,20 @@ const CARD = {
 test("the situation card reads in plain words: scene, turn, who is here, secrets, handoff", () => {
   const state = { ...STATE, situation: CARD };
   assert.ok(valid(state), JSON.stringify(valid.errors));
-  const html = deskHtml({ isGM: true, state, pile: null, ceiling: "propose" });
+  const html = deskHtml({ isGM: true, state, pile: null, ceiling: "propose", cardOpen: true });
   assert.match(
     html,
-    /<summary><strong>GM only<\/strong> · <time [^>]+>As of [^<]+, round 2<\/time>/,
+    /<details class="secondchair-card" open>\n<summary><strong>GM only<\/strong> · Scene: Tower · Turn: <strong>Tovan Reed<\/strong> · <time [^>]+>As of [^<]+, round 2<\/time><\/summary>/,
   );
-  assert.match(html, /Scene: Tower · Turn: <strong>Tovan Reed<\/strong>/);
-  assert.match(html, /<h4>Tovan Reed<\/h4>\n<p>The party knows:<\/p>\n<ul><li>The bell rings/);
+  assert.match(
+    html,
+    /<h4>Tovan Reed<\/h4>\n<p>The party knows:<\/p>\n<ul><li>The bell rings on dry nights.<\/li><\/ul>\n/,
+  );
+  // What the party only suspects is never listed as known.
+  assert.match(
+    html,
+    /<p>The party only suspects or believes:<\/p>\n<ul><li>Tovan hid the relay. <em>\(the party suspects it\)<\/em><\/li><\/ul>/,
+  );
   assert.match(
     html,
     /Keep secret \(the party does not know\):<\/p>\n<ul><li>The vault key hides under the &lt;b&gt;altar/,
@@ -283,7 +298,7 @@ test("an empty situation card says so in each part, and none offers to show one"
   const state = { ...STATE, situation: empty };
   assert.ok(valid(state), JSON.stringify(valid.errors));
   const html = deskHtml({ isGM: true, state, pile: null, ceiling: "x" });
-  assert.match(html, /Scene: none seen yet<\/p>/);
+  assert.match(html, /Scene: none seen yet · <time/);
   assert.doesNotMatch(html, /Turn:/);
   assert.match(html, /No NPC seen here yet/);
   assert.match(html, /Nothing in your handoff about this scene/);
@@ -294,6 +309,26 @@ test("an empty situation card says so in each part, and none offers to show one"
     assert.match(none, /data-gesture="situation">Show the situation<\/button> <kbd>Shift<\/kbd>/);
     assert.doesNotMatch(none, /GM only/);
   }
+});
+
+test("the situation card is collapsed by default and stays as the GM left it across re-renders", () => {
+  const { d } = desk();
+  const state = { ...STATE, situation: CARD };
+  const render = () =>
+    deskHtml({ isGM: true, state: d.state, pile: null, ceiling: "x", cardOpen: d.cardOpen });
+  d.receive(state);
+  assert.match(render(), /<details class="secondchair-card">\n<summary>/);
+  d.setCardOpen(true);
+  d.receive({ ...state });
+  assert.match(render(), /<details class="secondchair-card" open>/);
+  d.setCardOpen(false); // the GM collapses it
+  d.receive({ ...state }); // the Core sends the Desk again
+  assert.match(render(), /<details class="secondchair-card">\n/);
+  // Withdrawn, then pulled again: collapsed again.
+  d.setCardOpen(true);
+  d.receive({ ...STATE, situation: null });
+  d.receive(state);
+  assert.equal(d.cardOpen, false);
 });
 
 test("a player never sees the situation card nor pulls one", async () => {

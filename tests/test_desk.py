@@ -14,7 +14,7 @@ from test_canon import entity, fact
 from test_knowledge import learn
 
 from secondchair.cli import main
-from secondchair.core import delegation, director, knowledge, observations, workspace
+from secondchair.core import delegation, director, index, knowledge, observations, workspace
 from secondchair.core.server import build_server
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
@@ -358,6 +358,9 @@ def tower_scene(ws: Workspace) -> tuple[str, str, str, str]:
     key = fact(ws, "The vault key hides under the altar.", entities=[tovan])
     learn(ws, tovan, key)
     learn(ws, "party", bell)
+    hid = fact(ws, "Tovan hid the relay.", entities=[tovan])
+    learn(ws, tovan, hid)
+    learn(ws, "party", hid, mode="suspects")  # the party only suspects it
     mira = entity(ws, "Mira Pell")
     learn(ws, mira, fact(ws, "Mira forged the tithe ledger.", entities=[mira]))
     handoff = ws.root / "prep/session-1/handoff.md"
@@ -377,6 +380,7 @@ def test_the_situation_card_shows_who_is_here_what_the_party_knows_and_what_to_k
     ws: Workspace,
 ) -> None:
     tovan, bell, key, _ = tower_scene(ws)
+    hid = next(f["id"] for f in index.search_facts(ws) if f["statement"] == "Tovan hid the relay.")
     assert state(ws)["situation"] is None  # nothing until the GM pulls it
     before = written(ws)
 
@@ -396,7 +400,12 @@ def test_the_situation_card_shows_who_is_here_what_the_party_knows_and_what_to_k
         {
             "id": tovan,
             "name": "Tovan Reed",
-            "shared": [{"id": bell, "statement": "The bell rings on dry nights.", "mode": "knows"}],
+            "shared": [  # how the party holds each: a suspicion is not knowledge
+                {"id": bell, "statement": "The bell rings on dry nights.", "mode": "knows"}
+                | {"party_mode": "knows"},
+                {"id": hid, "statement": "Tovan hid the relay.", "mode": "knows"}
+                | {"party_mode": "suspects"},
+            ],
             "secret": [
                 {"id": key, "statement": "The vault key hides under the altar.", "mode": "knows"}
             ],
@@ -405,6 +414,12 @@ def test_the_situation_card_shows_who_is_here_what_the_party_knows_and_what_to_k
     assert card["handoff"] == ["Tovan Reed lies about the relay.", "Tower: the bell is cracked."]
     # A read: no action logged, no call raised, no job queued, so no model is asked.
     assert written(ws) == before
+    # Deterministic: a second pull where play stands is the same card but for its time.
+    gesture(ws, "situation")
+    again = state(ws)["situation"]
+    assert again["as_of"]["at"] >= card["as_of"]["at"]
+    assert {**again, "as_of": None} == {**card, "as_of": None}
+    assert {**again["as_of"], "at": None} == {**card["as_of"], "at": None}
 
 
 def test_the_situation_card_is_withdrawn_once_play_moves_on_and_names_who_acts(
@@ -433,7 +448,13 @@ def test_the_situation_card_is_withdrawn_once_play_moves_on_and_names_who_acts(
     assert (card["acting"], card["as_of"]["round"], card["as_of"]["turn"]) == ("Tovan Reed", 1, 0)
 
     observe(ws, "o6", 5, "combat", "Scene.tower", action="turn", round=1, turn=1, combatant="Ada")
-    assert state(ws)["situation"] is None
+    assert state(ws)["situation"] is None  # the next turn
+    gesture(ws, "situation")
+    observe(ws, "o7", 6, "combat", "Scene.tower", action="round", round=2, turn=1, combatant="Ada")
+    assert state(ws)["situation"] is None  # the next round
+    gesture(ws, "situation")
+    observe(ws, "o8", 7, "scene", "Scene.market", action="activate", name="Market")
+    assert state(ws)["situation"] is None  # another scene
     gesture(ws, "end_session")
     gesture(ws, "situation")
     assert state(ws)["situation"]["as_of"]["session"] is None
@@ -456,9 +477,33 @@ def test_the_situation_card_lists_the_open_calls_about_an_npc_present(ws: Worksp
     assert pending["status"] == "pending"
 
 
+def test_outside_a_session_the_card_reads_the_next_sessions_handoff_and_the_cued_npc(
+    ws: Workspace,
+) -> None:
+    tovan, bell, _ = npc_who_knows(ws)
+    handoff = ws.root / "prep/session-1/handoff.md"
+    handoff.parent.mkdir(parents=True)
+    handoff.write_text("- Tovan Reed rings the bell at dusk.\n- Nobody else.\n")
+    gesture(ws, "situation")
+    assert state(ws)["situation"]["npcs"] == []  # nobody seen, nobody cued
+    cue(ws, tovan, "It only rings when the nights are dry.", [bell])
+    gesture(ws, "situation")  # the NPC the GM is voicing counts as present
+    card = state(ws)["situation"]
+    assert [n["name"] for n in card["npcs"]] == ["Tovan Reed"]
+    assert card["handoff"] == ["Tovan Reed rings the bell at dusk."]  # session 1's, the next
+
+
 def test_a_situation_card_file_with_no_as_of_or_garbled_is_never_shown(ws: Workspace) -> None:
     (ws.root / director.CARD_FILE).write_text(json.dumps({"scene": "Tower"}))
     assert state(ws)["situation"] is None
+    # Where play stands, but a damaged body: withdrawn rather than sent for the Desk to choke on.
+    as_of = observations.position(ws) | {"at": "2026-10-21T20:00:00+00:00"}
+    damaged = {"as_of": as_of, "scene": None, "acting": None, "npcs": [{"name": "Tovan"}]}
+    (ws.root / director.CARD_FILE).write_text(json.dumps(damaged | {"handoff": [], "calls": []}))
+    assert state(ws)["situation"] is None
+    ok = {**damaged, "npcs": [], "handoff": [], "calls": []}
+    (ws.root / director.CARD_FILE).write_text(json.dumps(ok))
+    assert state(ws)["situation"] == ok
     (ws.root / director.CARD_FILE).write_text("{not json")
     assert state(ws)["situation"] is None
 

@@ -903,12 +903,10 @@ def _withdraw(ws: Workspace, override: dict, interaction: int) -> None:
             calls._log_default(ws, None, None, job["id"], interaction)
     for call in calls.read_calls(ws):
         job = jobs.get(call["job"]) if call["job"] is not None else None
-        if call["entry"] is not None:
-            entity = read_entry(ws, call["entry"]).get("entity")
-        else:
-            entity = job.get("entity") if job else None
         moment = job["moment"] if job else call["moment"]
-        if call["status"] == "open" and covered(entity, call["responsibility"], moment):
+        if call["status"] == "open" and covered(
+            calls.entity_of(ws, call), call["responsibility"], moment
+        ):
             calls._default(ws, call, interaction)
 
 
