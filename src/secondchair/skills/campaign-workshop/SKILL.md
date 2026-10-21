@@ -108,6 +108,13 @@ as owner. Propose hooks for the PC's world (people, debts, places that could pul
 them in). Never write what the PC decides or feels, and never add a hook the
 player did not relay as a statement about their character.
 
+After a session is wrapped, when the GM asks what their players' choices open
+up, run `propose-opportunities`: a short draft note of optional next-session
+opportunities, each citing the played facts behind it, in
+`notes/opportunities/session-<n>.md`. It never runs by itself, writes nothing to
+canon and advances no arc. The GM adopts or rejects each note; `prepare-a-session`
+reads the adopted ones.
+
 ## Reference library
 
 Use `list_campaign_sources` and `search_campaign_library` on the connected Core

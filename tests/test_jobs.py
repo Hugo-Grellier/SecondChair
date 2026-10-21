@@ -549,6 +549,7 @@ def test_every_playbook_is_an_agent_skill_with_a_tier_and_a_responsibility() -> 
         "prepare-an-adventure",
         "propose-consequences",
         "propose-narrative-direction",
+        "propose-opportunities",
         "quick-help",
         "realise-a-scene",
         PLAYBOOK,
