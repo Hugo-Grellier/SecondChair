@@ -161,7 +161,7 @@ The "wrap a session" job adds three tools, served the same way (CAP-04..13; [wor
 | `consolidate_candidates(job)` | Routes the session's captured candidates through the Core's delegated actions, under the job; returns each candidate's outcome. |
 | `run_world_turn(job)` | For a started `world-turn` job, which a wrap queues (LW-07): runs the Core's world-turn up to the job's `until` and returns the occurrences recorded. |
 
-A runner started by `secondchair jobs run` logs its attempt itself and gives the agent the contract in its prompt; the job is done when the agent calls `finish_job` or exits cleanly.
+A runner started by `secondchair jobs run` logs its attempt itself and gives the agent the contract in its prompt; the job is done only when the agent calls `finish_job`. An agent that exits cleanly without it is a failed attempt (ARC-27); a retry's prompt lists the actions the job already took, so it continues rather than redoes them.
 
 ## Playbooks
 
