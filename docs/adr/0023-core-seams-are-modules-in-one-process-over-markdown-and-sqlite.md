@@ -1,6 +1,6 @@
 # The Core's seams are named modules in one process over Markdown and SQLite; an adapter only where an implementation varies
 
-Status: proposed 2026-10-21 ([#184](https://github.com/Hugo-Grellier/SecondChair/issues/184), epic [#173](https://github.com/Hugo-Grellier/SecondChair/issues/173)). Map: [write-paths.md](../research/write-paths.md).
+Status: accepted 2026-10-21, by owner Hugo in conversation 2026-10-21 ([#184](https://github.com/Hugo-Grellier/SecondChair/issues/184), epic [#173](https://github.com/Hugo-Grellier/SecondChair/issues/173)). Map: [write-paths.md](../research/write-paths.md).
 
 The read-only map of every write path (write-paths.md, read at `e96207e`) found one gateway that holds: every canon write is a `delegation.act`, a GM gesture on an authenticated Surface, or a hand edit that `log_hand_edits` catches. It also found that `delegation.py` carries the gateway together with GM interactions, overrides, holds, moments and disclosure, and that the invariants of the gateway itself sit in about 250 of its lines. Since the map, several of its findings have been fixed: the Core-path deny-list is complete and tested (#210), observations, the Foundry binding and `upgrade` take the workspace lock (#211), and a desired scene of unknown origin is bounded by the ceiling (#163). Evidence admission is moving into `core/admission.py` (ADR 0015, #232), and the world-turn journal (ADR 0016, #169) adds about 300 lines of planning, journal and recovery code, today written into `delegation.py`. `delegation.py` makes 15 function-local imports of modules that build on it (`calls`, `jobs`, `world`, `capture`, `index`, `knowledge`), and `index.rebuild` calls back into `delegation.log_hand_edits`. The cost of that coupling is review scope and merge conflicts, not a defect, so the decision is where the seams are and when code moves, not a rewrite.
 
@@ -69,9 +69,9 @@ Each stage is one PR, keeps the whole suite passing without editing a test's ass
 
 Not planned: splitting `index.py`, `world.py` or `capture.py` by size alone.
 
-## Proposed answers
+## Owner answers (2026-10-21)
 
-These are the owner's calls on #184. The ADR proposes them; it does not settle them.
+The owner's calls on #184, accepted by owner Hugo in conversation 2026-10-21.
 
 - **Names.** write-paths.md calls the gateway "admission". After ADR 0015, admission means evidence admission only, and the gateway is the ADR 0003 word.
 - **When code moves.** Stages 0 and 1 now; stages 2 to 5 on their trigger, each with its own PR and no ADR, since none changes behaviour.
