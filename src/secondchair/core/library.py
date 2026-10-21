@@ -391,42 +391,80 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
 
 
 STAT_HEADER = re.compile(r"^\S.*\s(?:CREATURE|HAZARD)\s+-?\d+$")
+# A paragraph opening with one of these belongs to the stat block above it.
+STAT_LINE = re.compile(
+    r"(?:AC|HP|Speed|Melee|Ranged|Spells|Strike|Str|Perception|Skills|Languages|Items|Fort|"
+    r"Reflex|Will|Immunities|Resistances|Weaknesses|Cantrips|Constant|Reaction|Attack|Hardness|"
+    r"Stealth|Disable|Reset|Routine|Effect|Trigger|Arcane|Divine|Primal|Occult|Innate)\b"
+)
 CELLS = re.compile(r"\t|\||\s{2,}")
-STAT_REACH = 30  # lines a header may take to show its AC and HP before it is reported
+STAT_REACH = 60  # lines after a header that may belong to its block
+ATOMIC_CAP = 6000  # characters; a longer block or table falls back to running text, reported
 
 
-def _cells(line: str) -> int:
-    return len([c for c in CELLS.split(line.strip()) if c.strip()])
+def _cells(line: str) -> list[str]:
+    return [c.strip() for c in CELLS.split(line.strip()) if c.strip()]
 
 
-def _spans(lines: list[str], begin: int, end: int) -> tuple[list, list]:
+def _is_row(line: str) -> bool:
+    """3+ cells, or 2 short cells with no sentence punctuation (double-spaced prose has both)."""
+    cells = _cells(line)
+    return len(cells) >= 3 or (
+        len(cells) == 2 and all(len(c) < 40 and c[-1] not in ".!?:;," for c in cells)
+    )
+
+
+def _spans(
+    lines: list[str], begin: int, end: int
+) -> tuple[list[tuple[int, int, str | None]], list[tuple[int, str, str]]]:
     """Split lines[begin:end] into (first, stop, kind) spans: kind "stat block" and "table" are
     atomic, None is running text. Also the blocks that could not be read confidently as
-    (line number, kind, reason); those stay running text. Pure and deterministic."""
+    (line number, kind, reason); those stay running text, except a stat block whose end is
+    uncertain, which stays atomic and is reported. Pure and deterministic."""
     spans, errors, at, text = [], [], begin, begin
     while at < end:
         found, stop = None, at + 1
         if STAT_HEADER.match(lines[at].strip()):
-            window = lines[at + 1 : min(end, at + 1 + STAT_REACH)]
-            reach = next((i for i, w in enumerate(window) if STAT_HEADER.match(w.strip())), None)
-            window = window[:reach]
-            seen = {
-                k: [i for i, w in enumerate(window) if re.match(k + r"\b", w.strip())]
-                for k in ("AC", "HP")
-            }
-            if missing := [k for k, v in seen.items() if not v]:
+            limit, last, pending, closed = min(end, at + 1 + STAT_REACH), at, False, False
+            for i in range(at + 1, limit):
+                line = lines[i].strip()
+                if not line:
+                    pending = True
+                elif STAT_HEADER.match(line) or (pending and not STAT_LINE.match(line)):
+                    closed = True
+                    break
+                else:
+                    last, pending = i, False
+            block = [w.strip() for w in lines[at + 1 : last + 1]]
+            if missing := [
+                k for k in ("AC", "HP") if not any(re.match(k + r"\b", w) for w in block)
+            ]:
                 errors.append((at + 1, "stat block", "no " + " or ".join(missing) + " line found"))
+            elif len("\n".join(lines[at : last + 1])) > ATOMIC_CAP:
+                errors.append((at + 1, "stat block", "over the atomic size cap; kept as text"))
             else:
-                found, stop = "stat block", at + 2 + seen["HP"][-1]
-        elif _cells(lines[at]) >= 2:
+                found, stop = "stat block", last + 1
+                if not closed:
+                    errors.append(
+                        (
+                            at + 1,
+                            "stat block",
+                            "runs to the end of its segment or reach; end uncertain",
+                        )
+                    )
+            if not found:
+                stop = at + 1
+        elif _is_row(lines[at]):
             run = at
-            while run < end and _cells(lines[run]) >= 2:
+            while run < end and _is_row(lines[run]):
                 run += 1
             if run - at >= 3:
-                if len({_cells(row) for row in lines[at:run]}) == 1:
-                    found = "table"
-                else:
+                if len({len(_cells(row)) for row in lines[at:run]}) > 1:
                     errors.append((at + 1, "table", "rows have differing column counts"))
+                elif len("\n".join(lines[at:run])) > ATOMIC_CAP:
+                    errors.append((at + 1, "table", "over the atomic size cap; kept as text"))
+                else:
+                    found = "table"
                 stop = run
         if found:
             if text < at:
@@ -621,7 +659,9 @@ def _ocr_page(path: Path, page: int, languages: str) -> str:
 
 
 def audit(ws: Workspace, source_id: str) -> dict:
-    """Re-run extraction on a source's own text, offline, and report what became atomic chunks
+    """Re-run the CURRENT extraction on a source's own text, offline (not the stored index: an
+    already indexed source keeps its old chunks until its content changes), and report what
+    would become atomic chunks
     and which blocks could not be read confidently: {"atomic": {kind: n}, "errors": [{"location",
     "line", "kind", "reason"}]}. Local GM audit of an indexing-permitted source; no source text."""
     _, entry = _source(ws, source_id)
@@ -629,7 +669,7 @@ def audit(ws: Workspace, source_id: str) -> dict:
         raise WorkspaceError("Local indexing permission has not been granted.")
     report: dict = {}
     _passages(Path(entry["path"]), report)
-    return report
+    return report | {"reflects": "current extraction of the file, not the stored index"}
 
 
 def _chunks(digest: str, model: str) -> dict[str, tuple[str, str, str]]:

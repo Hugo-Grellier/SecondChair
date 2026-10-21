@@ -591,12 +591,20 @@ BLOCKS = (
     + "Filler line about damp stones. " * 60
     + "\n\nGlimmer Toad  CREATURE 2\nSmall beast\nPerception +5; darkvision\n"
     "AC 15; Fort +6, Ref +4, Will +3\nHP 28\n\n"
-    "Speed 20 feet, swim 30 feet\n\n"
+    "Speed 20 feet, swim 30 feet\n"
+    "Melee jaws +7 (agile), Damage 1d6+2\n\n"
+    "The toad glows faintly in the dark.\n\n"
     "Rubble Heap  HAZARD 1\nStealth DC 18\nHP 12\n\n"
     "Roll   Find\n1-3    Rust\n4-6    A button\n7-9    Moth dust\n\n"
     "Name  Cost\nRope  1\nOil  3  4\nLamp  2  extra\n\n"
     "Closing words about the vault."
 )
+
+
+def spans(text):
+    lines = text.split("\n")
+    found, errors = library._spans(lines, 0, len(lines))
+    return [(k, "\n".join(lines[a:b])) for a, b, k in found if k], errors
 
 
 def test_stat_blocks_and_tables_are_atomic_chunks_and_unreadable_ones_are_reported(tmp_path):
@@ -606,17 +614,62 @@ def test_stat_blocks_and_tables_are_atomic_chunks_and_unreadable_ones_are_report
     passages = library._passages(path, report)
     texts = [p["text"] for p in passages]
     toad = next(t for t in texts if t.startswith("Glimmer Toad"))
-    assert toad.endswith("HP 28") and "swim 30 feet" not in toad  # a blank line after HP ends it
+    # Speed and Melee follow HP and stay in the block; the next prose paragraph does not.
+    assert toad.endswith("Damage 1d6+2") and "swim 30 feet" in toad and "glows" not in toad
     assert sum(t.count("Glimmer Toad") for t in texts) == 1
     assert next(t for t in texts if t.startswith("Roll")).endswith("Moth dust")
     assert report["atomic"] == {"stat block": 1, "table": 1}
     assert [(e["line"], e["kind"], e["reason"]) for e in report["errors"]] == [
-        (12, "stat block", "no AC line found"),
-        (21, "table", "rows have differing column counts"),
+        (15, "stat block", "no AC line found"),
+        (24, "table", "rows have differing column counts"),
     ]
     assert library._passages(path)[0]["chunk_id"] == passages[0]["chunk_id"]  # deterministic
     # An unreadable block stays running text, never dropped.
     assert any("Rubble Heap" in t for t in texts) and any("Oil  3  4" in t for t in texts)
+
+
+@pytest.mark.parametrize(
+    ("text", "atomic", "reasons"),
+    [
+        # trailing Speed and Strike paragraphs stay in the block
+        (
+            "A  CREATURE 1\nAC 10\nHP 5\n\nSpeed 25 feet\n\nStrike claw +5\n\nProse.",
+            ["A  CREATURE 1\nAC 10\nHP 5\n\nSpeed 25 feet\n\nStrike claw +5"],
+            [],
+        ),
+        # double-spaced prose is not a table
+        (
+            "One sentence here.  Another sentence.\nMore words follow.  And again.\n"
+            "Third line goes.  Done.",
+            [],
+            [],
+        ),
+        # missing HP
+        ("A  CREATURE 1\nAC 10\n\nProse.", [], ["no HP line found"]),
+        # a header followed by another header inside the reach
+        (
+            "A  CREATURE 1\nB  CREATURE 2\nAC 10\nHP 5\n",
+            ["B  CREATURE 2\nAC 10\nHP 5"],
+            ["no AC or HP line found", "runs to the end of its segment or reach; end uncertain"],
+        ),
+        # a block that reaches the end of its segment has an uncertain end
+        (
+            "A  CREATURE 1\nAC 10\nHP 5",
+            ["A  CREATURE 1\nAC 10\nHP 5"],
+            ["runs to the end of its segment or reach; end uncertain"],
+        ),
+        # over the size cap: kept as text and reported
+        (
+            "A  CREATURE 1\nAC 10\nHP 5\n" + "Strike " + "x" * 6000 + "\n\nProse.",
+            [],
+            ["over the atomic size cap; kept as text"],
+        ),
+    ],
+)
+def test_block_detection_cases(text, atomic, reasons):
+    found, errors = spans(text)
+    assert [t for _, t in found] == atomic
+    assert [r for _, _, r in errors] == reasons
 
 
 def test_a_long_stat_block_is_never_split_and_audit_is_permissioned(ws, tmp_path, capsys):
@@ -625,7 +678,9 @@ def test_a_long_stat_block_is_never_split_and_audit_is_permissioned(ws, tmp_path
     with pytest.raises(WorkspaceError, match="indexing permission"):
         library.audit(ws, sid)
     library.permit(ws, sid, True, False, True)
-    assert library.audit(ws, sid) == {"atomic": {"stat block": 1}, "errors": []}
+    audit = library.audit(ws, sid)
+    assert audit["atomic"] == {"stat block": 1} and audit["errors"] == []
+    assert "not the stored index" in audit["reflects"]
     [big] = [p for p in library._passages(path) if p["text"].startswith("Big Thing")]
     assert len(big["text"]) > 2800 and big["text"].endswith("HP 300")
     main(["sources", "audit", sid, "-w", str(ws.root)])
