@@ -12,6 +12,7 @@ v3 warnings (three-clue rule, inverted rule, reachability from the entries, sing
 failure), optionally simulating the loss of some clues.
 """
 
+import re
 from collections import deque
 from collections.abc import Collection, Sequence
 from typing import Any
@@ -22,6 +23,7 @@ from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
 
 MYSTERIES_DIR = "canon/mysteries"
+DRAFTS_DIR = "notes/mysteries"
 
 
 def _items(doc: dict, key: str, problems: list[str]) -> list[dict]:
@@ -180,6 +182,26 @@ def check(
     }
 
 
+def draft_facts(doc: dict) -> tuple[dict, dict[str, dict]]:
+    """A mystery draft (a note, ADR 0017) as `check` reads it: each conclusion and clue that
+    carries a draft `statement` instead of a fact id gets a synthetic canon fact `draft:<id>`
+    that holds and that nobody knows. Returns the document and those facts; a mix of both forms
+    is fine; a fact id wins over a statement on the same item."""
+    synthetic: dict[str, dict] = {}
+    out = {**doc}
+    for key in ("conclusions", "clues"):
+        items = []
+        for item in doc.get(key) or []:
+            draft = isinstance(item, dict) and isinstance(item.get("statement"), str)
+            if draft and item.get("fact") is None and item.get("id"):
+                fid = f"draft:{item['id']}"
+                synthetic[fid] = {"id": fid, "status": "canon", "valid_to": None}
+                item = {**item, "fact": fid}
+            items.append(item)
+        out[key] = items
+    return out, synthetic
+
+
 def _warnings(nodes, conclusions, roots, reachable, pointing) -> list[dict]:
     def warn(code: str, message: str) -> dict:
         return {"code": code, "message": message}
@@ -238,8 +260,8 @@ def _warnings(nodes, conclusions, roots, reachable, pointing) -> list[dict]:
 def tools(ws: Workspace) -> list[Tool]:
     """Recording and checking a mystery, bound to the served workspace."""
 
-    def report(doc: dict, lose: list[str]) -> dict[str, Any]:
-        facts = {f["id"]: f for f in index.search_facts(ws, include_retconned=True)}
+    def report(doc: dict, lose: list[str], extra: dict | None = None) -> dict[str, Any]:
+        facts = {f["id"]: f for f in index.search_facts(ws, include_retconned=True)} | (extra or {})
         entities = {e["id"] for e in index.search_entities(ws)}
         held = knowledge.known(ws, PARTY)
         known = {f for f, h in held.items() if h["mode"] == "knows"}  # a suspicion finds nothing
@@ -287,7 +309,28 @@ def tools(ws: Workspace) -> list[Tool]:
         front, _ = index.split_doc(path.read_text())
         return report(front, lose or [])
 
+    def check_draft_mystery(mystery: str, lose: list[str] | None = None) -> dict[str, Any]:
+        """The same report as check_mystery for a mystery still a draft: the note
+        notes/mysteries/<mystery>.md, whose front matter has the graph of record_mystery except
+        that a conclusion or clue may carry a draft `statement` instead of a `fact` id (or a
+        canon fact id when the truth is already canon). Draft statements count as live, unknown
+        facts; nodes still name canon entities. `lose` simulates losing clues. Nothing is
+        written: the draft stays a note until the GM promotes it."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", mystery):
+            raise CanonError(f"{mystery!r} is not a draft slug.")
+        path = ws.root / DRAFTS_DIR / f"{mystery}.md"
+        if not path.is_file():
+            raise CanonError(f"No draft {DRAFTS_DIR}/{mystery}.md.")
+        front, _ = index.split_doc(path.read_text())
+        if not any(front.get(k) for k in ("conclusions", "nodes", "clues")):
+            raise CanonError(f"{path.name} carries no mystery graph in its front matter.")
+        doc, synthetic = draft_facts(front)
+        return report(doc, lose or [], synthetic)
+
     return [
         Tool(fn=record_mystery, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=check_mystery, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(
+            fn=check_draft_mystery, responsibility="prep", delegated_action=False, reversible=True
+        ),
     ]

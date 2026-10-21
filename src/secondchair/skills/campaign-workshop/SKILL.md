@@ -66,6 +66,17 @@ later. Ask before choosing a structure the GM has not asked for.
 - **Investigations**: the mystery as an entity, its conclusions and clues as
   facts, then `record_mystery` and `check_mystery` (three clues per conclusion,
   reachability, single points of failure). Show the GM the warnings.
+  A mystery still a draft lives in `notes/mysteries/<slug>.md` (graph in the front
+  matter, a draft `statement` in place of each fact id) and `check_draft_mystery`
+  checks it without writing canon; the `design-a-situation` task skill builds it.
+  **Promoting a draft** needs the GM's explicit confirmation at each step: (1) the
+  mystery entity (`create_entity`); (2) the setting truths, conclusions and past
+  events, as GM-decision facts (`record_fact`, origin `{kind: gm, words: …}`); (3)
+  each clue as a GM-decision fact the party does **not** know (no `record_knowledge`
+  for the party: found in play, wrapped later); (4) `record_mystery` with those fact
+  ids, then `check_mystery`, and show the GM its warnings; (5) set the draft note's
+  `status: adopted` and `cites` to the new ids. The facts stay agent proposals until
+  the GM runs `secondchair confirm <id>`. A draft the GM does not promote stays a note.
 - **A living world**: fronts, situations and their clocks move between sessions
   with `secondchair world turn <date>`; `forecast_world` shows what comes.
 - **Scenarios and arcs** not yet played stay in `notes/workshop/` until the

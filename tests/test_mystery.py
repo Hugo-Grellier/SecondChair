@@ -8,7 +8,7 @@ import pytest
 from mcp import Client
 
 from secondchair.cli import main
-from secondchair.core import mystery, workspace
+from secondchair.core import index, mystery, workspace
 from secondchair.core.index import CanonError
 from secondchair.core.server import build_server
 
@@ -321,3 +321,90 @@ def test_the_core_refuses_a_mystery_whose_references_do_not_resolve(ws) -> None:
     result = call(ws, "record_mystery", agent="claude-prep", mystery="e-nope", conclusions=[])
     assert result.is_error
     assert "e-nope" in result.content[0].text
+
+
+# A draft: a note under notes/mysteries/ with the graph, statements in place of fact ids (#177).
+
+
+def draft(ws, slug: str, front: dict | None) -> None:
+    path = ws.root / "notes" / "mysteries" / f"{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = "Just prose.\n" if front is None else index.join_doc(front, "Notes.")
+    path.write_text(text)
+
+
+def draft_graph(inn: str, clues: list[dict]) -> dict:
+    return {
+        "id": "d-12345678",
+        "status": "draft",
+        "conclusions": [{"id": C1, "statement": "The steward sabotages the inn."}],
+        "nodes": [{"id": N1, "entity": inn, "entry": True}],
+        "clues": clues,
+    }
+
+
+def draft_clue(n: int, on: str = N1, **extra: Any) -> dict:
+    return {"id": f"clue-{n}", "statement": f"Draft clue {n}.", "on": on, "points_to": [C1]} | extra
+
+
+def test_a_draft_note_is_checked_like_a_mystery_and_nothing_is_written(ws) -> None:
+    inn = entity(ws, "Hanged Inn")
+    clues = [draft_clue(n) for n in (1, 2, 3)]
+    draft(ws, "stolen-ledger", draft_graph(inn, clues))
+    before = sorted(p for p in ws.root.rglob("*") if p.is_file())
+    report = call(ws, "check_draft_mystery", mystery="stolen-ledger").structured_content
+    assert report["problems"] == []
+    assert codes(report) == ["mystery-single-node"]
+    assert {c["state"] for c in report["clues"]} == {"hidden"}
+    assert sorted(p for p in ws.root.rglob("*") if p.is_file()) == before
+
+
+def test_a_draft_loses_a_clue_and_a_single_node_conclusion_warns(ws) -> None:
+    inn = entity(ws, "Hanged Inn")
+    clues = [draft_clue(1), draft_clue(2)]
+    draft(ws, "ledger", draft_graph(inn, clues))
+    report = call(ws, "check_draft_mystery", mystery="ledger", lose=["clue-1"]).structured_content
+    assert "mystery-three-clues" in codes(report)
+    assert report["simulated_loss"] == ["clue-1"]
+    assert {c["id"]: c["state"] for c in report["clues"]}["clue-1"] == "lost"
+    result = call(ws, "check_draft_mystery", mystery="ledger", lose=["clue-9"])
+    assert result.is_error
+
+
+def test_a_draft_mixes_fact_ids_and_statements(ws) -> None:
+    inn = entity(ws, "Hanged Inn")
+    sabotage = fact(ws, "Someone sabotages the inn.")
+    by_fact = {"id": "clue-2", "fact": sabotage, "on": N1, "points_to": [C1]}
+    front = draft_graph(inn, [draft_clue(1), by_fact])
+    front["conclusions"] = [{"id": C1, "fact": sabotage}]
+    draft(ws, "mixed", front)
+    report = call(ws, "check_draft_mystery", mystery="mixed").structured_content
+    assert report["problems"] == []
+    assert {c["id"]: c["fact"] for c in report["clues"]} == {
+        "clue-1": "draft:clue-1",
+        "clue-2": sabotage,
+    }
+    assert report["conclusions"][0]["fact"] == sabotage
+
+
+def test_a_draft_with_an_unknown_fact_or_neither_is_a_problem(ws) -> None:
+    inn = entity(ws, "Hanged Inn")
+    front = draft_graph(inn, [draft_clue(1, fact="f-nope"), {"id": "clue-2", "on": N1}])
+    draft(ws, "bad", front)
+    report = call(ws, "check_draft_mystery", mystery="bad").structured_content
+    assert any("f-nope is not in canon" in p for p in report["problems"])
+
+
+def test_a_note_without_the_graph_or_a_missing_draft_is_refused(ws) -> None:
+    draft(ws, "prose", None)
+    draft(ws, "no-graph", {"id": "d-12345678", "status": "draft"})
+    for slug in ("prose", "no-graph", "absent", "../canon/x"):
+        assert call(ws, "check_draft_mystery", mystery=slug).is_error
+
+
+def test_the_cli_checks_a_draft(ws, capsys) -> None:
+    inn = entity(ws, "Hanged Inn")
+    draft(ws, "cli", draft_graph(inn, [draft_clue(1), draft_clue(2)]))
+    assert main(["mystery", "check-draft", "cli", "-w", str(ws.root), "--lose", "clue-1"]) == 0
+    assert "mystery-three-clues" in capsys.readouterr().out
+    assert main(["mystery", "check-draft", "absent", "-w", str(ws.root)]) == 1

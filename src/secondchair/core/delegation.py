@@ -439,7 +439,8 @@ def act(
             if record["responsibility"] in JOB_GOVERNED:
                 governing.append(record["responsibility"])
             if record["playbook"] == "propose-narrative-direction" and occurrence is None:
-                occurrence = record["inputs"]["occurrence"]  # its answer closes it (LW-19)
+                # its answer closes it (LW-19); a proposal from an observation has none (#177)
+                occurrence = record["inputs"].get("occurrence")
         responsibility = governing[-1]
 
         def strictest(entity: str | None = None) -> tuple[str, str]:

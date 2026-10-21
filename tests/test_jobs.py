@@ -544,6 +544,7 @@ def test_every_playbook_is_an_agent_skill_with_a_tier_and_a_responsibility() -> 
         "answer-probes",
         "calibrate-encounters",
         "develop-campaign-direction",
+        "design-a-situation",
         "diagnose-frictions",
         "prepare-a-session",
         "prepare-an-adventure",
