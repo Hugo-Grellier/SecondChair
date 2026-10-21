@@ -78,6 +78,36 @@ material, and `quick-help` answers last-minute needs at the table. Several
 pending proposals or relayed decisions can be settled in one command:
 `secondchair approve <entry> <entry>…` and `secondchair confirm <id> <id>…`.
 
+## NPC dossiers and PC hooks
+
+Acting direction has no truth value, so it is not canon, yet it needs one stable
+home. Keep it in a dossier note `notes/npcs/<entity id>.md` per NPC, with the
+front matter of ADR 0017 (`id`, `status`, and `cites` listing the NPC's canon fact
+ids; every id must resolve). Write one only when the GM asks for it. Sections:
+
+- **Desire, need, fear, contradiction, vulnerabilities**: what they want, what
+  they lack, what they dread, where they act against themselves, what can hurt them.
+- **Relationships**: one line each, each citing the fact ids it rests on.
+- **Current attitude**: toward the party today, as one or two sentences.
+- **Voice and body**: how they speak and move, in a few words a GM can act.
+- **Improvisation rules**: how they answer pressure, kindness, a bribe, a threat,
+  silence, in direction the GM can play without rereading canon.
+- **Change triggers**: each a possible future ("if the party spares her brother,
+  she softens"), never applied by itself. A trigger is not a fact and does not
+  fire; only play, through the wrap, changes canon.
+
+What is true now, such as a secret motive, stays a canon fact the party does not
+know; the dossier points to it by id and never restates it. Check any line a
+player may hear with `check_audience_content`. After a wrap, propose dossier
+updates in the body, each citing the played fact that motivates it; the GM
+decides what to adopt and sets the status.
+
+PC hook notes `notes/pcs/<entity id>.md` follow the same front matter and hold
+only what the player gave (goals, ties), relayed by the GM, with the player named
+as owner. Propose hooks for the PC's world (people, debts, places that could pull
+them in). Never write what the PC decides or feels, and never add a hook the
+player did not relay as a statement about their character.
+
 ## Reference library
 
 Use `list_campaign_sources` and `search_campaign_library` on the connected Core

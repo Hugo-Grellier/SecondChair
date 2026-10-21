@@ -250,7 +250,7 @@ def _gm_command(args: argparse.Namespace) -> str:
         done = [f"{i} (entry {canon.confirm(ws, i, 'cli', auth)['id']})" for i in args.id]
         return f"Confirmed as GM decisions: {', '.join(done)}."
     if args.command == "wrap":
-        return _describe_wrap(capture.wrap(ws, args.session, auth, args.start, args.end))
+        return _describe_wrap(ws, capture.wrap(ws, args.session, auth, args.start, args.end))
     if args.command == "promote":
         delegation.promote(ws, args.entry, "cli", auth)
         return f"Promoted hand edit {args.entry} to a GM decision."
@@ -340,7 +340,7 @@ def _describe_call(call: dict) -> str:
     return f"Call {call['id']}  {call['kind']}  {call['responsibility']}  {state}: {what}"
 
 
-def _describe_wrap(summary: dict) -> str:
+def _describe_wrap(ws: workspace.Workspace, summary: dict) -> str:
     """The wrap's grouped round (CAP-13): questions first, contradictions leading, then what was
     applied, each undoable by its entries."""
     lines = []
@@ -373,6 +373,10 @@ def _describe_wrap(summary: dict) -> str:
             f"Session interval {settled['start']} to {settled['end']}; current date "
             f"{settled['end']}. World-turn job {job['id']} queued (secondchair jobs)."
         )
+        if summary["spotlight"]:
+            names = {e["id"]: e["names"][0] for e in index.search_entities(ws)}
+            counts = ", ".join(f"{names[i]} {n}" for i, n in summary["spotlight"].items())
+            lines.append(f"Spotlight (played facts citing each PC): {counts}.")
     return "\n".join(lines)
 
 
