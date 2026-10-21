@@ -25,7 +25,7 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
-from secondchair.core import admission, calls, delegation, index
+from secondchair.core import admission, calls, delegation, index, journal
 from secondchair.core.calendar import Calendar, CalendarError
 from secondchair.core.delegation import (
     LOG_DIR,
@@ -613,7 +613,7 @@ def _apply(
 
 def _check_recovered(ws: Workspace) -> None:
     """Refuse while recovery keeps a journal stopped: its canon is half-written (ADR 0016)."""
-    if stopped := [j["key"] for _, j in delegation._journals(ws)]:
+    if stopped := [j["key"] for _, j in journal._journals(ws)]:
         raise DelegationError(
             f"Occurrence {stopped[0]} was interrupted and recovery stopped on a changed file: "
             "answer its exception call, then run `secondchair recover`."
@@ -704,10 +704,8 @@ def _journal(
     events = [e["id"] for e in index.search_events(ws) if read & {*e["opens"], *e["closes"]}]
     reads = [f"{index.ENTITIES_DIR}/{entity}.md", *(f"{index.FACTS_DIR}/{f}.md" for f in read)]
     reads += [f"{index.EVENTS_DIR}/{e}.md" for e in events]
-    journal = delegation.new_journal(
-        ws, record["key"], entity, reads, writes + records[1:] + records[:1]
-    )
-    delegation.apply_journal(ws, journal)
+    plan = journal.new_journal(ws, record["key"], entity, reads, writes + records[1:] + records[:1])
+    journal.apply_journal(ws, plan)
 
 
 # What agents and the GM do with a queued occurrence

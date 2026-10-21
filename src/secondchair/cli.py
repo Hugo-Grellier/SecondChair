@@ -19,6 +19,7 @@ from secondchair.core import (
     delegation,
     index,
     jobs,
+    journal,
     library,
     machine,
     mystery,
@@ -1081,9 +1082,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "recover":
             ws = workspace.load(args.workspace)
             with delegation.locked(ws):
-                done = delegation.recover(ws, force=True)
+                done = journal.recover(ws, force=True)
             print("\n".join(done) or "Nothing to recover.")
-            return 1 if delegation._journals(ws) else 0  # what is left is stopped
+            return 1 if journal._journals(ws) else 0  # what is left is stopped
         elif args.command == "doctor":
             return doctor(workspace.load(args.workspace))
         elif args.command == "serve":

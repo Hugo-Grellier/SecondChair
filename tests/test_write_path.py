@@ -12,7 +12,7 @@ from pathlib import Path
 import jsonschema
 from test_canon import JOB, SCHEMA, act, call, read, refused, ws  # noqa: F401 (ws is a fixture)
 
-from secondchair.core import delegation, index
+from secondchair.core import delegation, index, journal
 from secondchair.core.index import FACTS_DIR, INDEX_FILE
 from secondchair.core.workspace import STATE_DIR, Workspace
 
@@ -137,7 +137,7 @@ def test_a_crash_between_apply_and_append_is_one_hand_edit_at_the_next_rebuild(
     # Another rebuild, and a recovery, add nothing; the file is untouched and still one fact.
     index.connect(ws).close()
     with delegation.locked(ws):
-        assert delegation.recover(ws) == []
+        assert journal.recover(ws) == []
     assert delegation.read_log(ws)[0] == logged
     assert facts(ws) == [written] and written.read_text() == text
     [found] = read(ws, "search_facts", text="ferry Saltmere")
