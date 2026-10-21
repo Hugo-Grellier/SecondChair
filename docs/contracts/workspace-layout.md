@@ -371,7 +371,25 @@ sessions:
 
 ## `prep/`
 
-Markdown the GM reads to run a session, written by agents with `write_prep` (responsibility prep, logged and undoable) or by the GM by hand. The `prepare-a-session` playbook writes `session-<n>/handoff.md`; `quick-help` may append improvised cards to `session-<n>/improv.md`. Paths are lowercase words joined by dashes, folders allowed, ending in `.md`. Prep is a desired state, not canon (ADR 0007): nothing here is read as truth, and what is played becomes canon only at the wrap.
+Markdown the GM reads to run a session, written by agents with `write_prep` (responsibility prep, logged and undoable) or by the GM by hand. The `prepare-a-session` playbook writes `session-<n>/handoff.md`; `quick-help` may append improvised cards to `session-<n>/improv.md`. The `prepare-an-adventure` playbook writes an adventure tree, `adventure-<slug>/dossier.md` for the GM and `adventure-<slug>/players-guide.md` for the players, which the GM shares outside SecondChair (nothing is published). Paths are lowercase words joined by dashes, folders allowed, ending in `.md`. Prep is a desired state, not canon (ADR 0007): nothing here is read as truth, and what is played becomes canon only at the wrap.
+
+### The index block
+
+A prep note may end with one fenced `yaml` block, the last thing in the file and hand-editable, listing what the note relies on. Every key is optional.
+
+```yaml
+creatures: [{uuid: Compendium.pf2e.bestiary.Actor.abc, name: Goblin Warrior, level: -1}]
+encounters:
+  - {id: ambush, level: 1, party_size: 4, xp: 80, threat: moderate,
+     creatures: [{uuid: Compendium.pf2e.bestiary.Actor.abc, name: Goblin Warrior, level: 1}]}
+treasure: [{level: 1, party_size: 4, total_gp: 175}]   # placed so far, per party level
+clues: [clue-lantern]                                  # clue ids of a canon mystery or a draft note
+scenes: [s1-warehouse]                                 # keys with a desired state in scenes/
+cites: [f-1a2b3c4d]                                    # fact ids a player-facing note uses
+```
+
+- `check_prep(path)` (a PF2e read; `secondchair prep check <path>`) lints it and fixes nothing. It looks each `uuid` up by its `name` with the connector's compendium search, and reports the ones it cannot check as `unchecked` when no GM client is connected; recomputes each encounter's XP and threat with GM Core and compares any `xp` or `threat` stated; compares `total_gp` with the level's `treasure_budget`; and requires every clue id in a `clues` list under `canon/mysteries/` or the front matter of a `notes/` draft, and every scene key to have `scenes/<key>.yaml`. It returns `{ok, problems, unchecked, encounters, treasure}`.
+- `check_prep_guide(path)` (a Core read; `secondchair prep guard <path>`) runs the audience guard for the party over the whole note and the `cites` of its block, as `check_audience_content` does for a line. It writes and discloses nothing.
 
 ## `canon/entities/`
 

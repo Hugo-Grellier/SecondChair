@@ -6,12 +6,44 @@ through `write_prep`, a delegated action the Core logs and can undo (ARC-04).
 """
 
 import re
+from typing import Any
 
+import yaml
+
+from secondchair.core import knowledge
+from secondchair.core.index import PARTY, CanonError
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
 
 PREP_DIR = "prep"
 PATH = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*(/[a-z0-9]+(-[a-z0-9]+)*)*\.md$")
+FENCE = "```yaml\n"
+
+
+def read_prep(ws: Workspace, path: str) -> str:
+    """The text of the prep note `path` (relative to `prep/`), never a path outside it."""
+    if not PATH.match(path) or not (ws.root / PREP_DIR / path).is_file():
+        raise CanonError(f"No prep note {path!r}: give its path relative to `prep/`.")
+    return (ws.root / PREP_DIR / path).read_text()
+
+
+def index_block(text: str) -> dict[str, Any]:
+    """The YAML index a prep file ends with: its last fenced `yaml` block, which must close the
+    file (the GM may edit it by hand). Empty when the file has none; `CanonError` when the block
+    is not a mapping."""
+    body = text.rstrip()
+    start = body.rfind(FENCE)
+    if start < 0 or not body.endswith("```"):
+        return {}
+    try:
+        block = yaml.safe_load(body[start + len(FENCE) : -3])
+    except yaml.YAMLError as e:
+        raise CanonError(f"The index block is not valid YAML: {e}") from e
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise CanonError("The index block must be a YAML mapping.")
+    return block
 
 
 def write_prep(path: str, text: str) -> Change:
@@ -33,4 +65,20 @@ def write_prep(path: str, text: str) -> Change:
 
 
 def tools(ws: Workspace) -> list[Tool]:
-    return [Tool(fn=write_prep, responsibility="prep", delegated_action=True, reversible=True)]
+    def check_prep_guide(path: str, at: str | None = None) -> dict[str, Any]:
+        """Check a whole prep note, such as an adventure's players' guide, before the GM shares
+        it with the players: the audience guard (as for check_audience_content) run for the
+        party over the entire file. Refused when the text carries a canary or a name the party
+        holds no fact about, or when the `cites` of its index block (the ids of the facts it
+        uses; flavour with no truth value cites nothing) name an unknown fact or one the party
+        does not know. A read: it changes nothing. Returns the mode each cited fact is held in."""
+        text = read_prep(ws, path)
+        cites = index_block(text).get("cites") or []
+        if not (isinstance(cites, list) and all(isinstance(c, str) for c in cites)):
+            raise CanonError("`cites` in the index block must be a list of fact ids.")
+        return knowledge.guard(ws, PARTY, text, cites, at)
+
+    return [
+        Tool(fn=write_prep, responsibility="prep", delegated_action=True, reversible=True),
+        Tool(fn=check_prep_guide, responsibility="prep", delegated_action=False, reversible=True),
+    ]
