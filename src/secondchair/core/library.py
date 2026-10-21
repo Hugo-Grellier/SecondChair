@@ -6,6 +6,8 @@ run through the GM's own Ollama server (ADR 0001 amendment).
 """
 
 import hashlib
+import html
+import itertools
 import json
 import math
 import re
@@ -246,11 +248,16 @@ def _db() -> sqlite3.Connection:
     path = machine.data_dir() / "library" / "index.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(path, timeout=60, isolation_level=None)
+    if (old := db.execute("PRAGMA table_info(passages)").fetchall()) and not any(
+        column[1] == "chunk_id" for column in old
+    ):
+        # The index is derived: an older layout without chunk ids is rebuilt by re-indexing.
+        db.executescript("DROP TABLE passages; DROP TABLE passages_fts; DROP TABLE indexed;")
     db.executescript(
         """
         CREATE TABLE IF NOT EXISTS passages (
             id INTEGER PRIMARY KEY, digest TEXT, model TEXT, location TEXT, text TEXT,
-            vector BLOB);
+            vector BLOB, heading_path TEXT, chunk_id TEXT);
         CREATE INDEX IF NOT EXISTS passages_key ON passages (digest, model);
         CREATE VIRTUAL TABLE IF NOT EXISTS passages_fts USING fts5 (
             text, content='passages', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
@@ -293,14 +300,16 @@ def _store(digest: str, model: str, extract) -> None:
             ).fetchone():
                 for passage, vector in zip(passages, vectors, strict=True):
                     rowid = db.execute(
-                        "INSERT INTO passages (digest, model, location, text, vector) "
-                        "VALUES (?, ?, ?, ?, ?)",
+                        "INSERT INTO passages (digest, model, location, text, vector, "
+                        "heading_path, chunk_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (
                             digest,
                             model,
                             passage["location"],
                             passage["text"],
                             np.asarray(vector, dtype="<f4").tobytes(),
+                            passage["heading_path"],
+                            passage["chunk_id"],
                         ),
                     ).lastrowid
                     db.execute(
@@ -391,24 +400,79 @@ def _passages(path: Path) -> list[dict]:
             pages = [path.read_text(encoding="utf-8")]
         except UnicodeError as e:
             raise WorkspaceError(f"Source is not UTF-8 text: {path.name}.") from e
-    passages = []
+    is_pdf = path.suffix.lower() == ".pdf"
+    queue, stack, ordinals, passages = (_outline(path) if is_pdf else []), [], {}, []
     for page, text in enumerate(pages, 1):
-        # Pack whole lines into ~1,500-character passages: fixed line counts leave page
-        # numbers and headers as tiny passages that outrank real text on short queries.
-        chunks: list[tuple[int, list[str]]] = []
-        for number, line in enumerate(text.splitlines(), 1):
-            if not chunks or sum(len(kept) + 1 for kept in chunks[-1][1]) + len(line) > 1500:
-                chunks.append((number, []))
-            chunks[-1][1].append(line)
-        if len(chunks) > 1 and len("".join(chunks[-1][1]).strip()) < 200:
-            chunks[-2][1].extend(chunks.pop()[1])
-        for start, lines in chunks:
-            excerpt = "\n".join(lines).strip()
-            location = f"page {page}" if path.suffix.lower() == ".pdf" else f"line {start}"
-            # Bound model excerpts even when extracted text has very long lines.
-            for offset in range(0, len(excerpt), 1800):
-                passages.append({"location": location, "text": excerpt[offset : offset + 1800]})
+        lines = text.splitlines()
+        # (first line, heading path) segments; a chunk never spans two of them.
+        segments, position = [(0, " > ".join(stack))], 0
+        while queue and queue[0][2] <= page:
+            level, title, found_on = queue.pop(0)
+            if found_on == page:  # ponytail: a heading not found as its own line starts the page
+                wanted = " ".join(title.split()).casefold()
+                position = next(
+                    (
+                        i
+                        for i in range(position, len(lines))
+                        if " ".join(lines[i].split()).casefold() == wanted
+                    ),
+                    position,
+                )
+            del stack[level:]
+            stack.append(title)
+            segments.append((position, " > ".join(stack)))
+        segments.append((len(lines), ""))
+        for (begin, heading), (end, _) in itertools.pairwise(segments):
+            # Pack whole lines into ~1,500-character passages: fixed line counts leave page
+            # numbers and headers as tiny passages that outrank real text on short queries.
+            chunks: list[tuple[int, list[str]]] = []
+            for number, line in enumerate(lines[begin:end], begin + 1):
+                if not chunks or sum(len(kept) + 1 for kept in chunks[-1][1]) + len(line) > 1500:
+                    chunks.append((number, []))
+                chunks[-1][1].append(line)
+            if len(chunks) > 1 and len("".join(chunks[-1][1]).strip()) < 200:
+                chunks[-2][1].extend(chunks.pop()[1])
+            for start, chunk in chunks:
+                excerpt = "\n".join(chunk).strip()
+                location = f"page {page}" if is_pdf else f"line {start}"
+                # Bound model excerpts even when extracted text has very long lines.
+                for offset in range(0, len(excerpt), 1800):
+                    ordinal = ordinals[heading] = ordinals.get(heading, -1) + 1
+                    passages.append(
+                        {
+                            "location": location,
+                            "text": excerpt[offset : offset + 1800],
+                            "heading_path": heading,
+                            # Qualified by the source id wherever a citation names it.
+                            "chunk_id": "c-"
+                            + hashlib.sha256(f"{heading}\0{ordinal}".encode()).hexdigest()[:16],
+                        }
+                    )
     return passages
+
+
+def _outline(path: Path) -> list[tuple[int, str, int]]:
+    """The PDF bookmarks as (depth, title, page) in document order, via Poppler's pdftohtml
+    (pdfinfo and pdftotext do not expose them). Empty when absent or Poppler lacks the tool."""
+    try:
+        xml = subprocess.run(
+            ["pdftohtml", "-xml", "-i", "-q", "-stdout", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=True,
+        ).stdout
+    except OSError, subprocess.SubprocessError:
+        return []
+    items, depth = [], 0
+    for tag in re.finditer(r'<outline>|</outline>|<item page="(\d+)">(.*?)</item>', xml, re.DOTALL):
+        if tag[0] == "<outline>":
+            depth += 1
+        elif tag[0] == "</outline>":
+            depth -= 1
+        elif title := " ".join(html.unescape(tag[2]).split()):
+            items.append((max(depth - 1, 0), title, int(tag[1])))
+    return items
 
 
 def _ocr_page(path: Path, page: int, languages: str) -> str:
@@ -454,9 +518,24 @@ def _ocr_page(path: Path, page: int, languages: str) -> str:
         raise WorkspaceError(f"OCR timed out on {path.name} page {page}.") from e
 
 
+def _chunks(digest: str, model: str) -> dict[str, tuple[str, str, str]]:
+    """chunk id -> (heading path, location, text) of one stored content version."""
+    with closing(_db()) as db:
+        return {
+            row[0]: row[1:]
+            for row in db.execute(
+                "SELECT chunk_id, heading_path, location, text FROM passages "
+                "WHERE digest = ? AND model = ?",
+                (digest, model),
+            )
+        }
+
+
 def build_index(
     ws: Workspace, source_id: str, replace_changed: bool = False, authenticated: bool = False
-) -> None:
+) -> dict | None:
+    """Index a source. Replacing a changed version returns the chunk diff by stable chunk id:
+    {"added", "removed", "changed": [{"chunk_id", "heading_path", "location"}], "unchanged": n}."""
     with locked(ws):
         _, entry = _source(ws, source_id)
         if not entry["index"]:
@@ -467,7 +546,7 @@ def build_index(
         model = _embedding_model()
         if done:
             if done["sha256"] == before and done["model"] == model:
-                return
+                return None
             if done["sha256"] != before and not (replace_changed and authenticated):
                 raise WorkspaceError(
                     f"Source {source_id} changed; its existing index was preserved. The GM must "
@@ -491,6 +570,18 @@ def build_index(
                 "INSERT OR REPLACE INTO indexed VALUES (?, ?, ?, ?, ?)",
                 (_key(ws), source_id, before, model, json.dumps(stat)),
             )
+    if not done or done["sha256"] == before:
+        return None
+    old, new = _chunks(done["sha256"], done["model"]), _chunks(before, model)
+    cite = lambda ids, table: [  # noqa: E731
+        {"chunk_id": i, "heading_path": table[i][0], "location": table[i][1]} for i in sorted(ids)
+    ]
+    return {
+        "added": cite(new.keys() - old.keys(), new),
+        "removed": cite(old.keys() - new.keys(), old),
+        "changed": cite([i for i in old.keys() & new.keys() if old[i][2] != new[i][2]], new),
+        "unchanged": sum(old[i][2] == new[i][2] for i in old.keys() & new.keys()),
+    }
 
 
 RRF_K = 60  # reciprocal rank fusion constant
@@ -596,15 +687,22 @@ def search(
         found = {
             row[0]: row[1:]
             for row in db.execute(
-                f"SELECT id, digest, location, text FROM passages "
+                f"SELECT id, digest, location, text, heading_path, chunk_id FROM passages "
                 f"WHERE id IN ({','.join('?' * len(ranked))})",
                 ranked,
             )
         }
     hits = [
-        {"location": location, "text": text, **origin, "score": fused[rowid]}
+        {
+            "location": location,
+            "heading_path": heading_path or "",
+            "chunk_id": chunk_id,
+            "text": text,
+            **origin,
+            "score": fused[rowid],
+        }
         for rowid in ranked
-        for digest, location, text in [found[rowid]]
+        for digest, location, text, heading_path, chunk_id in [found[rowid]]
         for origin in origins[digest]
     ]
     return {"matches": hits[:limit], "sources": sources, "method": "hybrid"}

@@ -627,8 +627,10 @@ def _sources_command(args: argparse.Namespace) -> None:
         )
         print(f"Permissions updated for {args.id}.")
     elif action == "index":
-        library.build_index(ws, args.id, args.replace_changed, interactive())
+        diff = library.build_index(ws, args.id, args.replace_changed, interactive())
         print(f"Index ready for {args.id}.")
+        if diff:
+            print(json.dumps(diff, ensure_ascii=False, indent=2))
     elif action == "list":
         print(json.dumps(library.listing(ws), ensure_ascii=False, indent=2))
     else:

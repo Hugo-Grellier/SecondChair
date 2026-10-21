@@ -700,6 +700,18 @@ directory; the indexed result retains the original PDF page number. Extracted te
 into passages of about 1,500 characters within a page. Markdown and text use line
 locations.
 
+PDFs with bookmarks are chunked by outline. `pdftohtml -xml` (Poppler) lists the bookmarks; each
+passage carries a `heading_path` such as `Conditions > Frightened`, and no passage spans a heading
+boundary. A heading starts at the line of its own text on its page, or at the top of the page when
+that line is not found. A PDF without bookmarks, and Markdown or text, has an empty `heading_path`
+and is chunked as before. Every passage has a `chunk_id`, derived from its heading path and its
+ordinal within that heading, so it survives a new printing; with the source id it names a chunk.
+`search` citations carry `heading_path` and `chunk_id` next to the page. `sources index
+--replace-changed` prints the diff of the old and new version by chunk id: `added`, `removed` and
+`changed` chunks (same id, different text) and the number `unchanged`. Without bookmarks the ordinal
+is positional, so an insertion shifts later ids. An index written before chunk ids is discarded on
+first use and sources need `sources index` again.
+
 Search is hybrid. A SQLite FTS5 index (BM25, accent-insensitive) requires every query
 term, for exact names of spells, gods and places; normalized passage embeddings from
 the multilingual Ollama model `qwen3-embedding:0.6b` find paraphrases (cosine ≥ 0.2).

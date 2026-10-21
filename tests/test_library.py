@@ -191,6 +191,119 @@ def make_pdf(path, texts=("Harbor archaeology", "Absalom ancient treasure"), siz
     path.write_bytes(data)
 
 
+def make_outlined_pdf(path, pages, outline):
+    """Tiny PDF: `pages` is a list of line lists, `outline` lists (depth, title, page) bookmarks."""
+    count = len(pages)
+    font, outlines = 3 + 2 * count, 4 + 2 * count
+    bookmark = lambda i: outlines + 1 + i  # noqa: E731
+    objects = [
+        f"<< /Type /Catalog /Pages 2 0 R /Outlines {outlines} 0 R >>".encode(),
+        f"<< /Type /Pages /Kids [{' '.join(f'{3 + n} 0 R' for n in range(count))}] "
+        f"/Count {count} >>".encode(),
+    ]
+    for n in range(count):
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources "
+            f"<< /Font << /F1 {font} 0 R >> >> /Contents {3 + count + n} 0 R >>".encode()
+        )
+    for lines in pages:
+        stream = "BT /F1 12 Tf 14 TL 50 700 Td " + " ".join(f"({t}) Tj T*" for t in lines) + " ET"
+        objects.append(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream".encode())
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    objects.append(
+        f"<< /Type /Outlines /First {bookmark(0)} 0 R /Last {bookmark(len(outline) - 1)} 0 R "
+        f"/Count {len(outline)} >>".encode()
+    )
+    # Bookmark tree from depths: the parent is the nearest earlier shallower entry.
+    parents = {}
+    for i, (depth, _, _) in enumerate(outline):
+        parents[i] = next((j for j in range(i - 1, -1, -1) if outline[j][0] < depth), None)
+    for i, (_, title, page) in enumerate(outline):
+        siblings = [j for j in parents if parents[j] == parents[i]]
+        children = [j for j in parents if parents[j] == i]
+        entry = f"/Title ({title}) /Dest [{2 + page} 0 R /Fit] "
+        entry += f"/Parent {outlines if parents[i] is None else bookmark(parents[i])} 0 R"
+        if siblings.index(i):
+            entry += f" /Prev {bookmark(siblings[siblings.index(i) - 1])} 0 R"
+        if siblings.index(i) < len(siblings) - 1:
+            entry += f" /Next {bookmark(siblings[siblings.index(i) + 1])} 0 R"
+        if children:
+            entry += f" /First {bookmark(children[0])} 0 R /Last {bookmark(children[-1])} 0 R"
+        objects.append(f"<< {entry} >>".encode())
+    data, offsets = b"%PDF-1.4\n", []
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += f"{number} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(data)
+    data += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
+    data += b"".join(f"{offset:010} 00000 n \n".encode() for offset in offsets)
+    data += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    )
+    path.write_bytes(data)
+
+
+PAGES = [
+    ["Chapter One", "Lanterns hang over the quay."],
+    ["Conditions", "Frightened", "A frightened guest flees the kettle."],
+    ["Chapter Two", "Barges carry copper."],
+]
+OUTLINE = [(1, "Chapter One", 1), (1, "Conditions", 2), (2, "Frightened", 2), (1, "Chapter Two", 3)]
+
+
+@pytest.mark.skipif(not shutil.which("pdftohtml"), reason="Poppler not installed")
+def test_outline_gives_heading_paths_and_chunks_never_cross_headings(ws, tmp_path):
+    pdf = tmp_path / "book.pdf"
+    make_outlined_pdf(pdf, PAGES, OUTLINE)
+    found = {p["heading_path"]: p for p in library._passages(pdf)}
+    assert list(found) == ["Chapter One", "Conditions", "Conditions > Frightened", "Chapter Two"]
+    assert "kettle" not in found["Conditions"]["text"]
+    assert "kettle" in found["Conditions > Frightened"]["text"]
+    assert "Chapter Two" not in found["Conditions > Frightened"]["text"]
+    [sid] = library.register(ws, pdf)
+    library.permit(ws, sid, True, True, True)
+    library.build_index(ws, sid)
+    [hit] = library.search(ws, "kettle")["matches"]
+    assert (hit["location"], hit["heading_path"]) == ("page 2", "Conditions > Frightened")
+
+
+@pytest.mark.skipif(not shutil.which("pdftotext"), reason="Poppler not installed")
+def test_a_pdf_without_an_outline_has_empty_heading_paths(tmp_path):
+    pdf = tmp_path / "plain.pdf"
+    make_pdf(pdf)
+    passages = library._passages(pdf)
+    assert [p["location"] for p in passages] == ["page 1", "page 2"]
+    assert {p["heading_path"] for p in passages} == {""}
+    assert len({p["chunk_id"] for p in passages}) == 2
+
+
+@pytest.mark.skipif(not shutil.which("pdftohtml"), reason="Poppler not installed")
+def test_reimport_reports_chunks_by_stable_id_and_keeps_unchanged_ids(ws, tmp_path):
+    pdf = tmp_path / "book.pdf"
+    make_outlined_pdf(pdf, PAGES, OUTLINE)
+    [sid] = library.register(ws, pdf)
+    library.permit(ws, sid, True, True, True)
+    assert library.build_index(ws, sid) is None
+    errata = [PAGES[0], [*PAGES[1][:2], "A frightened guest flees the lantern."], PAGES[2]]
+    make_outlined_pdf(pdf, errata, OUTLINE)
+    diff = library.build_index(ws, sid, True, True)
+    assert diff is not None
+    assert [c["heading_path"] for c in diff["changed"]] == ["Conditions > Frightened"]
+    assert diff["added"] == diff["removed"] == [] and diff["unchanged"] == 3
+    [hit] = library.search(ws, "lantern guest")["matches"]
+    assert hit["chunk_id"] == diff["changed"][0]["chunk_id"]
+    assert (hit["location"], hit["heading_path"]) == ("page 2", "Conditions > Frightened")
+    # A new section is added and an old one removed; the rest keep their ids.
+    make_outlined_pdf(
+        pdf, [*errata[:2], ["Appendix", "Tide tables."]], [*OUTLINE[:3], (1, "Appendix", 3)]
+    )
+    diff = library.build_index(ws, sid, True, True)
+    assert diff is not None
+    assert [c["heading_path"] for c in diff["added"]] == ["Appendix"]
+    assert [c["heading_path"] for c in diff["removed"]] == ["Chapter Two"]
+    assert diff["changed"] == [] and diff["unchanged"] == 3
+
+
 def test_source_metadata_is_set_by_hand_updated_and_carried_in_citations(ws, tmp_path):
     path = tmp_path / "reference.txt"
     path.write_text("Un secret dans le port.")
