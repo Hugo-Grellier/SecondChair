@@ -27,11 +27,21 @@ JOB_SCHEMA = json.loads((CONTRACTS / "job.schema.json").read_text())
 LOG_SCHEMA = json.loads((CONTRACTS / "action-log-entry.schema.json").read_text())
 BIBLE = ROOT / "sample-campaign/bible.md"
 PLAYBOOK = "rebuild-entities-from-a-bible"
-OK = [sys.executable, "-c", "pass"]
+OK = [sys.executable, "-c", "pass"]  # exits cleanly without finish_job: a failed attempt (#171)
+
+
+def finishing(ws: Workspace) -> list[str]:
+    """A host that calls finish_job for its job, then exits cleanly."""
+    end = "import sys, pathlib; from secondchair.core import jobs, workspace as w; "
+    end += "jobs.end(w.load(pathlib.Path(sys.argv[1])), int(sys.argv[2]))"
+    return [sys.executable, "-c", end, str(ws.root), "{job}"]
+
+
 BROKEN = [sys.executable, "-c", "raise SystemExit('host unavailable')"]
 
 # The agent a fake host runs: it creates one entity for the job named in its prompt, over the
-# Core's MCP endpoint, and writes what the Core answered to the file given as its argument.
+# Core's MCP endpoint, finishes the job, and writes what the Core answered to the file given as
+# its argument.
 FAKE_AGENT = """
 import asyncio, json, os, re, sys
 from mcp import Client
@@ -44,6 +54,8 @@ async def main():
         result = await client.call_tool(
             "create_entity", {"names": ["Ada Fen"], "agent": "fake-runner", "job": job}
         )
+        if not result.is_error:
+            await client.call_tool("finish_job", {"job": job})
     with open(out, "w") as f:
         json.dump({"error": result.is_error, "text": result.content[0].text}, f)
 
@@ -199,7 +211,8 @@ def test_every_block_s_playbooks_reach_the_agent_host(
     )
     queue(ws)
 
-    assert main(["jobs", "-w", str(ws.root), "run"]) == 0
+    # The echo host never calls finish_job, so its attempt fails and the job stays queued.
+    assert main(["jobs", "-w", str(ws.root), "run"]) == 1
 
     dirs = [f"--plugin-dir={d}" for d in runner.playbook_dirs()]
     assert json.loads(out.read_text())[1:] == dirs
@@ -209,7 +222,9 @@ def test_every_block_s_playbooks_reach_the_agent_host(
 def test_with_the_first_entry_broken_the_second_is_used_and_both_are_logged(
     ws: Workspace, config: Path
 ) -> None:
-    configure(config, {"broken": BROKEN, "ok": OK}, ("broken", "model-a"), ("ok", "model-b"))
+    configure(
+        config, {"broken": BROKEN, "ok": finishing(ws)}, ("broken", "model-a"), ("ok", "model-b")
+    )
     queue(ws)
 
     assert main(["jobs", "-w", str(ws.root), "run"]) == 0
@@ -241,8 +256,30 @@ def test_with_every_entry_broken_the_job_stays_queued_and_calls_on_the_gm(
     assert "stays queued" in capsys.readouterr().err
 
 
+def test_a_host_exiting_cleanly_without_finish_job_is_a_failed_attempt(
+    ws: Workspace, config: Path
+) -> None:
+    configure(config, {"ok": OK}, ("ok", "model-a"))
+    queue(ws)
+
+    assert main(["jobs", "-w", str(ws.root), "run"]) == 1
+
+    record = job(ws)
+    assert record["status"] == "queued"
+    [attempt] = record["attempts"]
+    assert attempt["outcome"] == "failed" and "finish_job" in attempt["error"]
+    assert [yaml.safe_load(p.read_text())["kind"] for p in (ws.root / "calls").glob("*.yaml")] == [
+        "exception"
+    ]
+
+
 def test_a_missing_host_binary_is_a_broken_entry(ws: Workspace, config: Path) -> None:
-    configure(config, {"gone": ["/nonexistent/agent-host"], "ok": OK}, ("gone", "m"), ("ok", "m"))
+    configure(
+        config,
+        {"gone": ["/nonexistent/agent-host"], "ok": finishing(ws)},
+        ("gone", "m"),
+        ("ok", "m"),
+    )
     queue(ws)
 
     assert main(["jobs", "-w", str(ws.root), "run"]) == 0
@@ -374,10 +411,26 @@ def test_a_session_acting_for_a_started_job_stays_bound_to_it(ws: Workspace, mod
 
 def test_the_runner_prompt_names_the_job_and_its_contract(ws: Workspace) -> None:
     queue(ws)
-    text = runner.prompt(job(ws))
+    text = runner.prompt(ws, job(ws))
     assert re.search(r"job 1\b", text) and PLAYBOOK in text and "finish_job" in text
     contract = json.loads(text.split("\n", 1)[1])
     assert "attempts" not in contract and contract["campaign_language"] == "fr"
+
+
+def test_a_retry_prompt_lists_the_actions_earlier_attempts_took(ws: Workspace) -> None:
+    """An agent that acted, then exited without finish_job, is retried: the next one is told
+    what is already done so it does not redo it (#171)."""
+    queue(ws)
+    jobs.start(ws, 1, {"host": "h", "model": "m", "effort": "e"}, manual=False)
+    call(ws, "create_entity", {"names": ["Ada Fen"], "agent": "a", "job": 1})
+    call(ws, "create_entity", {"names": ["Bo Lin"], "agent": "gm"})
+    jobs.end(ws, 1, "h exited without calling finish_job")
+
+    text = runner.prompt(ws, job(ws))
+
+    [entry, other] = log(ws)
+    assert f"- {entry['id']}: create_entity on {entry['target']}, applied" in text
+    assert other["target"] not in text and "do not take them again" in text
 
 
 def test_a_job_carries_the_vocabulary_of_the_entities_it_is_about(ws: Workspace) -> None:
@@ -453,3 +506,18 @@ def test_the_model_name_check_catches_model_names() -> None:
     for text in ("model: sonnet", "use gpt-5", "o3-mini", "claude-opus-4"):
         assert MODEL_NAME.search(text), text
     assert not MODEL_NAME.search("tier: standard, host: claude, effort: high")
+
+
+def test_the_codex_template_lets_exec_call_the_secondchair_tools() -> None:
+    """`codex exec` never asks, so without this a tool needing approval is refused (#94); the
+    Core's delegation table still decides what each call does."""
+    template = runner.HOSTS["codex"]
+    at = template.index('mcp_servers.secondchair.default_tools_approval_mode="approve"')
+    assert template[at - 1] == "-c"
+
+
+def test_no_runner_template_lets_a_job_relay_the_gms_approval() -> None:
+    """A job has no GM at hand, so a headless host never gets approve_proposal (DEL-27)."""
+    claude, codex = runner.HOSTS["claude"], runner.HOSTS["codex"]
+    assert claude[claude.index("--disallowedTools") + 1] == "mcp__secondchair__approve_proposal"
+    assert 'mcp_servers.secondchair.disabled_tools=["approve_proposal"]' in codex

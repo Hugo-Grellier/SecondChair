@@ -11,7 +11,7 @@ import pytest
 import yaml
 from mcp import Client
 
-from secondchair import cli
+from secondchair import cli, runner
 from secondchair.cli import main
 from secondchair.core import capture, delegation, index, jobs, workspace, world
 from secondchair.core.server import build_server
@@ -106,6 +106,72 @@ def test_a_certain_candidate_is_applied_as_played_with_who_saw_it(ws: Workspace)
     party = {k["fact"] for k in index.search_knowledge(ws, ["party"])}
     assert party == {facts[GAUGE]["id"], facts[FEE]["id"]}
     assert capture.consolidate(ws, job) == []  # nothing new
+
+
+def test_an_inferred_candidate_is_an_agent_proposal_carrying_its_quote_as_evidence(
+    ws: Workspace,
+) -> None:
+    job = wrap_job(ws)
+    submit(ws, job, GAUGE, inferred=True, translation="La jauge reste à zéro.", known_by=["party"])
+
+    [done] = capture.consolidate(ws, job)
+
+    assert done["status"] == "applied"
+    [fact] = index.search_facts(ws)
+    assert fact["rank"] == "agent_proposal"  # #167: the quote does not make it played
+    assert fact["origin"] == {
+        "kind": "job",
+        "job": str(job),
+        "quote": GAUGE,
+        "locator": "01-dry-bell.md:7",
+        "translation": "La jauge reste à zéro.",
+    }
+    [known] = index.search_knowledge(ws, ["party"])
+    assert known["origin"]["kind"] == "job"
+    index.rebuild(ws)  # replayed from the files
+    assert index.search_facts(ws)[0]["rank"] == "agent_proposal"
+
+
+def test_an_inferred_candidate_cannot_close_played_canon_and_its_duplicate_is_a_proposal(
+    ws: Workspace,
+) -> None:
+    edda = entity(ws, "Edda Vale")
+    job = wrap_job(ws)
+    submit(ws, job, GAUGE)
+    [gauge] = capture.consolidate(ws, job)
+    submit(ws, job, FEE, inferred=True, closes=[gauge["fact"]])
+    told = "The party told Edda that the gauge stayed at zero while the bell rang."
+    submit(
+        ws,
+        job,
+        told,
+        inferred=True,
+        classification="duplicate",
+        reason="known",
+        duplicate_of=gauge["fact"],
+        known_by=[edda],
+    )
+
+    done = {c["quote"]: c for c in capture.consolidate(ws, job)}
+
+    # An agent proposal cannot close a played fact (CAN-08): on main it ranked played and did.
+    assert done[FEE]["status"] == "failed" and "ranks played" in done[FEE]["error"]
+    assert done[told]["status"] == "duplicate"
+    [known] = index.search_knowledge(ws, [edda])
+    assert (known["rank"], known["origin"]["kind"]) == ("agent_proposal", "job")
+
+
+def test_an_approved_inferred_question_stays_an_agent_proposal(ws: Workspace) -> None:
+    job = wrap_job(ws)
+    submit(ws, job, GAUGE, inferred=True, classification="contradiction", reason="?")
+    [held] = capture.consolidate(ws, job)
+    jobs.end(ws, job)
+
+    delegation.approve(ws, held["entries"][0], "cli", authenticated=True)
+    capture.wrap(ws, 1, authenticated=True, end="4726-01-02")
+
+    [fact] = index.search_facts(ws)
+    assert (fact["rank"], fact["origin"]["kind"]) == ("agent_proposal", "job")
 
 
 @pytest.mark.parametrize("level", ["act-then-review", "autonomous"])
@@ -312,6 +378,7 @@ def test_after_the_wrap_the_current_date_is_the_session_end_and_a_world_turn_is_
     world_turn = summary["job"]
     assert (world_turn["playbook"], world_turn["responsibility"]) == ("world-turn", "living_world")
     assert world_turn["inputs"] == {"until": "4726-01-02", "since": "4726-01-01"}
+    assert world_turn["tier"] == runner.playbook("world-turn")["tier"]  # the playbook's (ARC-25)
     assert world_turn["status"] == "queued"
     jobs.start(ws, world_turn["id"], {"host": "h", "model": "m", "effort": "e"}, manual=True)
     assert capture.turn(ws, world_turn["id"]) == []  # no front yet
