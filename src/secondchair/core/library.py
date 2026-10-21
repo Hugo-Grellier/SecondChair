@@ -390,7 +390,102 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
     return result
 
 
-def _passages(path: Path) -> list[dict]:
+STAT_HEADER = re.compile(r"^\S.*\s(?:CREATURE|HAZARD)\s+-?\d+$")
+# A paragraph opening with one of these belongs to the stat block above it.
+STAT_LINE = re.compile(
+    r"(?:AC|HP|Speed|Melee|Ranged|Spells|Strike|Str|Perception|Skills|Languages|Items|Fort|"
+    r"Reflex|Will|Immunities|Resistances|Weaknesses|Cantrips|Reaction|Hardness|Disable|Routine|"
+    r"Trigger|Divine|Primal|Occult|Innate)\b"
+    # Words that also open ordinary sentences need a digit or colon on the line.
+    r"|(?:Items|Constant|Attack|Stealth|Reset|Effect|Arcane)\b(?=.*[\d:])"
+)
+CELLS = re.compile(r"\t|\||\s{2,}")
+STAT_REACH = 60  # lines after a header that may belong to its block
+ATOMIC_CAP = 6000  # characters; a longer block or table falls back to running text, reported
+
+
+def _cells(line: str) -> list[str]:
+    return [c.strip() for c in CELLS.split(line.strip()) if c.strip()]
+
+
+def _is_row(line: str) -> bool:
+    """3+ cells, or 2 short cells with no sentence punctuation (double-spaced prose has both)."""
+    cells = _cells(line)
+    return len(cells) >= 3 or (
+        len(cells) == 2 and all(len(c) < 40 and c[-1] not in ".!?:;," for c in cells)
+    )
+
+
+def _spans(
+    lines: list[str], begin: int, end: int
+) -> tuple[list[tuple[int, int, str | None]], list[tuple[int, str, str]]]:
+    """Split lines[begin:end] into (first, stop, kind) spans: kind "stat block" and "table"
+    are atomic, None is running text. Also the blocks that could not be read confidently as
+    (line number, kind, reason); those stay running text, except a stat block whose end is
+    uncertain, which stays atomic and is reported. Pure and deterministic."""
+    spans, errors, at, text = [], [], begin, begin
+    while at < end:
+        found, stop = None, at + 1
+        if STAT_HEADER.match(lines[at].strip()):
+            limit, last, pending, closed = min(end, at + 1 + STAT_REACH), at, False, False
+            for i in range(at + 1, limit):
+                line = lines[i].strip()
+                if not line:
+                    pending = True
+                elif STAT_HEADER.match(line) or (pending and not STAT_LINE.match(line)):
+                    closed = True
+                    break
+                else:
+                    last, pending = i, False
+            else:
+                closed = pending and limit == end  # only blank lines remain in the segment
+            block = [w.strip() for w in lines[at + 1 : last + 1]]
+            if missing := [
+                k for k in ("AC", "HP") if not any(re.match(k + r"\b", w) for w in block)
+            ]:
+                errors.append((at + 1, "stat block", "no " + " or ".join(missing) + " line found"))
+            elif len("\n".join(lines[at : last + 1])) > ATOMIC_CAP:
+                errors.append((at + 1, "stat block", "over the atomic size cap; kept as text"))
+            else:
+                found, stop = "stat block", last + 1
+                if not closed:
+                    errors.append(
+                        (
+                            at + 1,
+                            "stat block",
+                            "runs to the end of its segment or reach; end uncertain",
+                        )
+                    )
+            if not found:
+                stop = at + 1
+        elif _is_row(lines[at]):
+            run = at
+            while run < end and _is_row(lines[run]):
+                run += 1
+            if run - at >= 3:
+                if len({len(_cells(row)) for row in lines[at:run]}) > 1:
+                    errors.append((at + 1, "table", "rows have differing column counts"))
+                elif len("\n".join(lines[at:run])) > ATOMIC_CAP:
+                    errors.append((at + 1, "table", "over the atomic size cap; kept as text"))
+                else:
+                    found = "table"
+                stop = run
+        if found:
+            if text < at:
+                spans.append((text, at, None))
+            spans.append((at, stop, found))
+            text = stop
+        at = stop
+    if text < end:
+        spans.append((text, end, None))
+    return spans, errors
+
+
+def _passages(path: Path, report: dict | None = None) -> list[dict]:
+    """Passages of a file. Stat blocks and tables are single atomic passages, never split;
+    `report`, when given, receives {"atomic": {kind: n}, "errors": [...]} (no source text)."""
+    report = {} if report is None else report
+    report.update(atomic={}, errors=[])
     if path.suffix.lower() == ".pdf":
         try:
             proc = subprocess.run(
@@ -456,32 +551,48 @@ def _passages(path: Path) -> list[dict]:
             segments.append((position, " > ".join(stack)))
         segments.append((len(lines), ""))
         for (begin, heading), (end, _) in itertools.pairwise(segments):
-            # Pack whole lines into ~1,500-character passages: fixed line counts leave page
-            # numbers and headers as tiny passages that outrank real text on short queries.
-            chunks: list[tuple[int, list[str]]] = []
-            for number, line in enumerate(lines[begin:end], begin + 1):
-                if not chunks or sum(len(kept) + 1 for kept in chunks[-1][1]) + len(line) > 1500:
-                    chunks.append((number, []))
-                chunks[-1][1].append(line)
-            if len(chunks) > 1 and len("".join(chunks[-1][1]).strip()) < 200:
-                chunks[-2][1].extend(chunks.pop()[1])
-            for start, chunk in chunks:
-                excerpt = "\n".join(chunk).strip()
-                location = f"page {page}" if is_pdf else f"line {start}"
-                # Bound model excerpts even when extracted text has very long lines.
-                for offset in range(0, len(excerpt), 1800):
+
+            def where(number: int, page: int = page) -> str:
+                return f"page {page}" if is_pdf else f"line {number}"
+
+            spans, errors = _spans(lines, begin, end)
+            report["errors"] += [
+                {"location": where(n), "line": n, "kind": k, "reason": r} for n, k, r in errors
+            ]
+            for first, stop, kind in spans:
+                if kind:
+                    report["atomic"][kind] = report["atomic"].get(kind, 0) + 1
                     ordinal = ordinals[heading] = ordinals.get(heading, -1) + 1
-                    passages.append(
-                        {
-                            "location": location,
-                            "text": excerpt[offset : offset + 1800],
-                            "heading_path": heading,
-                            # Qualified by the source id wherever a citation names it.
-                            "chunk_id": "c-"
-                            + hashlib.sha256(f"{heading}\0{ordinal}".encode()).hexdigest()[:16],
-                        }
-                    )
+                    text = "\n".join(lines[first:stop]).strip()
+                    passages.append(_passage(where(first + 1), text, heading, ordinal))
+                    continue
+                # Pack whole lines into ~1,500-character passages: fixed line counts leave page
+                # numbers and headers as tiny passages that outrank real text on short queries.
+                chunks: list[tuple[int, list[str]]] = []
+                for number, line in enumerate(lines[first:stop], first + 1):
+                    if not chunks or sum(len(k) + 1 for k in chunks[-1][1]) + len(line) > 1500:
+                        chunks.append((number, []))
+                    chunks[-1][1].append(line)
+                if len(chunks) > 1 and len("".join(chunks[-1][1]).strip()) < 200:
+                    chunks[-2][1].extend(chunks.pop()[1])
+                for start, chunk in chunks:
+                    excerpt = "\n".join(chunk).strip()
+                    # Bound model excerpts even when extracted text has very long lines.
+                    for offset in range(0, len(excerpt), 1800):
+                        ordinal = ordinals[heading] = ordinals.get(heading, -1) + 1
+                        text = excerpt[offset : offset + 1800]
+                        passages.append(_passage(where(start), text, heading, ordinal))
     return passages
+
+
+def _passage(location: str, text: str, heading: str, ordinal: int) -> dict:
+    return {
+        "location": location,
+        "text": text,
+        "heading_path": heading,
+        # Qualified by the source id wherever a citation names it.
+        "chunk_id": "c-" + hashlib.sha256(f"{heading}\0{ordinal}".encode()).hexdigest()[:16],
+    }
 
 
 def _outline(path: Path) -> list[tuple[int, str, int]]:
@@ -549,6 +660,23 @@ def _ocr_page(path: Path, page: int, languages: str) -> str:
         ) from e
     except subprocess.TimeoutExpired as e:
         raise WorkspaceError(f"OCR timed out on {path.name} page {page}.") from e
+
+
+def audit(ws: Workspace, source_id: str) -> dict:
+    """Re-run the CURRENT extraction on a source's own text, offline (not the stored index: an
+    already indexed source keeps its old chunks until its content changes), and report what
+    would become atomic chunks and which blocks could not be read confidently:
+    {"atomic": {kind: n}, "errors": [{"location", "line", "kind", "reason"}], "reflects": ...}.
+    Local GM audit of an indexing-permitted source; no source text."""
+    _, entry = _source(ws, source_id)
+    if not entry["index"]:
+        raise WorkspaceError("Local indexing permission has not been granted.")
+    path = Path(entry["path"])
+    if not path.is_file():
+        raise WorkspaceError(f"Source file not found: {path.name}.")
+    report: dict = {}
+    _passages(path, report)
+    return report | {"reflects": "current extraction of the file, not the stored index"}
 
 
 def _chunks(digest: str, model: str) -> dict[str, tuple[str, str, str]]:

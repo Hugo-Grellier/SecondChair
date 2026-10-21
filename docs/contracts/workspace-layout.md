@@ -749,6 +749,7 @@ secondchair sources search 'ancient harbor'         # safe for model context
 # After a file changes, inspect the change and explicitly confirm replacement:
 secondchair sources index r-<id> --replace-changed
 secondchair sources permit r-<id> --model deny
+secondchair sources audit r-<id>                     # GM terminal; needs the index permission
 ```
 
 Each source may carry GM-entered `title`, `edition` (`legacy`, `remaster`, `other`), `version`
@@ -788,6 +789,17 @@ ordinal within that heading, so it survives a new printing; with the source id i
 `changed` chunks (same id, different text) and the number `unchanged`. Without bookmarks the ordinal
 is positional, so an insertion shifts later ids. An index written before chunk ids is discarded on
 first use and sources need `sources index` again.
+
+A stat block (a `<name> CREATURE n` or `HAZARD n` header, its `AC` and `HP` lines and the
+paragraphs after them that open with a stat keyword such as `Speed`, `Melee` or `Strike`) and a
+table (3 or more consecutive rows of equal cell counts) are each one atomic passage, never split.
+One over 6,000 characters falls back to running text and is reported. `secondchair sources audit
+r-<id>` re-runs the current extraction offline on an indexing-permitted source and prints
+`{"atomic": {kind: n}, "errors": [{"location", "line", "kind", "reason"}], "reflects": ...}`:
+what became atomic and which blocks could not be read confidently (no `AC` or `HP`, unequal
+columns, over the cap, end uncertain), with no source text. `reflects` says it is the current
+extraction of the file, not the stored index; an already indexed source keeps its old chunks until
+its content changes. A missing source file is a workspace error.
 
 Search is hybrid. A SQLite FTS5 index (BM25, accent-insensitive) requires every query
 term, for exact names of spells, gods and places; normalized passage embeddings from
