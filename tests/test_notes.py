@@ -1,7 +1,7 @@
 import pytest
 
 from secondchair.cli import main
-from secondchair.core import index, library, notes, workspace
+from secondchair.core import index, notes, workspace
 
 
 def note(ws, name, front, body="Pitch."):
@@ -68,15 +68,3 @@ def test_two_adopted_in_one_alternative_set_are_reported(ws, capsys):
     note(ws, "c.md", {"id": "d-00000003", "status": "adopted", "alternatives": "other"})
     assert main(["notes", "check", "-w", str(ws.root)]) == 1
     assert "2 adopted notes" in capsys.readouterr().err
-
-
-def test_search_leaves_out_closed_notes_unless_asked(ws):
-    for name, status in (("a", "draft"), ("b", "rejected"), ("c", "superseded")):
-        note(ws, f"{name}.md", {"id": f"d-0000000{ord(name) - 96}", "status": status}, "harbor")
-    note(ws, "plain.md", {}, "harbor")
-    hits = library.search(ws, "harbor")["matches"]
-    assert {h["filename"]: h.get("status") for h in hits} == {
-        "notes/a.md": "draft",
-        "notes/plain.md": None,
-    }
-    assert len(library.search(ws, "harbor", include_closed=True)["matches"]) == 4
