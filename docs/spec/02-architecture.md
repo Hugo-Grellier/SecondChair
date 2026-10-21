@@ -19,7 +19,7 @@ Decisions: [ADR 0001](../adr/0001-no-in-house-orchestrator-llm-free-core.md), [A
 ```
 
 - **ARC-01** The Core depends on nothing. System extensions, VTT connectors and Surfaces depend only on Core contracts, never on each other.
-- **ARC-02** One process, `secondchair serve <workspace>`, carries the MCP server and the VTT bridge for one campaign. System extensions and VTT connectors are Python packages loaded through entry points. The CLI uses the Core as a library.
+- **ARC-02** One process, `secondchair serve -w <workspace>`, carries the MCP server and the VTT bridge for one campaign. System extensions and VTT connectors are Python packages loaded through entry points. The CLI uses the Core as a library.
 - **ARC-03** The **Core is the only MCP server** agents see. Extensions and connectors MUST NOT expose tools of their own: they register tools with the Core, each declaring its responsibility, whether it is a read or a delegated action, and whether it is reversible.
 - **ARC-04** The Core wraps every delegated action: level check against the effective delegation level, action log entry, undo. No agent ever talks to the VTT directly ([ADR 0003](../adr/0003-core-is-the-only-gateway.md)).
 - **ARC-05** Languages: Python (`uv`) for the Core, System extension, CLI and the connector's Python half; JavaScript only inside the Foundry modules ([ADR 0002](../adr/0002-rebuild-rather-than-evolve.md)).

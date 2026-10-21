@@ -10,7 +10,7 @@ Decision: [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md); ticke
 
 ## Process
 
-- **PKG-04** One long-running `secondchair serve <workspace>` per campaign, one active campaign per machine, on a configurable port.
+- **PKG-04** One long-running `secondchair serve -w <workspace>` per campaign, one active campaign per machine, on a configurable port.
 - **PKG-05** Agents reach the Core over MCP Streamable HTTP on 127.0.0.1. No stdio mode: several agents (the GM's session, the runners) and the Foundry module share one Core over one workspace.
 - **PKG-06** The loopback MCP endpoint is unauthenticated. That is acceptable because irreversible approvals require an authenticated Surface ([ADR 0003](../adr/0003-core-is-the-only-gateway.md)).
 

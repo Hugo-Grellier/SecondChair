@@ -4,7 +4,7 @@ Protocol version: **0.1.0** (`secondchair.core.PROTOCOL_VERSION`). Requirements:
 
 ## The MCP endpoint
 
-`secondchair serve <workspace>` carries the Core's MCP server over **Streamable HTTP** at `http://127.0.0.1:<port>/mcp`, the port coming from the machine configuration (default 7240). There is no stdio mode: every agent host (the GM's session, the runners) shares this one Core. The endpoint is unauthenticated and bound to loopback only; requests whose `Host` or `Origin` is not a loopback name are refused (DNS rebinding). `GET /` answers `{"service": "secondchair", "campaign_language": …, "protocol_version": …}`.
+`secondchair serve -w <workspace>` carries the Core's MCP server over **Streamable HTTP** at `http://127.0.0.1:<port>/mcp`, the port coming from the machine configuration (default 7240). There is no stdio mode: every agent host (the GM's session, the runners) shares this one Core. The endpoint is unauthenticated and bound to loopback only; requests whose `Host` or `Origin` is not a loopback name are refused (DNS rebinding). `GET /` answers `{"service": "secondchair", "campaign_language": …, "protocol_version": …}`.
 
 `secondchair host setup <claude|codex>` prints the configuration an agent host needs to reach that endpoint, and how to install the playbooks: for Claude Code one plugin per block (`claude plugin marketplace add <playbooks>` then `claude plugin install <name>@<name>`, `secondchair` for the Core's), for Codex every skill linked into `~/.codex/skills/`. It writes no file: the GM pastes or runs what it prints.
 

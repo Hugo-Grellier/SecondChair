@@ -8,7 +8,7 @@ Python 3.14 or later, with [uv](https://docs.astral.sh/uv/):
 ```sh
 uv tool install "secondchair @ git+https://github.com/Hugo-Grellier/SecondChair@<tag>"
 secondchair init ~/campaigns/my-campaign --language en --calendar absalom
-secondchair serve ~/campaigns/my-campaign
+secondchair serve -w ~/campaigns/my-campaign
 ```
 
 `serve` listens on 127.0.0.1 only, on the port set in `~/.config/secondchair/config.yaml` (`port: 7240` by default). The workspace layout is described in [`docs/contracts/workspace-layout.md`](docs/contracts/workspace-layout.md).

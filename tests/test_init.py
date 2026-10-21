@@ -38,10 +38,32 @@ def test_init_keeps_an_existing_gitignore(tmp_path: Path) -> None:
     assert (tmp_path / ".gitignore").read_text() == "notes.tmp\n.secondchair/\n"
 
 
-def test_init_requires_a_calendar(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit):
-        main(["init", str(tmp_path), "--language", "fr"])
+def test_init_without_a_calendar_lists_the_valid_values(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["init", str(tmp_path), "--language", "fr"]) == 1
+    err = capsys.readouterr().err
+    assert "--calendar is required" in err and "absalom" in err
     assert not (tmp_path / "workspace.yaml").exists()
+
+
+def test_init_without_a_language_gives_examples(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["init", str(tmp_path), "--calendar", "absalom"]) == 1
+    assert "BCP 47" in capsys.readouterr().err
+
+
+def test_calendars_lists_the_installed_ones(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["calendars"]) == 0
+    assert "absalom" in capsys.readouterr().out.split()
+
+
+def test_init_prints_the_next_steps(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["init", str(tmp_path), "--language", "en", "--calendar", "absalom"]) == 0
+    out = capsys.readouterr().out
+    assert f"secondchair serve -w {tmp_path}" in out
+    assert "secondchair host setup claude" in out and "secondchair token" in out
 
 
 def test_init_refuses_an_unknown_calendar_name(

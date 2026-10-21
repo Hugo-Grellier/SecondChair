@@ -237,6 +237,11 @@ def from_config(value: Any) -> Calendar:
         ) from e
 
 
+def available_calendars() -> list[str]:
+    """The calendar names the installed System extensions provide."""
+    return sorted(ep.name for ep in entry_points(group=ENTRY_POINT_GROUP))
+
+
 def _named(name: Any) -> Calendar:
     found = {ep.name: ep for ep in entry_points(group=ENTRY_POINT_GROUP)}
     if name not in found:

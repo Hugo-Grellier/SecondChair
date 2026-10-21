@@ -116,3 +116,20 @@ def test_serve_refuses_an_invalid_port_in_the_machine_configuration(
 
     assert main(["serve", str(ws)]) == 1
     assert "port must be an integer" in capsys.readouterr().err
+
+
+def test_serve_takes_w_default_cwd_and_the_positional_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ran: list[Path] = []
+    monkeypatch.setattr("secondchair.cli.serve", lambda ws, *a: ran.append(ws.root))
+    main(["init", str(tmp_path / "c"), "--language", "en", "--calendar", "absalom"])
+    ws = (tmp_path / "c").resolve()
+    assert main(["serve", "-w", str(ws)]) == 0
+    assert main(["serve", str(ws)]) == 0
+    assert main(["serve", str(ws), "-w", str(ws)]) == 0
+    monkeypatch.chdir(ws)
+    assert main(["serve"]) == 0
+    assert [r.resolve() for r in ran] == [ws] * 4
+    assert main(["serve", str(tmp_path), "-w", str(ws)]) == 1
+    assert "two different workspaces" in capsys.readouterr().err
