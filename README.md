@@ -13,6 +13,8 @@ secondchair serve ~/campaigns/my-campaign
 
 `serve` listens on 127.0.0.1 only, on the port set in `~/.config/secondchair/config.yaml` (`port: 7240` by default). The workspace layout is described in [`docs/contracts/workspace-layout.md`](docs/contracts/workspace-layout.md).
 
+`secondchair backup <workspace> <archive>` archives the workspace with a manifest of hashes, and `secondchair restore <archive> <new-dir>` verifies it into an empty directory and runs `check`; back up the Foundry world separately.
+
 Agents reach the campaign through the Core's MCP server at `http://127.0.0.1:7240/mcp` (Streamable HTTP). To configure an agent host, run `secondchair host setup claude` or `secondchair host setup codex` and apply what it prints; it never edits the host's files. How blocks register tools is described in [`docs/contracts/tool-registration.md`](docs/contracts/tool-registration.md).
 
 Every delegated action goes through the Core, at the level the campaign's delegation table (`delegation.yaml`) gives its responsibility in the current moment. From the workspace directory:
