@@ -8,28 +8,81 @@ unseen; a shared vocabulary on an unrelated topic can raise a false positive.
 """
 
 import re
+import unicodedata
 
 THRESHOLD = 0.6  # share of the secret's lemmas the text must carry to be reported
-MIN_LEMMAS = 3  # a shorter secret is too thin to score; exact checks cover it
+MIN_LEMMAS = 3  # a shorter secret is too thin to score; `unscored` lists those
 
 _STOP = frozenset(
-    "a an and are as at be been but by for from had has have he her his in is it its of on or "
-    "she that the their them they this to was were which who with".split()
+    [
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "but",
+        "by",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "he",
+        "her",
+        "his",
+        "in",
+        "is",
+        "it",
+        "its",
+        "of",
+        "on",
+        "or",
+        "she",
+        "that",
+        "the",
+        "their",
+        "them",
+        "they",
+        "this",
+        "to",
+        "was",
+        "were",
+        "which",
+        "who",
+        "with",
+    ]
 )
-_SUFFIXES = ("ing", "ed", "es", "s")
+
+
+def _stem(w: str) -> str:
+    """A crude stem so inflections meet their base: houses/house, hated/hate, spies/spy."""
+    for suffix, repl in (("ies", "y"), ("ing", ""), ("ed", ""), ("es", ""), ("s", "")):
+        if (
+            w.endswith(suffix)
+            and not w.endswith("ss")
+            and len(w) - len(suffix) >= (2 if repl else 3)
+        ):
+            w = w[: -len(suffix)] + repl
+            break
+    return w[:-1] if w.endswith("e") and len(w) > 3 else w
 
 
 def lemmas(text: str) -> set[str]:
-    out = set()
-    for w in re.findall(r"[a-z0-9']+", text.lower()):
-        if w in _STOP:
-            continue
-        for s in _SUFFIXES:
-            if w.endswith(s) and len(w) - len(s) >= 3:
-                w = w[: -len(s)]
-                break
-        out.add(w)
-    return out
+    """Content words, accents and possessives folded. Tool text is English (VIS-04), but names
+    in a campaign may carry accents ("Éloïse", "l'amiral")."""
+    text = unicodedata.normalize("NFKD", text.casefold())
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    text = re.sub(r"['\u2019]s\b", "", text)  # possessive
+    words = re.findall(r"\w+", text)  # an apostrophe splits: l'amiral -> l, amiral
+    return {_stem(w) for w in words if len(w) > 1 and w not in _STOP}
+
+
+def unscored(secrets: dict[str, str]) -> list[str]:
+    """Secrets too thin to score (under `MIN_LEMMAS`); the exact checks are all that cover them."""
+    return sorted(sid for sid, secret in secrets.items() if len(lemmas(secret)) < MIN_LEMMAS)
 
 
 def overlap(secret: str, text: str) -> float:

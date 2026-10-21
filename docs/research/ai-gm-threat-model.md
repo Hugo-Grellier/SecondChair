@@ -26,7 +26,7 @@ Research for [#198](https://github.com/Hugo-Grellier/SecondChair/issues/198) lea
 
 | # | Threat | Asset | What stops it today | Gap for an AI GM |
 |---|---|---|---|---|
-| T1 | **Prompt injection by a player** steers the narrator or extracts secrets | Secrets, canon | Nothing reads player speech during play (ADR 0008); every agent act goes through the Core | Live speech and chat become input: the largest new surface |
+| T1 | **Prompt injection by a player** steers the narrator or extracts secrets | Secrets, canon | Nothing reads player speech during play (ADR 0008); every agent act goes through the Core. Not zero today: wrap-time capture already feeds player transcripts to a model, and its facts enter canon at the played rank (CAP-05). The current mitigation is the quote-verbatim rule (CAP-04): a candidate must quote its Source, and anything inferred stays at agent proposal | Live speech and chat become input: the largest new surface |
 | T2 | **Verbatim leak** of a canary or an unheld entity name | Secrets | `knowledge.guard` (CAN-16) refuses cited-fact, canary and unheld-name leaks; bench invariant of 0 | None for exact strings |
 | T3 | **Paraphrase leak** of a secret in new words | Secrets | Not blocked. The bench measures it, reported only (`bench.paraphrase`, G2) | A deterministic overlap detector has a known ceiling (synonym swaps pass); no floor yet |
 | T4 | **Irreversible act at speed**: disclosure and public lines cannot be undone | Secrets, trust | Hold at *propose* in every base profile (DEL-09); lifting needs an authenticated Surface per cell | An AI-run scene lifts the hold for many cells at once and multiplies acts |
@@ -42,15 +42,15 @@ Research for [#198](https://github.com/Hugo-Grellier/SecondChair/issues/198) lea
 
 Each row is a capability an AI GM would exercise, set against what the delegation model gives today. "Ceiling" is the highest level the cell can reach; "Hold" is the irreversible hold (DEL-09).
 
-| Capability (ladder level) | Responsibility cell | Ceiling today | Hold | Input trust | Irreversible | Needs beyond v4 | Must stay human-directed |
+| Capability (ladder level) | Responsibility cell | Ceiling | Hold | Input trust | Irreversible | Needs beyond v4 | Must stay human-directed |
 |---|---|---|---|---|---|---|---|
-| Answer rules | Rules and combat | Autonomous | n/a | GM-asked | No | Nothing | No |
-| Run a bounded encounter for GM creatures | Rules and combat | Autonomous | n/a (VTT state is undoable by log) | GM-set, then game state | Partly (damage applied) | Turn-driver silence of agents (ADR 0013) | The decision to start it |
-| Voice an NPC with vetted knowledge | NPCs and disclosure | Autonomous with the hold lifted (DEL-09a) | Lifted per cell, GM gesture | Facts cited and audience-checked (CAN-16) | Yes, a public line | Paraphrase-leak measure (T3) | Which NPC speaks, and the first lift |
-| Describe a permitted scene | Disclosure | Autonomous with the hold lifted | Lifted per cell | Cited, party-held facts | Yes | Same as above | What is permitted to be shown |
+| Answer rules | Rules and combat | Autonomous only if the GM raises the ceiling (DEL-19, DEL-19a; default act-then-review) | n/a | GM-asked | No | Nothing | No |
+| Run a bounded encounter for GM creatures | Rules and combat | Autonomous only if the GM raises the ceiling (DEL-19, DEL-19a; default act-then-review) | n/a (VTT state is undoable by log) | GM-set, then game state | Partly (damage applied) | Turn-driver silence of agents (ADR 0013) | The decision to start it |
+| Voice an NPC with vetted knowledge | NPCs and Disclosure (two cells; an NPC line is a public line) | Autonomous only if the GM raises the ceiling (DEL-19, DEL-19a; default act-then-review), with the hold lifted (DEL-09a) | Lifted per cell, GM gesture | Facts cited and audience-checked (CAN-16) | Yes, a public line | Paraphrase-leak measure (T3) | Which NPC speaks, and the first lift |
+| Describe a permitted scene | Disclosure | Autonomous only if the GM raises the ceiling (DEL-19, DEL-19a; default act-then-review), with the hold lifted | Lifted per cell | Cited, party-held facts | Yes | Same as above | What is permitted to be shown |
 | React to player speech or chat | none today | none | n/a | **Untrusted** (T1) | Via the act it triggers | Live speech (ADR 0008 amendment), injection controls | Admission of any player input |
 | Generate new narrative direction | Narrative direction | **Propose** (DEL-08) | n/a | Model output | Yes, once shown | Its own ADR lifting DEL-08 | Yes, by default: the GM's creative call |
-| Write played events into canon | Canon capture | Propose to GM-decision rank (DEL-29) | n/a | Model output | No, but authoritative | A path no agent can open | Yes: the GM decides what was played |
+| Write played events into canon | Memory | Propose to GM-decision rank (DEL-29) | n/a | Model output | No, but authoritative | A path no agent can open | Yes: the GM decides what was played |
 | Enter, leave or stop the mode | none | n/a | n/a | GM only | n/a | An authenticated per-session gesture, a visible indicator, per-player consent | **Yes, always** |
 
 Reading the matrix: the lower four ladder rows map onto existing cells and need no new rights model (VIS-01..03). The rows that do not are exactly input from players, new narrative and entry to the mode, which is why they carry the gates below.
@@ -75,7 +75,7 @@ Gates are conditions to check, not decisions. G4 chooses among them.
 4. Injection controls for player input (T1) are specified and tested with invented material.
 5. Entry, consent, indicator and stop (T5, T7, T8) are specified as one separate mode.
 
-**Defer** while any gate above is open: this is the recommendation in [ai-gm-mode.md](ai-gm-mode.md). DEL-08 stays at *propose*; no leaf work widens a cell toward AI direction.
+**Defer** while any gate above is open: this is the recommendation in [ai-gm-mode.md](ai-gm-mode.md). DEL-08 stays at *propose*; while open, DEL-08 stands.
 
 **Reject** if any of these is found:
 
