@@ -252,6 +252,18 @@ def test_probes_pass_and_nothing_leaks_when_canon_answers_them(tmp_path: Path) -
     assert report["passed"]
 
 
+def test_a_reworded_secret_is_reported_but_never_fails(tmp_path: Path) -> None:
+    ws, ids, facts = rebuild(tmp_path)
+    description = "Folk say a relay with a crack, under pressure, is what rings the bell."
+    act(ws, "create_entity", names=["Rumour Board"], description=description)
+
+    found, unscored = s0.paraphrase_leaks(ws, GOLD)
+
+    assert any(m.startswith("paraphrase of B12 in ") for m in found), found
+    assert unscored == 0
+    assert s0.score_probes(ws, GOLD, answers(ws, ids, facts))["leaks"] == []  # no gate reads it
+
+
 def test_a_knower_inherits_but_a_faction_never_inherits_from_its_members(tmp_path: Path) -> None:
     ws, ids, facts = rebuild(tmp_path)
     sella = knowledge.known(ws, ids["Sella Marr"], START)

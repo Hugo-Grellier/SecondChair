@@ -8,6 +8,7 @@ scored with no LLM judge:
 - entity recall and precision against the gold set's named entities, by an exact shared name;
 - leaks: a canary in any entity (names, aliases, player-facing description) and every leak of
   canon knowledge (`s0.leaks`);
+- paraphrase leaks: rewordings of forbidden bible facts (`s0.paraphrase_leaks`), reported only;
 - narrative direction, from the log's actions (`s0.narrative_direction`);
 - the fact probes and the knowledge probes passed, from the agent's stored reply
   (`s0.score_answers`), and the continuity errors: refused contradictions, rejections and undos
@@ -35,6 +36,8 @@ METRICS = (
     "entity_recall",
     "entity_precision",
     "leaks",
+    "paraphrase_leaks",
+    "paraphrase_unscored",
     "narrative_direction",
     "fact_probes",
     "knowledge_probes",
@@ -66,6 +69,7 @@ def score_run(stored: Path, gold: dict) -> dict:
             )
         ]
         leaks = canaries + s0.leaks(ws, gold)
+        paraphrase_leaks, unscored = s0.paraphrase_leaks(ws, gold)
         actions = [e for e in entries if e.get("kind") == "action"]
         narrative = s0.narrative_direction(ws, actions)
         reply = stored.parent / REPLY_FILE
@@ -80,6 +84,8 @@ def score_run(stored: Path, gold: dict) -> dict:
         "entity_recall": len(found) / len(set(labels.values())),
         "entity_precision": len(matching) / len(named) if named else 0.0,
         "leaks": leaks,
+        "paraphrase_leaks": paraphrase_leaks,  # reported only, never gates (#198 G2)
+        "paraphrase_unscored": unscored,  # secrets too thin to score, reported with it
         "narrative_direction": narrative,
         "fact_probes": sum(probes["probes"][p] for p in s0.FACT_PROBES),
         "knowledge_probes": sum(probes["probes"][p] for p in s0.KNOWLEDGE_PROBES),
@@ -154,5 +160,8 @@ def markdown(found: dict) -> str:
     lines += ["", f"GM effort gain vs baseline: {'yes' if found['gain']['gm_effort'] else 'no'}."]
     for t in TABLES:
         for i, run in enumerate(found["tables"][t]["runs"], 1):
-            lines += [f"- {t} run {i}: {msg}" for msg in run["leaks"] + run["narrative_direction"]]
+            lines += [
+                f"- {t} run {i}: {msg}"
+                for msg in run["leaks"] + run["paraphrase_leaks"] + run["narrative_direction"]
+            ]
     return "\n".join(lines) + "\n"

@@ -22,6 +22,7 @@ from typing import Any
 import py3langid
 import yaml
 
+from secondchair.bench import paraphrase
 from secondchair.core import calls, capture, delegation, index, knowledge, world
 from secondchair.core.delegation import LOG_DIR
 from secondchair.core.tools import Change
@@ -313,6 +314,24 @@ def leaks(ws: Workspace, gold: dict) -> list[str]:
         if by_label.get(f) in checks["forbidden_party_facts_at_start"]
     ]
     return found
+
+
+def paraphrase_leaks(ws: Workspace, gold: dict) -> tuple[list[str], int]:
+    """REPORTED ONLY (#198 G2, never a gate): party-held statements and entity descriptions that
+    reword a forbidden bible fact, through `paraphrase.leaks`, and the number of secrets too thin
+    to score. Exact leaks are `leaks`."""
+    forbidden = set(gold["leak_checks"]["forbidden_party_facts_at_start"])
+    secrets = {
+        f["origin"]["page"]: f["statement"]
+        for f in index.search_facts(ws)
+        if str(f["origin"].get("source", "")).endswith("bible.md")
+        and f["origin"].get("page") in forbidden
+    }
+    held = knowledge.known(ws, index.PARTY)
+    texts = {f: h["statement"] for f, h in held.items()} | {
+        e["id"]: e["description"] for e in index.search_entities(ws) if e["description"]
+    }
+    return paraphrase.leaks(secrets, texts), len(paraphrase.unscored(secrets))
 
 
 def _labels(ws: Workspace, gold: dict) -> dict[str, str]:
