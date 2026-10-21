@@ -55,6 +55,16 @@ def purchased_content() -> list[tuple[Path, bool]]:
     return [(Path(e["path"]).expanduser().resolve(), e.get("opt_in", False)) for e in entries]
 
 
+def model_providers() -> list[str]:
+    """The third-party model providers the GM allows to receive their assets (#179, LIC-12,
+    LIC-16): one switch per provider, none by default."""
+    path, found = config()
+    names = found.get("model_providers", [])
+    if not isinstance(names, list) or not all(isinstance(n, str) and n for n in names):
+        raise MachineConfigError(f"{path}: model_providers must be a list of provider names.")
+    return names
+
+
 def data_dir() -> Path:
     """Where the Core keeps Sources it records itself, such as behaviour traces (TRC-04)."""
     return _xdg("XDG_DATA_HOME", ".local/share")
