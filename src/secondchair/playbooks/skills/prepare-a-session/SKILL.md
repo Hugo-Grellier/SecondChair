@@ -46,12 +46,13 @@ Write it with `write_prep` at `session-<n>/handoff.md`, in Markdown, organised f
 5. **Scenes**, in the order they are likely played, each with:
    - its purpose and how the party gets in and out (several ways in for an investigation);
    - a short read-aloud text (3 to 5 sentences, player-facing, checked with `check_audience_content`);
+   - a **cue** for each NPC who acts in the scene, readable in 5 to 10 seconds, on four lines: *objective* and *tactic* (what they want here and how they go about it), *posture* (their emotional state, a few words, GM-only), *opens with* (one line they say first, checked with `check_audience_content` for the `party` audience before you write it; if it does not pass, rewrite it), and *likely responses* (two or three: if the party does this, they do that). A cue is direction, not truth: it never states a secret as fact, never decides what a PC does or feels, and anything canon does not hold is a proposal;
    - what is there: places, NPCs present, clues (mystery clue ids and the fact each reveals), obstacles and the DCs the GM may use (PF2e: level-based DCs);
    - for an encounter, the creatures with their levels and the `encounter_xp` result (XP, threat), their tactics and morale, and the terrain;
    - treasure placed, with the running total against `treasure_budget`;
    - the Foundry scene key, its map, lights and music (below);
    - what to do if the party skips it or goes elsewhere.
-6. **NPCs**: one card each: name, role, look, voice and mannerism in a few words, what they want, what they know and hide (from `what_knows`), two or three lines they may say, how they react if threatened or bribed.
+6. **NPCs**: one card each (the scene cues carry what changes from scene to scene): name, role, look, voice and mannerism in a few words, what they want, what they know and hide (from `what_knows`), two or three lines they may say, how they react if threatened or bribed.
 7. **Investigation**: for each mystery in play, the conclusions, the clues the party can still find and where, and the missing links to watch (`check_mystery` warnings).
 8. **Improv kit**: names that fit the setting (people, places, taverns) not used in canon (check with `search_entities`), a few rumours with whether they are true, two or three short random encounters or complications with their levels, and how to recover if the party goes off track.
 9. **In Foundry**: what you prepared (scene keys and document keys), what realised and what needs the GM (conflicts, errors, assets you could not find, what to do by hand), and the order to activate scenes and playlists.
