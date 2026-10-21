@@ -307,10 +307,14 @@ def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict, dict], list[str]]:
             found[doc["id"]] = doc
         loaded.append(found)
     entities, facts, events, knowledge = loaded
-    for f in facts.values():
+    for f in list(facts.values()):
         for e in f["entities"]:
             if e not in entities:
                 errors.append(f"{FACTS_DIR}/{f['id']}.md: unknown entity {e!r}")
+        if unknown := [e for e in f.pop("_refs", []) if e not in entities]:
+            # A state the world-turn would follow to nowhere is skipped, like an invalid shape.
+            errors.append(f"{FACTS_DIR}/{f['id']}.md: its state names unknown entities {unknown}")
+            del facts[f["id"]]
     for ev in events.values():
         for key, among in (("opens", facts), ("closes", facts), ("replaces", events)):
             ids = ev[key] if isinstance(ev[key], list) else [ev[key]] if ev[key] else []
@@ -423,9 +427,12 @@ def _fact(calendar: Calendar, relations: set[str], front: dict, body: str) -> di
     if state is not None:
         from secondchair.core import world  # it builds on this module
 
-        world.check_state(calendar, state)  # a hand edit too: the world-turn reads its shape
+        # A hand edit too: the world-turn reads its shape, defaults filled as the tools fill them.
+        state, refs = world.check_state(calendar, state)
         if state["of"] not in front["entities"]:
             raise CanonError("a state fact's of is one of its entities")
+        # The ids its value names are checked against the entities with `entities` (_load).
+        return {**front, "state": state, "statement": body, "_refs": refs}
     return {**front, "statement": body}
 
 

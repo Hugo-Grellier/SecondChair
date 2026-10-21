@@ -47,6 +47,7 @@ from secondchair.core.workspace import CONFIG_FILE, Workspace, WorkspaceError
 
 FRONT, CLOCK, AGENDA, SITUATION = "front", "clock", "agenda", "situation"
 INTENT, POOL, CAPACITY, CATALOGUE = "intent", "pool", "capacity", "catalogue"  # ADR 0022
+FACTION_KEYS = (INTENT, POOL, CAPACITY, CATALOGUE)
 EFFECT_CLASSES = ("derived", "narrative")  # a catalogue effect's class, the GM's call (ADR 0009)
 STEP = "1w"  # the campaign-wide faction step unless workspace.yaml sets faction_step (ADR 0022)
 STAGES = ("available", "active", "resolved", "expired")  # `active`: the party engaged it
@@ -166,7 +167,7 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
         value = [
             fields(
                 {"id", "cost", "duration", "effect"},
-                {"prerequisites": [], "target": None, "contest": None},
+                {"prerequisites": [], "target": None, "contest": None, "serves": []},
                 a,
                 "catalogue action",
             )
@@ -195,6 +196,8 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
                     refs += ids([p["front"]], "A prerequisite's front")
                 else:
                     raise CanonError("A prerequisite is {holds: fact id} or {front, clock_gte}.")
+            for goal in items(a["serves"], "An action's serves (goal ids)", 0):
+                words(goal, "A served goal's id")
             if a["target"] is not None:
                 refs += ids([a["target"]], "An action's target")
             if a["contest"] is not None:

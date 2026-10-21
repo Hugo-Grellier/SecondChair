@@ -79,6 +79,47 @@ def _source(origin: dict) -> str:
 def tools(ws: Workspace) -> list[Tool]:
     """Canon's delegated actions and reads, bound to the served workspace."""
 
+    def _check_faction(
+        fact_id: str, origin: dict, state: dict, never_true: bool, dates: dict
+    ) -> None:
+        """A faction's state facts are the GM's to write (ADR 0022, decision a): never a job's
+        own work. One per key on any date, refused here rather than at read, where a second one
+        would stop the whole world-turn; a catalogue's `serves` names the faction's goals."""
+        if origin.get("kind") == "job":
+            raise CanonError(f"A faction's {state['key']} is the GM's to write, not a job's.")
+        same = [
+            f
+            for f in index.search_facts(ws, entity=state["of"])
+            if f["id"] != fact_id and (f.get("state") or {}).get("of") == state["of"]
+        ]
+        if state["key"] == world.CATALOGUE and (
+            intents := [
+                f for f in same if f["state"]["key"] == world.INTENT and not f["never_true"]
+            ]
+        ):
+            goals = {g["id"] for f in intents for g in f["state"]["value"]}
+            for a in state["value"]:
+                if unknown := set(a["serves"]) - goals:
+                    raise CanonError(f"{a['id']} serves unknown goals {sorted(unknown)}.")
+        if never_true:
+            return
+
+        def span(f: dict) -> tuple[int, int]:  # start-inclusive, end-exclusive; None is open
+            start, end = f["valid_from"], f["valid_to"]
+            return (
+                index.date_key(ws.calendar, start) if start else -(10**12),
+                index.date_key(ws.calendar, end) if end else 10**12,
+            )
+
+        lo, hi = span(dates)
+        for f in (f for f in same if f["state"]["key"] == state["key"] and not f["never_true"]):
+            start, end = span(f)
+            if start < hi and lo < end:
+                raise CanonError(
+                    f"{state['of']} already holds a {state['key']} fact ({f['id']}) on "
+                    "those dates: end it, or correct it, first."
+                )
+
     def fact_doc(
         fact_id: str,
         statement: str,
@@ -115,6 +156,8 @@ def tools(ws: Workspace) -> list[Tool]:
         dates = {}
         for key, value in (("valid_from", valid_from), ("valid_to", valid_to)):
             dates[key] = ws.calendar.canonical(value, partial=True) if value else None
+        if state is not None and state["key"] in world.FACTION_KEYS:
+            _check_faction(fact_id, origin, state, never_true, dates)
         front = {
             "id": fact_id,
             "entities": list(dict.fromkeys(involved)),
@@ -160,8 +203,9 @@ def tools(ws: Workspace) -> list[Tool]:
         pursues: [front or situation ids]}], "pool" {name: {value, income, cap}}, "capacity"
         (an integer >= 1) and "catalogue" [{id, cost: {pool: n}, duration, effect: {class:
         derived|narrative, does}, prerequisites: [{holds: fact id} or {front, clock_gte}],
-        target (entity id or null), contest ({pool} or null)}], which only the GM writes in
-        prep: draft them into notes/ instead. The statement says the same in words.
+        target (entity id or null), contest ({pool} or null), serves: [goal ids]}], which
+        only the GM writes in prep: draft them into notes/ instead (a job origin is refused).
+        The statement says the same in words.
         The Core looks the origin's evidence up and refuses it when it cannot find it: record
         what it cannot find with a job origin, which may carry the same quote or page."""
         fact_id = f"f-{secrets.token_hex(4)}"
