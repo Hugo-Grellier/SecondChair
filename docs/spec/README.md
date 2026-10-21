@@ -59,7 +59,7 @@ Two ticket resolutions disagreed with an ADR or with each other. The GM settled 
 | [0012](../adr/0012-behaviour-traces-capture-raw-input-with-consent.md) | Behaviour traces capture raw input, locally and only with consent | [04](04-canon-memory-capture.md), [10](10-success-bench.md) |
 | [0013](../adr/0013-third-party-modules-are-evidence-turn-drivers-take-over.md) | Third-party modules are optional evidence; a turn driver takes over; house rules come from discrepancies | [06](06-pf2e-rules.md) |
 | [0014](../adr/0014-declarative-campaign-calendar-core-follows-paizo.md) | Declarative campaign calendar; the Core follows Paizo over the PF2e clock | [05](05-living-world-calendar.md) |
-| [0018](../adr/0018-snapshot-boundary-restore-and-upgrade-consent.md) | **Proposed, awaiting the GM.** A snapshot is the workspace plus a paired Foundry world; restore into a fresh directory; a destructive migration needs consent. Amends ADR 0010 (in-place upgrade) and PKG-16 | [09](09-packaging.md) |
+| [0018](../adr/0018-snapshot-boundary-restore-and-upgrade-consent.md) | A snapshot is the workspace plus a paired Foundry world; restore into a fresh directory; a destructive migration needs consent. Amends ADR 0010 (in-place upgrade) and PKG-16 | [09](09-packaging.md) |
 
 ### Ticket resolutions without an ADR
 

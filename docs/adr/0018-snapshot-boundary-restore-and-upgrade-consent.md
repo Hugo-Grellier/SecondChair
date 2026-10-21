@@ -1,8 +1,8 @@
 # A campaign snapshot is the workspace plus a paired Foundry world; restore is into a fresh directory; a destructive migration needs consent
 
-Status: proposed — awaiting the GM ([#197](https://github.com/Hugo-Grellier/SecondChair/issues/197))
+Status: accepted 2026-10-21 ([#197](https://github.com/Hugo-Grellier/SecondChair/issues/197))
 
-Not binding until the GM accepts it. Until then ADR 0010 and PKG-16 hold as written.
+Accepted by the GM on 2026-10-21; it amends ADR 0010 and PKG-16 as stated below.
 
 **Amends [ADR 0010](0010-local-core-reached-by-the-gm-browser.md) (its upgrade consequence) and PKG-16 ([09](../spec/09-packaging.md#export-and-schema-evolution)).** ADR 0010 says an older schema blocks `serve` "until `secondchair upgrade` migrates it in place as a reviewable diff". PKG-16 says the same. On acceptance, PKG-16 becomes:
 
