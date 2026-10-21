@@ -121,11 +121,22 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
     return {**state, "value": value}, refs
 
 
-def _current(ws: Workspace) -> dict[str, dict[str, Any]]:
-    """Entity id -> its current state facts: one per key, a list of agenda steps."""
+def _current(ws: Workspace, at: str | None = None, head: bool = False) -> dict[str, dict[str, Any]]:
+    """Entity id -> its state facts valid on `at`, by default the cursor (#170): one per key, a
+    list of agenda steps. A belief (`never_true`) never is. `head`: the head of each chain, the
+    fact no event closes whatever its dates (#205), which an effect transforms (an occurrence
+    may be applied after a later one, LW-17) and whose dates `_holds` checks; a `valid_to` the
+    GM scheduled does not close it. Before the first world-turn, the open ones."""
+    if head:
+        closed = {c for e in index.search_events(ws) if e["status"] == "canon" for c in e["closes"]}
+        facts = [f for f in index.search_facts(ws) if not f["never_true"] and f["id"] not in closed]
+    elif at := at or cursor(ws):
+        facts = index.search_facts(ws, at=at)
+    else:
+        facts = [f for f in index.search_facts(ws) if not f["never_true"] and f["valid_to"] is None]
     found: dict[str, dict[str, Any]] = {}
-    for f in index.search_facts(ws):
-        if f.get("state") is None or f["valid_to"] is not None:
+    for f in facts:
+        if f.get("state") is None:
             continue
         mine = found.setdefault(f["state"]["of"], {AGENDA: []})
         key = f["state"]["key"]
@@ -138,6 +149,15 @@ def _current(ws: Workspace) -> dict[str, dict[str, Any]]:
         else:
             mine[key] = f
     return found
+
+
+def _holds(ws: Workspace, f: dict, date: str) -> bool:
+    """Whether fact `f` holds on `date`: started by then and not yet ended."""
+    on = index.date_key(ws.calendar, date)
+    start, end = f["valid_from"], f["valid_to"]
+    return (start is None or index.date_key(ws.calendar, start) <= on) and (
+        end is None or index.date_key(ws.calendar, end) > on
+    )
 
 
 def state(ws: Workspace) -> dict[str, dict]:
@@ -220,7 +240,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
         out.append({**occ, "rule": rule, **more})
         return out[-1]
 
-    for entity, s in sorted(_current(ws).items()):
+    for entity, s in sorted(_current(ws, head=True).items()):  # each date checked with _holds
         if FRONT in s and s[FRONT]["state"]["value"]["active"]:  # a pause suspends it (LW-14)
             rule = s[FRONT]["state"]["value"]
             clock = s[CLOCK]["state"]["value"] if CLOCK in s else 0
@@ -231,7 +251,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
             day = cal.add(rule["anchor"], f"{every}d")
             while room > 0 and at(day) <= at(until):
                 key = f"{entity}/tick@{day}"
-                if at(day) > at(since) and key not in used:
+                if at(day) > at(since) and key not in used and _holds(ws, s[FRONT], day):
                     n = min(rule["ticks"], room)
                     room -= n
                     cls = "rule" if rule["unless"] is None else "derived"
@@ -253,6 +273,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
                 if (
                     "date" in step["when"]
                     and at(step["when"]["date"]) <= at(until)
+                    and _holds(ws, s[FRONT], step["when"]["date"])
                     and step_key not in used  # a dated step never scheduled is, late
                 ):
                     due(step_key, "step", "rule", entity, step["when"]["date"], a["id"])
@@ -263,6 +284,7 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
                 v["deadline"] is not None
                 and v["stage"] in ("available", "active")
                 and at(v["deadline"]) <= at(until)
+                and _holds(ws, s[SITUATION], v["deadline"])
                 and key not in used
             ):
                 # An engaged situation's deadline is new narrative (ADR 0009).
@@ -421,9 +443,11 @@ def _evolution(
     rank: str,
     origin: dict,
     knowers: list[str],
+    closed_on: str | None = None,
 ) -> list[Change]:
     """An offscreen event closing `old` and opening the new state fact, and what its knowers
-    learn (LW-03, LW-11). File ids derive from the occurrence key, used once."""
+    learn (LW-03, LW-11). File ids derive from the occurrence key, used once. `closed_on`: `old`
+    starts after `date`, so a second event closes it on its start, never before (#205)."""
     fact_id, event_id = _id("f", key, "fact"), _id("v", key, "event")
     fact: dict[str, Any] = {"id": fact_id, "entities": [new_state["of"]], "relation": None}
     fact |= {"valid_from": None, "valid_to": None, "rank": rank, "origin": origin}
@@ -431,9 +455,14 @@ def _evolution(
     event: dict[str, Any] = {"id": event_id, "date": date, "kind": "offscreen"}
     event |= {"opens": [fact_id], "closes": [old["id"]] if old else [], "replaces": None}
     event |= {"rank": rank, "origin": origin}
-    changes = [
-        Change(f"{index.FACTS_DIR}/{fact_id}.md", index.join_doc(fact, statement), key),
-        Change(f"{index.EVENTS_DIR}/{event_id}.md", index.join_doc(event, description), key),
+    events = [event]
+    if closed_on:
+        events.insert(0, {**event, "id": _id("v", key, "close"), "date": closed_on, "opens": []})
+        event["closes"] = []
+    changes = [Change(f"{index.FACTS_DIR}/{fact_id}.md", index.join_doc(fact, statement), key)]
+    changes += [
+        Change(f"{index.EVENTS_DIR}/{e['id']}.md", index.join_doc(e, description), key)
+        for e in events
     ]
     for knower in dict.fromkeys(knowers):  # LW-11: the carrier and named participants only
         k_id = _id("k", key, knower)
@@ -446,8 +475,10 @@ def _evolution(
 def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change]:
     """The files one occurrence writes; `_Blocked` when it no longer applies or contradicts
     played canon (LW-09)."""
-    s = _current(ws).get(record["entity"], {AGENDA: []})
+    s = _current(ws, head=True).get(record["entity"], {AGENDA: []})
     key, date, entity = record["key"], record["date"], record["entity"]
+    if FRONT in s and not _holds(ws, s[FRONT], date):
+        raise _Blocked(f"{entity} is not a front on {date}")
     names = {e["id"]: e["names"][0] for e in index.search_entities(ws)}
     if record["kind"] == "tick":
         if FRONT not in s:
@@ -491,7 +522,9 @@ def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change
     ]
     if played:
         raise _Blocked(f"it contradicts played fact {played[0]['id']}")
-    return _evolution(key, old, new_state, statement, key, date, rank, origin, knowers)
+    late = bool(old and old["valid_from"]) and not _holds(ws, {**old, "valid_to": None}, date)
+    closed_on = old["valid_from"] if late else None  # LW-17: the event keeps the date
+    return _evolution(key, old, new_state, statement, key, date, rank, origin, knowers, closed_on)
 
 
 def _rule_rank(ws: Workspace, record: dict) -> tuple[str, dict]:
@@ -541,7 +574,7 @@ def _apply(
 def _cascade(ws: Workspace, tick: dict, approve: tuple[str, bool] | None, job: int | None) -> None:
     """The threshold steps a tick crosses, dated at the tick, each once (T5): new ones, and
     those an undo returned to the queue with it."""
-    s = _current(ws).get(tick["entity"], {AGENDA: []})
+    s = _current(ws, head=True).get(tick["entity"], {AGENDA: []})
     clock = s[CLOCK]["state"]["value"] if CLOCK in s else 0
     known = {r["key"]: r for r in occurrences(ws)}
     for a in s[AGENDA]:
