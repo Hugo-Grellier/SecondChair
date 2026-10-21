@@ -522,7 +522,7 @@ def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change
     ]
     if played:
         raise _Blocked(f"it contradicts played fact {played[0]['id']}")
-    late = old and old["valid_from"] and not _holds(ws, {**old, "valid_to": None}, date)
+    late = bool(old and old["valid_from"]) and not _holds(ws, {**old, "valid_to": None}, date)
     closed_on = old["valid_from"] if late else None  # LW-17: the event keeps the date
     return _evolution(key, old, new_state, statement, key, date, rank, origin, knowers, closed_on)
 
