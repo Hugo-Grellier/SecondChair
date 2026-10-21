@@ -654,7 +654,8 @@ def _effect(
             raise _Blocked(f"{entity} holds no pool")
         pools = old["state"]["value"]
         if record["kind"] == INCOME:
-            value = _credited(pools)
+            if (value := _credited(pools)) == pools:  # a late accept finds them at their caps
+                raise _Blocked(f"{entity}'s pools are at their caps")
         else:  # a pool never goes below zero, whatever moved since the validation
             debit = record["debit"]
             if short := {n: c for n, c in debit.items() if n not in pools or c > pools[n]["value"]}:
@@ -716,6 +717,10 @@ def _changes(
         rank = ("agent_proposal", {"kind": "rule", "fact": record["rule"], "key": record["key"]})
         debit = _effect(ws, record, *rank, overlay) if any(record["debit"].values()) else []
         return debit + _learnt(ws, record, f": {_does(ws, record)}", "effect")
+    if record["kind"] == INCOME and rank is None:  # the rank of the pool it credits, its head:
+        head = _current(ws, head=True, overlay=overlay).get(record["entity"], {}).get(POOL)
+        if head is not None:  # a debited pool's lower rank is never promoted (ADR 0009)
+            rank = (head["rank"], {"kind": "rule", "fact": record["rule"], "key": record["key"]})
     if rank is None and record["cites"]:  # an unless settled by a job (LW-10)
         rank = ("agent_proposal", {"kind": "job", "job": str(record["job"])})
     return _effect(ws, record, *(rank or _rule_rank(ws, record)), overlay)
@@ -1036,7 +1041,7 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
     derived consequence at the living world's level (ADR 0022 decision c), held behind a
     proposal call at propose. `job`: the started faction-intent job that chose. Refused during
     a live session (LW-05), at manual, after the world-turn cursor, and within one faction step
-    of another faction turn. Queues no job. Returns the records."""
+    of another faction turn. Queues no job. Returns the records, its income ones included."""
     from secondchair.core import jobs  # it builds on canon, which builds on this module
 
     with locked(ws):
@@ -1059,7 +1064,7 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
         if near := [
             r["key"]
             for r in occurrences(ws)
-            if r["kind"] in (ACTION, FAILURE)
+            if r["kind"] in (ACTION, FAILURE, INCOME)  # income once per step, too
             and at(cal.add(r["date"], step)) > at(date)
             and at(cal.add(date, step)) > at(r["date"])
         ]:
@@ -1094,7 +1099,9 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
             else:
                 plan_one(record)
         used = {r["key"] for r in occurrences(ws)}
-        heads = _current(ws, head=True, overlay=overlay)
+        # Held at propose, no debit lands now: income is planned on the pools as they stand.
+        held = delegation.plan_actions(ws, _effect_tool(), AGENT, [], job) is None
+        heads = _current(ws, head=True, overlay=[] if held else overlay)
         for faction, s in sorted(_current(ws, at=date).items()):  # credited after the debits
             pool = heads.get(faction, {}).get(POOL)
             key = f"{faction}/income@{date}"
@@ -1135,12 +1142,12 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
             if why is not None:
                 _ask(ws, r, "exception", f"{why}; reject it, or accept it once it applies")
             elif r["status"] == "queued" and r["kind"] == INCOME:
-                _ask(ws, r, "proposal", "accept, reject or reschedule it")
+                _ask(ws, r, "proposal", "its faction is credited its income; accept or reject it")
             elif r["status"] == "queued" and r["kind"] == FAILURE:
                 _ask(ws, r, "proposal", "its faction learns its choice failed; accept or reject it")
             elif r["status"] == "queued":
                 _ask(ws, r, "proposal", "its faction acts and pays for it; accept or reject it")
-        return [r for r, _, _ in planned if r["kind"] != INCOME]
+        return [r for r, _, _ in planned]
 
 
 def _credited(pools: dict) -> dict:
@@ -1253,8 +1260,8 @@ def decide(
                 "or reschedule it."
             )
         if answer == "reschedule":
-            if record["kind"] in (FAILURE, ACTION):  # a choice belongs to its faction step
-                raise DelegationError(f"{key} is a faction choice: accept or reject it.")
+            if record["kind"] in (FAILURE, ACTION, INCOME):  # it belongs to its faction step
+                raise DelegationError(f"{key} belongs to its faction step: accept or reject it.")
             if date is None:
                 raise DelegationError("Rescheduling needs the new date.")
             date = ws.calendar.canonical(date)
@@ -1270,6 +1277,14 @@ def decide(
             record["rescheduled_to"] = f"{key}~{date}"
         _save(ws, record, OCCURRENCES_DIR)
         return _find(ws, key)
+
+
+def undoable_alone(ws: Workspace, entry: dict) -> bool:
+    """Whether one entry of an occurrence may be undone on its own: only a narrative-direction
+    job's, whose last undo returns its occurrence to the queue (LW-19). Every other occurrence
+    is undone whole (`undo`), or half of it would stay applied."""
+    record = next((r for r in occurrences(ws) if r["key"] == entry["occurrence"]), None)
+    return record is None or (record["class"] == "narrative" and record["kind"] != ACTION)
 
 
 def proposal_answered(ws: Workspace, entry: dict) -> None:
@@ -1301,13 +1316,20 @@ def undo(ws: Workspace, key: str, reason: str, channel: str, authenticated: bool
             raise DelegationError(f"{key} is {target['status']}, not applied.")
         if target["kind"] in ("pause", "resume"):
             raise DelegationError(f"{key} is a GM gesture: resume or pause the front instead.")
-        first = min(target["entries"])
+        first, faction = min(target["entries"]), target["kind"] in (ACTION, FAILURE, INCOME)
+
+        def built_on(r: dict) -> bool:
+            """A later effect on the target's entity; for a faction, only along its pool chain:
+            a later debit or income on the pool a debit or an income closed."""
+            later = r["entity"] == target["entity"] and min(r["entries"]) > first
+            return later and (not faction or (_pooled(target) and _pooled(r)))
+
         todo = {
             r["key"]: r
             for r in records
             if r["status"] == "applied"
             and r["kind"] not in ("pause", "resume")
-            and (r["key"] == key or (r["entity"] == target["entity"] and min(r["entries"]) > first))
+            and (r["key"] == key or built_on(r))
         }
         while more := [
             r
@@ -1323,11 +1345,18 @@ def undo(ws: Workspace, key: str, reason: str, channel: str, authenticated: bool
                 "correction or a retcon can change it now."
             )
         for entry in entries:
-            delegation.undo(ws, entry, reason, channel, authenticated)
+            delegation.undo(ws, entry, reason, channel, authenticated, whole=True)
         for r in todo.values():
             r |= {"status": "queued", "entries": []}
             _save(ws, r, OCCURRENCES_DIR)
+            if r["kind"] in (ACTION, FAILURE, INCOME):  # back in the queue, it waits on the GM
+                _ask(ws, r, "proposal", f"undone ({reason}); accept or reject it")
         return sorted(todo)
+
+
+def _pooled(record: dict) -> bool:
+    """Whether a faction occurrence changes its pool: an income, or a debit."""
+    return record["kind"] == INCOME or (record["kind"] == ACTION and any(record["debit"].values()))
 
 
 def set_active(ws: Workspace, front: str, active: bool, date: str, authenticated: bool) -> dict:

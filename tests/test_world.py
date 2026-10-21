@@ -1220,11 +1220,12 @@ def chose(*actions: str) -> list[dict]:
 
 
 def fturn(ws: Workspace, date: str, choices: Any, job: int | None = None) -> list[dict]:
-    """A faction turn on `date`, the world-turn cursor first brought up to it."""
+    """A faction turn on `date`, the world-turn cursor first brought up to it: its choice
+    records, without its income ones."""
     at = world.cursor(ws)
     if at is None or index.date_key(ws.calendar, at) < index.date_key(ws.calendar, date):
         turn(ws, date)
-    return world.faction_turn(ws, date, choices, job)
+    return [r for r in world.faction_turn(ws, date, choices, job) if r["kind"] != "income"]
 
 
 def failure_event(ws: Workspace, key: str) -> list[dict]:
@@ -1391,7 +1392,7 @@ def test_one_faction_turn_per_step_never_after_the_cursor(ws: Workspace) -> None
     for inside in ("4725-01-11", "4725-01-05", "4725-01-01"):
         with pytest.raises(DelegationError, match="One faction turn per step"):
             world.faction_turn(ws, inside, {council: chose("bribe")})
-    [next_week] = world.faction_turn(ws, "4725-01-12", {council: chose("bribe")})
+    next_week = world.faction_turn(ws, "4725-01-12", {council: chose("bribe")})[0]
     assert next_week["status"] == "applied"
 
 
@@ -1483,6 +1484,7 @@ def test_a_contest_is_seeded_from_its_keys_and_replays_to_the_same_records(
     first, replay = outcome(ws), outcome(workspace.load(copy))
 
     assert first == replay  # every field but the wall-clock `at`
+    first = [r for r in first if r["kind"] != "income"]
     rolls = {r["entity"]: r["contest"]["roll"] for r in first}
     assert rolls == {f: world.roll(f"{f}/seize@{TURN}") for f in (council, guild)}
     [won] = [r for r in first if r["status"] == "applied"]
@@ -1578,15 +1580,33 @@ def test_a_cite_that_is_no_canon_fact_refuses_the_whole_output(ws: Workspace) ->
             world.faction_turn(ws, TURN, {council: [{"action": "bribe", "cites": cites}]})
     assert snapshot(ws.root) == before
     # A belief may be cited, held by the faction or not (D25).
-    [record] = world.faction_turn(ws, TURN, {council: [{"action": "bribe", "cites": [belief]}]})
+    record = world.faction_turn(ws, TURN, {council: [{"action": "bribe", "cites": [belief]}]})[0]
     assert record["cites"] == [belief]
 
 
 def test_an_empty_faction_turn_records_nothing_and_leaves_its_step_free(ws: Workspace) -> None:
-    council = gm_faction(ws, "Council", 5, 1, action("bribe", {"coin": 1}))
+    council = gm_faction(ws, "Council", 10, 1, action("bribe", {"coin": 1}))  # at its cap
 
     assert fturn(ws, TURN, {}) == [] and fturn(ws, TURN, {council: []}) == []
     assert world.faction_turn(ws, TURN, {council: chose("bribe")})[0]["status"] == "applied"
+
+
+def test_an_empty_turn_crediting_income_occupies_its_step(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 2, 1, action("bribe", {"coin": 1}))
+    fturn(ws, TURN, {})
+    turn(ws, NEXT)
+
+    for inside, choices in (
+        ("4725-01-06", {}),
+        ("4725-01-07", {}),
+        ("4725-01-08", {council: chose("bribe")}),
+    ):
+        with pytest.raises(DelegationError, match="One faction turn per step"):
+            world.faction_turn(ws, inside, choices)
+    assert [r["key"] for r in world.occurrences(ws) if r["kind"] == "income"] == [
+        f"{council}/income@{TURN}"
+    ]
+    assert coin(ws, council, NEXT) == 3  # credited once
 
 
 def test_a_hand_edit_to_any_faction_it_read_rolls_an_interrupted_turn_back(
@@ -1619,7 +1639,8 @@ def test_a_hand_edit_to_any_faction_it_read_rolls_an_interrupted_turn_back(
 
     assert [r for r in world.occurrences(ws) if r["kind"] != "tick"] == []
     assert "faction turn must run again" in calls.read_calls(ws)[-1]["message"]
-    assert len(world.faction_turn(ws, TURN, choices)) == 4  # run again, it plans afresh
+    again = world.faction_turn(ws, TURN, choices)  # run again, it plans afresh
+    assert len([r for r in again if r["kind"] != "income"]) == 4
 
 
 def test_failed_choices_are_listed_collapsed_with_their_reason_in_the_report(
@@ -1665,9 +1686,9 @@ def test_an_applied_failure_is_accepted_late_or_undone_back_to_the_queue(ws: Wor
     [record] = fturn(ws, TURN, {council: chose("squeeze")})
     assert record["status"] == "applied" and failure_event(ws, record["key"])
 
-    income = f"{council}/income@{TURN}"  # later on the same faction: undone with it (LW-12)
-    undone = world.undo(ws, record["key"], "other", "cli", authenticated=True)
-    assert undone == sorted([record["key"], income])
+    # Its income is not built on it: only the pool chain cascades (LW-12).
+    assert world.undo(ws, record["key"], "other", "cli", authenticated=True) == [record["key"]]
+    assert occ(ws, f"{council}/income@{TURN}")["status"] == "applied"
     assert occ(ws, record["key"])["status"] == "queued"
     assert failure_event(ws, record["key"]) == []
     assert world.decide(ws, record["key"], "accept", authenticated=True)["status"] == "applied"
@@ -1721,7 +1742,8 @@ def test_income_is_credited_once_per_step_up_to_the_cap(ws: Workspace) -> None:
     [credited] = index.search_facts(ws, at=TURN, entity=council)
     assert credited["rank"] == "gm_decision"  # a rule effect keeps its rule's rank (ADR 0009)
     assert credited["origin"]["key"] == income["key"]
-    assert world.faction_turn(ws, TURN, {}) == []  # its key is used once (LW-13)
+    with pytest.raises(DelegationError, match="One faction turn per step"):
+        world.faction_turn(ws, TURN, {})  # once per step (LW-13)
     assert [r["key"] for r in world.occurrences(ws) if r["kind"] == "income"] == [income["key"]]
 
     turn(ws, NEXT)
@@ -1820,6 +1842,108 @@ def test_undoing_an_action_returns_its_debit_and_effect_together(ws: Workspace) 
     assert coin(ws, council, TURN) == 5 and effect_facts(ws, record["key"]) == []
     world.decide(ws, record["key"], "accept", authenticated=True)
     assert coin(ws, council, TURN) == 3 and len(effect_facts(ws, record["key"])) == 1
+
+
+def pool_ranks(ws: Workspace, faction: str) -> list[tuple[str, str | None]]:
+    return [
+        (f["rank"], f["origin"].get("key"))
+        for f in index.search_facts(ws, entity=faction)
+        if (f.get("state") or {}).get("key") == "pool"
+    ]
+
+
+def test_income_takes_the_rank_of_the_pool_it_credits_never_a_higher_one(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 5, 1, action("bribe", {"coin": 2}))
+
+    fturn(ws, TURN, {council: chose("bribe")})
+
+    bribe, income = f"{council}/bribe@{TURN}", f"{council}/income@{TURN}"
+    assert sorted(pool_ranks(ws, council), key=str) == sorted(
+        [
+            ("gm_decision", None),
+            ("agent_proposal", bribe),
+            ("agent_proposal", income),  # credited on the debited pool: not promoted
+        ],
+        key=str,
+    )
+
+
+def test_undoing_a_faction_choice_cascades_only_along_its_pool_chain(ws: Workspace) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    squeeze = action("squeeze", {"coin": 1}, prerequisites=[{"front": tolls, "clock_gte": 1}])
+    council = gm_faction(ws, "Council", 5, 2, squeeze, action("bribe", {"coin": 2}))
+    belief = {"of": tolls, "key": "clock", "value": 1}
+    learn(ws, council, fact(ws, "The squeeze began.", never_true=True, state=belief), "believes")
+    fturn(ws, TURN, {council: chose("squeeze", "bribe")})
+    squeezed, bribe = f"{council}/squeeze@{TURN}", f"{council}/bribe@{TURN}"
+
+    assert world.undo(ws, squeezed, "other", "cli", authenticated=True) == [squeezed]
+
+    assert occ(ws, bribe)["status"] == "applied" and coin(ws, council, TURN) == 4
+    back = occ(ws, squeezed)
+    assert back["status"] == "queued" and back["call"] is not None  # it waits on the GM
+    # A debit takes the later income on its pool with it, each back behind a call.
+    income = f"{council}/income@{TURN}"
+    assert world.undo(ws, bribe, "other", "cli", authenticated=True) == sorted([bribe, income])
+    assert all(occ(ws, k)["call"] is not None for k in (bribe, income))
+    assert coin(ws, council, TURN) == 5
+
+
+def test_one_entry_of_a_faction_occurrence_is_never_undone_alone(ws: Workspace) -> None:
+    seize = action("seize", {"coin": 2})
+    seize["effect"]["class"] = "narrative"
+    council = gm_faction(ws, "Council", 5, 2, seize, action("bribe", {"coin": 2}))
+    held, bribe = fturn(ws, TURN, {council: chose("seize", "bribe")})
+    accepted = world.decide(ws, held["key"], "accept", authenticated=True)
+
+    for record in (bribe, accepted):
+        for entry in (min(record["entries"]), max(record["entries"])):
+            with pytest.raises(DelegationError, match="world undo"):
+                delegation.undo(ws, entry, "other", "cli", True)
+    assert occ(ws, bribe["key"])["status"] == occ(ws, held["key"])["status"] == "applied"
+    assert coin(ws, council, TURN) == 2  # 5 - 2 + 1 - 2
+
+
+def test_at_propose_income_counts_no_held_debit_and_belongs_to_its_step(ws: Workspace) -> None:
+    rich = gm_faction(ws, "Rich", 10, 1, action("bribe", {"coin": 2}))  # at its cap
+    poor = gm_faction(ws, "Poor", 5, 1, action("bribe", {"coin": 2}))
+    set_level(ws, "prep", "living_world", "propose")
+
+    fturn(ws, TURN, {rich: chose("bribe"), poor: chose("bribe")})
+
+    incomes = [r["key"] for r in world.occurrences(ws) if r["kind"] == "income"]
+    assert incomes == [f"{poor}/income@{TURN}"]  # the held debit is not counted for Rich
+    with pytest.raises(DelegationError, match="accept or reject"):
+        world.decide(ws, incomes[0], "reschedule", True, date=NEXT)
+    world.decide(ws, f"{rich}/bribe@{TURN}", "reject", authenticated=True)
+    assert coin(ws, rich, TURN) == 10
+
+
+def test_a_hand_edit_to_an_income_only_faction_rolls_an_interrupted_turn_back(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    council = gm_faction(ws, "Council", 5, 1, action("bribe", {"coin": 1}))
+    guild = gm_faction(ws, "Guild", 5, 1, action("bribe", {"coin": 1}))  # no choice: income
+    turn(ws, TURN)
+    [pool] = [
+        f for f in index.search_facts(ws, entity=guild) if (f["state"] or {}).get("key") == "pool"
+    ]
+
+    def crash(step: str) -> None:
+        if step.startswith("occurrences/"):
+            raise RuntimeError(step)
+
+    monkeypatch.setattr(journal, "_fault", crash)
+    with pytest.raises(RuntimeError):
+        world.faction_turn(ws, TURN, {council: chose("bribe")})
+    monkeypatch.setattr(journal, "_fault", lambda step: None)
+    path = ws.root / index.FACTS_DIR / f"{pool['id']}.md"
+    path.write_text(path.read_text().replace("value: 5", "value: 0"))
+    with delegation.locked(ws):  # the first acquisition recovers
+        pass
+
+    assert [r for r in world.occurrences(ws) if r["kind"] != "tick"] == []
+    assert "rolled back" in calls.read_calls(ws)[-1]["message"]
 
 
 def test_a_contest_loser_never_debits_and_learns_no_effect(ws: Workspace) -> None:

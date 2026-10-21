@@ -671,11 +671,27 @@ def reject(ws: Workspace, entry_id: int, reason: str, channel: str, authenticate
         return entry
 
 
-def undo(ws: Workspace, entry_id: int, reason: str, channel: str, authenticated: bool) -> dict:
-    """Undo an applied reversible action of the current moment (DEL-25, DEL-26)."""
+def undo(
+    ws: Workspace,
+    entry_id: int,
+    reason: str,
+    channel: str,
+    authenticated: bool,
+    whole: bool = False,
+) -> dict:
+    """Undo an applied reversible action of the current moment (DEL-25, DEL-26). An entry of a
+    world occurrence goes with the rest of it (`world.undo`, which passes `whole`), except a
+    narrative-direction job's own entries (LW-19)."""
+    from secondchair.core import world  # it builds on this module
+
     _check_reason(reason)
     with locked(ws):
         entry = _entry(ws, entry_id, "action")
+        if not whole and entry.get("occurrence") and not world.undoable_alone(ws, entry):
+            raise DelegationError(
+                f"Entry {entry_id} is part of occurrence {entry['occurrence']}: undo it whole "
+                f"with `secondchair world undo {entry['occurrence']}`."
+            )
         if entry["status"] != "applied":
             raise DelegationError(f"Entry {entry_id} is {entry['status']}, not applied.")
         if not entry["reversible"]:
