@@ -26,7 +26,7 @@ You were given a job id: call `start_job` with it and the host, model and effort
 - `inputs.session`: the number of the session to prepare.
 - `inputs.brief` (optional): the path of the GM's brief, a Source: what they want this session to hold, scenes they have in mind, constraints (duration, players absent, tone). Read it, never edit it. Without a brief, prepare what canon and the living world lead to, and ask nothing during a job: list the choices you made as open questions.
 
-Also read, when they exist: earlier handoffs (`prep/session-*/handoff.md`), the working notes (`notes/`, the GM's provisional ideas: never treat them as canon), the scenes and documents already prepared (`scenes/*.yaml`, `documents/*.yaml`), and the house rules (`house-rules.yaml`).
+Also read, when they exist: earlier handoffs (`prep/session-*/handoff.md`), the working notes (`notes/`, the GM's provisional ideas: never treat them as canon; an opportunity note under `notes/opportunities/` whose front matter says `status: adopted` is an idea the GM chose to offer, to weave in as a proposal, never as something that happened), the scenes and documents already prepared (`scenes/*.yaml`, `documents/*.yaml`), and the house rules (`house-rules.yaml`).
 
 ## What canon says (read before writing anything)
 
