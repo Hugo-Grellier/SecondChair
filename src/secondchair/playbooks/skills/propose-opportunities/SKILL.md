@@ -31,7 +31,7 @@ Write the note in the **campaign language** (`campaign_language` of `workspace.y
 3. **NPC dossiers**, when present: `notes/npcs/<entity id>.md`, in particular their change triggers.
 4. **Deterministic signals**, only these:
    - **Unused prep**: the clue ids of the session's handoff (`prep/session-<n>/handoff.md`) that `check_mystery` still reports as not found.
-   - **Spotlight**, when available: how many played facts concern each PC this session. A PC with few is a prompt to offer them a hook, never a verdict.
+   - **Spotlight**: how many played facts concern each PC this session (the count the wrap summary shows). A PC with few is a prompt to offer them a hook, never a verdict.
    - **Change triggers**: a dossier trigger whose cited facts now hold in canon.
 
 You apply no judgement of your own to decide that a beat is due, that foreshadowing was contradicted or that a faction repeats itself. If the GM wants that, they ask in conversation.
