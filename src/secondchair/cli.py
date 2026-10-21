@@ -515,6 +515,7 @@ def _prep_command(args: argparse.Namespace) -> int:
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok", True) else 1
 
+
 def _mystery_command(args: argparse.Namespace) -> str:
     """Check a mystery draft note against canon (#177); nothing is written."""
     ws = workspace.load(args.workspace)
