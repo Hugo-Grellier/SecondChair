@@ -333,6 +333,7 @@ def test_a_record_made_by_hand_during_a_hold_is_never_overwritten(ws: Workspace)
         delegation._log_path(ws, 2).write_text("id: 2\nhand: true\n")
         with pytest.raises(delegation.DelegationError):
             delegation._append(ws, {"kind": "t"})
+        assert delegation._append(ws, {"kind": "t"})["id"] == 3  # the retry re-globs
     assert "hand" in delegation._log_path(ws, 2).read_text()
 
 

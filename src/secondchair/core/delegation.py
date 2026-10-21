@@ -1447,6 +1447,7 @@ def _append(ws: Workspace, entry: dict, directory: str = LOG_DIR) -> dict:
     entry = {"id": _next_id(ws, directory), "at": datetime.now(UTC).isoformat(), **entry}
     target = ws.root / directory / f"{entry['id']:06d}.yaml"
     if target.exists():  # a file made by hand behind the cache: never overwrite a record
+        _forget(target.parent)  # a retry in this hold re-globs and finds a free id
         raise DelegationError(f"{target.name} already exists in {directory}; nothing was written.")
     _save(ws, entry, directory)
     if _is_held(ws):  # _save dropped it: only ours is new
@@ -1459,9 +1460,10 @@ def _is_held(ws: Workspace) -> bool:
     return ws.root.resolve() in _held.__dict__.get("roots", ())
 
 
-# Highest file id per directory, kept for one lock hold only (nobody else writes meanwhile) and
-# dropped by every write or removal in that directory (`_write`, `_apply`, the journal's
-# `_put`), so the glob runs once per directory per hold instead of once per append.
+# Highest file id per directory, kept only while a lock is held (cleared on every acquisition and
+# release, so nobody else writes meanwhile) and dropped by every write or removal in that
+# directory (`_write`, `_apply`, the journal's `_put`): the glob runs once per directory per hold
+# instead of once per append.
 _FILE_IDS: dict[str, int] = {}
 
 
