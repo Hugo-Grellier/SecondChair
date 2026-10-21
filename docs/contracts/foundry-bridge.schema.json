@@ -775,6 +775,10 @@
                   "type": "object",
                   "description": "Where play stood when the cue was shown (ADR 0020 item 3). The Core withdraws the cue (sends null) as soon as any field but `at` differs from where play stands now; the Desk shows its age from `at`.",
                   "properties": {
+                    "moment": {
+                      "type": "integer",
+                      "description": "The moment's sequence number, which grows at every moment change: a cue shown in prep stays withdrawn after a session starts and ends."
+                    },
                     "session": {
                       "type": [
                         "integer",
@@ -816,6 +820,7 @@
                     }
                   },
                   "required": [
+                    "moment",
                     "session",
                     "observation",
                     "scene",

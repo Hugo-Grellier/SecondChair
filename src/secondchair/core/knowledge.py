@@ -146,7 +146,7 @@ def show_cue(
 
 def active_cue(ws: Workspace) -> dict[str, Any] | None:
     """The acting cue last shown, if any; none when its derived file is unreadable. A cue is
-    withdrawn once play has moved on from its `as_of` (session, scene, combat round or turn,
+    withdrawn once play has moved on from its `as_of` (moment, session, scene, round or turn,
     ADR 0020 item 3), so a stale cue is never shown as current; one with no `as_of` is too."""
     try:
         cue = json.loads((ws.root / CUE_FILE).read_text())
@@ -252,8 +252,8 @@ def tools(ws: Workspace) -> list[Tool]:
         held by the NPC, or a fact it does not know is. `posture`, optional, is a few words on the
         NPC's emotional state: GM-only direction shown under the goal, never audience content, so
         it is not checked as a line. It replaces the active cue and is shown
-        whatever the NPC's delegation level, since it is a read, until the scene, the combat
-        round or turn, or the session changes: then it is withdrawn."""
+        whatever the NPC's delegation level, since it is a read, until the moment, the session,
+        the scene, or the combat round or turn changes: then it is withdrawn."""
         return show_cue(ws, npc, goal, line, cites, knows, does_not_know, posture)
 
     return [

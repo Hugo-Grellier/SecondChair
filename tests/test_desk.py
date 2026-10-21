@@ -260,6 +260,7 @@ def test_a_cue_is_withdrawn_once_play_moves_on_and_a_stale_one_is_never_shown(
     shown = state(ws)["cue"]
     assert shown["line"] == line
     assert {k: v for k, v in shown["as_of"].items() if k != "at"} == {
+        "moment": delegation.current_moment(ws)[1],
         "session": 1,
         "observation": "o2",
         "scene": "Scene.tower",
@@ -289,6 +290,27 @@ def test_a_cue_is_withdrawn_once_play_moves_on_and_a_stale_one_is_never_shown(
     gesture(ws, "end_session")
     assert state(ws)["cue"] is None
     (ws.root / knowledge.CUE_FILE).write_text(json.dumps({"npc": tovan, "line": line}))
+    assert state(ws)["cue"] is None
+
+
+def test_a_cue_shown_in_prep_stays_withdrawn_after_a_session(ws: Workspace) -> None:
+    tovan, bell, _ = npc_who_knows(ws)
+    line = "It only rings when the nights are dry."
+    cue(ws, tovan, line, [bell])
+    assert state(ws)["cue"]["as_of"]["session"] is None
+
+    gesture(ws, "start_session")  # an empty session withdraws it, with no observation yet
+    assert state(ws)["cue"] is None
+    observe(ws, "o1", 0, "scene", "Scene.tower", action="activate", name="Tower")
+    assert state(ws)["cue"] is None
+    gesture(ws, "end_session")  # back outside a session: still withdrawn
+    assert state(ws)["cue"] is None
+
+    # A cue shown in an empty session is withdrawn at its end too.
+    gesture(ws, "start_session")
+    cue(ws, tovan, line, [bell])
+    assert state(ws)["cue"]["as_of"]["observation"] is None
+    gesture(ws, "end_session")
     assert state(ws)["cue"] is None
 
 

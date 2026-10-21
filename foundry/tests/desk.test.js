@@ -34,6 +34,7 @@ const STATE = {
     does_not_know: [{ id: "f-3", statement: "A cracked relay rings the bell." }],
     voiced: false,
     as_of: {
+      moment: 7,
       session: 3,
       observation: "o-17",
       scene: "Scene.s1",
@@ -166,10 +167,16 @@ test("the acting cue shows its age, and its round in combat", () => {
   const cue = /** @type {NonNullable<DeskState["cue"]>} */ (STATE.cue);
   const html = deskHtml({ isGM: true, state: STATE, pile: null, ceiling: "propose" });
   assert.match(html, /<time datetime="2026-10-21T20:15:00\+00:00">As of [^<,]+<\/time>/);
-  const fighting = { ...STATE, cue: { ...cue, as_of: { ...cue.as_of, round: 2, turn: 1 } } };
+  const asOf = /** @type {NonNullable<typeof cue.as_of>} */ (cue.as_of);
+  const fighting = { ...STATE, cue: { ...cue, as_of: { ...asOf, round: 2, turn: 1 } } };
   assert.ok(valid(fighting), JSON.stringify(valid.errors));
   const combat = deskHtml({ isGM: true, state: fighting, pile: null, ceiling: "propose" });
   assert.match(combat, /As of [^<]+, round 2<\/time>/);
+  // A Core from before as_of: the cue renders, with no age line.
+  const { as_of: _, ...older } = cue;
+  const old = deskHtml({ isGM: true, state: { ...STATE, cue: older }, pile: null, ceiling: "x" });
+  assert.match(old, /Tovan Reed/);
+  assert.doesNotMatch(old, /As of/);
 });
 
 test("while a turn driver is active the acting cue shows no agent's line", () => {
