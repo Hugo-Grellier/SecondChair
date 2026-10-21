@@ -506,3 +506,18 @@ def test_the_model_name_check_catches_model_names() -> None:
     for text in ("model: sonnet", "use gpt-5", "o3-mini", "claude-opus-4"):
         assert MODEL_NAME.search(text), text
     assert not MODEL_NAME.search("tier: standard, host: claude, effort: high")
+
+
+def test_the_codex_template_lets_exec_call_the_secondchair_tools() -> None:
+    """`codex exec` never asks, so without this a tool needing approval is refused (#94); the
+    Core's delegation table still decides what each call does."""
+    template = runner.HOSTS["codex"]
+    at = template.index('mcp_servers.secondchair.default_tools_approval_mode="approve"')
+    assert template[at - 1] == "-c"
+
+
+def test_no_runner_template_lets_a_job_relay_the_gms_approval() -> None:
+    """A job has no GM at hand, so a headless host never gets approve_proposal (DEL-27)."""
+    claude, codex = runner.HOSTS["claude"], runner.HOSTS["codex"]
+    assert claude[claude.index("--disallowedTools") + 1] == "mcp__secondchair__approve_proposal"
+    assert 'mcp_servers.secondchair.disabled_tools=["approve_proposal"]' in codex
