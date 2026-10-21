@@ -1,0 +1,19 @@
+# Table-use log: copy and fill after each played session prepared by the studio.
+# Players' input only with their consent. Lists are ids or short labels.
+session: ""            # e.g. session-3
+date: ""
+prep:
+  prepared: []         # every scene and clue the prep offered, one id each
+  used: []             # those that were played, from the wrap's played facts
+  # abandoned = prepared minus used: computed by `abandoned_prep`, do not fill
+missing_information: []   # what the GM had to invent that prep should have held
+lookup:
+  source: ""           # trace (consenting behaviour trace frictions) | estimate (GM guess)
+  minutes: 
+forced_improvisation: []  # moments the prep had no answer for
+surprising_choices:       # player choices the outline did not anticipate
+  - choice: ""
+    studio_proposal_helped: # true | false
+engagement:
+  gm: 
+  players: []          # 1-5 each, only if they agree to answer

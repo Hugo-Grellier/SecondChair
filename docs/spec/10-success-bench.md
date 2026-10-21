@@ -64,6 +64,10 @@ Decisions: [ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md), [ADR 0012]
 - **BEN-11** Its calendar is deliberately different from Absalom: 10 months, a 6-day week, a one-day festival month, a leap interval other than 4 ([ADR 0014](../adr/0014-declarative-campaign-calendar-core-follows-paizo.md)).
 - **BEN-12** An agent drafts the bible and notes and the GM reviews them. The GM writes the gold set by hand, once.
 
+### Editorial track (reported only)
+
+Human editorial scores (rubric, five briefs, table-use log) and the deterministic editorial metrics are **reported only and never gate v4** (GM decision 24, [#182](https://github.com/Hugo-Grellier/SecondChair/issues/182)). They set no floor and amend no MET or BEN requirement above. Templates and protocol: [docs/bench/editorial](../bench/editorial/README.md); design: [editorial-evaluation](../design/editorial-evaluation.md).
+
 ## Acceptance of v4
 
 - **BEN-13** v4 is accepted when, on the reference runner configuration:
