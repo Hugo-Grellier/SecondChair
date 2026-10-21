@@ -403,8 +403,16 @@ def _runner_config(value: str) -> dict[str, str]:
 
 
 def _bench_command(args: argparse.Namespace) -> int:
-    from secondchair.bench import harness, report, s2  # the bench is not the Core's
+    from secondchair.bench import harness, recall, report, s2, scale  # not the Core's
 
+    if args.bench_command in ("scale", "recall"):
+        sizes = args.sizes.split(",")
+        if args.bench_command == "scale":
+            print(scale.run(sizes, args.seed))
+            return 0
+        passed, markdown = recall.run(sizes, args.seed)
+        print(markdown)
+        return 0 if passed else 1
     try:
         if args.bench_command == "s0":
             hosts = configured_runners()[1]
@@ -859,6 +867,17 @@ def main(argv: list[str] | None = None) -> int:
         "scripted fake runner",
     )
     s2_cmd.add_argument("-n", "--runs", type=int, default=3, help="runs (default 3)")
+    for name, what in (
+        ("scale", "the cost of the Core at each size of a synthetic campaign, with no model"),
+        (
+            "recall",
+            "score the Core's temporal queries against a generated gold set, with no model; "
+            "exits 1 when an invariant (delayed revelation, retcon) fails",
+        ),
+    ):
+        synthetic = bench_sub.add_parser(name, help=what)
+        synthetic.add_argument("--sizes", default="S", help="comma-separated S, M, L (default S)")
+        synthetic.add_argument("--seed", type=int, default=0, help="the generator's seed")
     bench_report = bench_sub.add_parser(
         "report", help="recompute a bench report from its stored action logs"
     )

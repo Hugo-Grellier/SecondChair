@@ -6,10 +6,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from secondchair.bench import synth
 from secondchair.core import canon, delegation, index, workspace
 
 
-def _workspace(size: int, root: Path) -> workspace.Workspace:
+def _workspace(size: int | str, root: Path) -> workspace.Workspace:
+    if isinstance(size, str):  # S, M or L: the synthetic campaign of #195, shared with its benches
+        return synth.generate(root, size).ws
     ws = workspace.init(root, "en", "absalom")
     create_entity = next(tool for tool in canon.tools(ws) if tool.name == "create_entity")
     for number in range(size):
@@ -51,7 +54,7 @@ def _measure(call, paths_read: set[Path] | None = None) -> tuple[float, int]:
 
 
 def benchmark(
-    size: int, unchanged_paths: set[Path] | None = None
+    size: int | str, unchanged_paths: set[Path] | None = None
 ) -> tuple[int, int, set[Path], list[tuple[float, int]]]:
     with TemporaryDirectory(prefix="secondchair-index-bench-") as directory:
         root = Path(directory) / "workspace"
@@ -69,7 +72,7 @@ def benchmark(
         return file_count, byte_count, inputs, [cold, unchanged, edited]
 
 
-def main(sizes: list[int]) -> None:
+def main(sizes: list[int | str]) -> None:
     print(
         "| Size | Workspace files | Workspace bytes | Cold connect (ms / bytes read) | "
         "Unchanged connect (ms / bytes read) | Edited connect (ms / bytes read) |"
@@ -83,9 +86,16 @@ def main(sizes: list[int]) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sizes", default="10,100,1000")
+    parser.add_argument(
+        "--sizes",
+        default="10,100,1000",
+        help="entity counts, or S, M, L for the synthetic campaigns of secondchair.bench.synth",
+    )
     arguments = parser.parse_args()
-    parsed_sizes = [int(value) for value in arguments.sizes.split(",")]
-    if not parsed_sizes or any(size < 1 for size in parsed_sizes):
-        parser.error("sizes must be positive integers")
+    parsed_sizes = [
+        value if value in synth.SIZES else int(value) if value.isdigit() else 0
+        for value in arguments.sizes.split(",")
+    ]
+    if not parsed_sizes or 0 in parsed_sizes:
+        parser.error("sizes must be positive integers, or S, M, L")
     main(parsed_sizes)

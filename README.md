@@ -94,6 +94,18 @@ uv run secondchair bench s0 /tmp/s0 --runner fake/scripted/none          # what 
 uv run secondchair bench report ~/bench/s0-run                           # recompute from the stored logs
 ```
 
+Two more benches need no model and no private material. They generate a seeded synthetic
+campaign of 10, 100 or 400 sessions (S, M, L) through the Core's own APIs: `bench scale` reports
+the Core's cost per size, and `bench recall` scores its temporal queries against a generated
+gold set, in the GM's view and the party's, and exits 1 when the delayed-revelation or retcon
+invariant fails. The gold set is generated, so its scores are tracked, not reference floors. M
+takes about two minutes to generate; L takes far longer, because the Core rebuilds its index after every write (#172), and was not run. S is what the tests run.
+
+```sh
+uv run secondchair bench scale --sizes S,M
+uv run secondchair bench recall --sizes S
+```
+
 S2, Beginner Box prep, is private: its scenario directory (`scenario.yaml` with the command that
 restores the bench world from its snapshot and the `calibrate-encounters` job inputs, and
 `gold.yaml` with what the scripted GM keeps) lives outside the repository. Each run restores the
