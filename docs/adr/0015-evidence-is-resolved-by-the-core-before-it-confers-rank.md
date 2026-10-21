@@ -1,6 +1,6 @@
 # Evidence is resolved by the Core before it confers a rank
 
-Status: proposed — awaiting the GM ([#168](https://github.com/Hugo-Grellier/SecondChair/issues/168))
+Status: accepted 2026-10-21 ([#168](https://github.com/Hugo-Grellier/SecondChair/issues/168))
 
 A fact's rank comes from its origin (ADR 0007, CAN-06..08), and today `rank_of` only checks the origin's shape. Any caller of `record_fact`, `record_event` or `record_knowledge` can write `{kind: observation, quote, locator}` with made-up strings and get **played**, or `{kind: source, source, page}` and get **cited_source**. Three paths already check their evidence: capture finds the quote in the job's Source or transcript segment (CAP-04), knowledge resolves an `observations/…#id` locator and its visibility (ARC-16), and a disclosure's locator is an action log entry the Core wrote itself (CAN-17). Every other path trusts the caller. Provenance is a trust boundary, so the decision is where rank-conferring evidence gets checked and what happens when it fails.
 
