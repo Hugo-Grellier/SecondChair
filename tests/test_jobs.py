@@ -628,8 +628,10 @@ def test_no_runner_template_lets_a_job_relay_the_gms_approval() -> None:
 TIER_OF = {
     "answer-probes": "standard",
     "calibrate-encounters": "standard",
+    "develop-campaign-direction": "deep",
     "diagnose-frictions": "standard",
     "prepare-a-session": "deep",
+    "prepare-an-adventure": "standard",
     "propose-consequences": "standard",
     "propose-narrative-direction": "deep",
     "quick-help": "fast",
@@ -642,7 +644,9 @@ TIER_OF = {
 
 
 def test_each_playbook_declares_its_intended_tier() -> None:
-    assert {s.name: runner.playbook(s.name)["tier"] for s in runner.skills()} == TIER_OF
+    found = {s.name: runner.playbook(s.name)["tier"] for s in runner.skills()}
+    # An extension's playbook is absent when its package is not installed.
+    assert found == {name: tier for name, tier in TIER_OF.items() if name in found}
 
 
 RUNNERS = {t: [{"host": "ok", "model": f"m-{t}", "effort": "high"}] for t in jobs.TIERS}
