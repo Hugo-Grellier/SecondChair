@@ -14,7 +14,7 @@ Each item is excluded from v4 only; none is excluded by the architecture.
 | Docker packaging; publishing to a package index (PyPI) | v4 installs from git tags. Docker is the preferred later channel and can be added without changing anything else | [ADR 0010](../adr/0010-local-core-reached-by-the-gm-browser.md), [09](09-packaging.md) PKG-17 |
 | LoreForge integration; SecondChair as the engine of a hosted LoreForge | A fresh effort, kept possible by dual licensing under the CLA and the deferred remote Core | [#1](https://github.com/Hugo-Grellier/SecondChair/issues/1), [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md) |
 | The monetization model | The licences only keep it possible | [ADR 0006](../adr/0006-agpl-core-apache-connector-cla.md) |
-| Faction simulation by agents | A faction acts through the fronts it carries | [ADR 0009](../adr/0009-world-turn-deterministic-three-effect-classes.md) |
+| Factions acting outside a GM-written catalogue | A faction acts through the fronts it carries and its catalogue, under deterministic validation | [ADR 0009](../adr/0009-world-turn-deterministic-three-effect-classes.md), [ADR 0022](../adr/0022-factions-choose-from-a-gm-written-catalogue-under-deterministic-validation.md) |
 | A world-turn during a live session | Fictional time moves only at the wrap or by a GM gesture | [ADR 0009](../adr/0009-world-turn-deterministic-three-effect-classes.md) |
 | Migrating any v3 campaign or storage | No migration; Westerhold is rebuilt from its bible as a Source | [ADR 0002](../adr/0002-rebuild-rather-than-evolve.md) |
 | Making Westerhold public | It stays a private Source; revisit after v4 | [#22](https://github.com/Hugo-Grellier/SecondChair/issues/22) |

@@ -151,12 +151,17 @@ def tools(ws: Workspace) -> list[Tool]:
         dates (YYYY-MM-DD, YYYY-MM or YYYY); leave them empty when an event opens or closes it.
         `never_true` records a false statement someone believes (a belief): it has no validity,
         no event opens it, and knowers can only believe or suspect it (record_knowledge).
-        `state` makes it a living-world state fact (a front or a situation, read by the
-        world-turn): {"of": entity id, "key": ..., "value": ...} with key and value one of
+        `state` makes it a living-world state fact (a front, a situation or a faction, read by
+        the world-turn): {"of": entity id, "key": ..., "value": ...} with key and value one of
         "front" {carrier, participants, capacity, every (7d, 1w), ticks, anchor (date),
         unless (text or null), active}, "clock" (an integer), "agenda" {id, when: {date} or
         {clock_gte}, status: pending}, "situation" {stage: available|active|resolved|expired,
-        deadline (date or null), participants}. The statement says the same in words.
+        deadline (date or null), participants}; on a faction, "intent" [1-3 {id, goal,
+        pursues: [front or situation ids]}], "pool" {name: {value, income, cap}}, "capacity"
+        (an integer >= 1) and "catalogue" [{id, cost: {pool: n}, duration, effect: {class:
+        derived|narrative, does}, prerequisites: [{holds: fact id} or {front, clock_gte}],
+        target (entity id or null), contest ({pool} or null)}], which only the GM writes in
+        prep: draft them into notes/ instead. The statement says the same in words.
         The Core looks the origin's evidence up and refuses it when it cannot find it: record
         what it cannot find with a job origin, which may carry the same quote or page."""
         fact_id = f"f-{secrets.token_hex(4)}"
