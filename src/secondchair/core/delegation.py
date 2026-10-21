@@ -1281,24 +1281,45 @@ def discloses(change: object) -> bool:
     return index.split_doc(change.after)[0].get("knower") == index.PARTY
 
 
+# Top-level workspace paths no delegated action writes: the Core's, the GM's and the managed
+# skills'.
+CORE_PATHS = (
+    CONFIG_FILE,
+    TABLE_FILE,
+    MOMENT_FILE,
+    LOG_DIR,
+    JOBS_DIR,
+    CALLS_DIR,
+    OBSERVATIONS_DIR,
+    OCCURRENCES_DIR,
+    WORLD_FILE,
+    FRICTIONS_DIR,
+    STATE_DIR,
+    # Written by other Core modules, which this one cannot import: the wrap's candidates and
+    # dates, the house rules, the reference library, the Foundry binding, Source references.
+    "capture",
+    "time.yaml",
+    "house-rules.yaml",
+    "library.yaml",
+    "foundry.yaml",
+    "sources",
+    # Written by the GM or by `secondchair campaign-skill`, never by an agent's action.
+    "speakers.yaml",
+    ".agents",
+    ".claude",
+    ".secondchair-skills.json",
+    # Git's own: a hook written there would run code at the GM's next commit.
+    ".git",
+    ".gitignore",
+)
+
+
 def _target(ws: Workspace, relative: str) -> Path:
     path = (ws.root / relative).resolve()
     if Path(relative).is_absolute() or not path.is_relative_to(ws.root.resolve()):
         raise DelegationError(f"{relative!r} is outside the campaign workspace.")
     parts = path.relative_to(ws.root.resolve()).parts
-    if parts and parts[0] in (
-        CONFIG_FILE,
-        TABLE_FILE,
-        MOMENT_FILE,
-        LOG_DIR,
-        JOBS_DIR,
-        CALLS_DIR,
-        OBSERVATIONS_DIR,
-        OCCURRENCES_DIR,
-        WORLD_FILE,
-        FRICTIONS_DIR,
-        STATE_DIR,
-    ):
+    if parts and parts[0] in CORE_PATHS:
         raise DelegationError(f"{relative!r} belongs to the Core; no delegated action writes it.")
     return path
 
@@ -1382,16 +1403,18 @@ _held = threading.local()
 
 
 @contextmanager
-def locked(ws: Workspace) -> Generator[None]:
+def locked(ws: Workspace | Path) -> Generator[None]:
     """One writer at a time across `serve` and the CLI; reentrant within a thread, since an
-    action reads the index, which may log hand edits.
+    action reads the index, which may log hand edits. A bare root for a workspace that does not
+    load yet (an upgrade).
     ponytail: one workspace-wide lock; finer locks if agents ever queue behind it."""
     held: set[Path] = _held.__dict__.setdefault("roots", set())
-    root = ws.root.resolve()
+    base = ws if isinstance(ws, Path) else ws.root
+    root = base.resolve()
     if root in held:
         yield
         return
-    lock = ws.root / STATE_DIR / "delegation.lock"
+    lock = base / STATE_DIR / "delegation.lock"
     lock.parent.mkdir(exist_ok=True)
     with lock.open("w") as f:
         fcntl.flock(f, fcntl.LOCK_EX)

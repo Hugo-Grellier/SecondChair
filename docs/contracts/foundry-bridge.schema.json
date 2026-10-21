@@ -390,7 +390,7 @@
             "autonomous",
             null
           ],
-          "description": "The level the module checks against the world's ceiling (DEL-19a): the effective level of the prepare_scene or prepare_document entry that last wrote the desired state; null when the GM last wrote it, by hand or by an undo, which the ceiling does not bound."
+          "description": "The level the module checks against the world's ceiling (DEL-19a): the effective level of the prepare_scene or prepare_document entry that last wrote the desired state; null when the GM last wrote it, by a logged hand edit or an undo, which the ceiling does not bound; autonomous for any other origin."
         }
       },
       "required": [
@@ -430,7 +430,7 @@
             "autonomous",
             null
           ],
-          "description": "The level the module checks against the world's ceiling (DEL-19a): the effective level of the prepare_scene or prepare_document entry that last wrote the desired state; null when the GM last wrote it, by hand or by an undo, which the ceiling does not bound."
+          "description": "The level the module checks against the world's ceiling (DEL-19a): the effective level of the prepare_scene or prepare_document entry that last wrote the desired state; null when the GM last wrote it, by a logged hand edit or an undo, which the ceiling does not bound; autonomous for any other origin."
         }
       },
       "required": [

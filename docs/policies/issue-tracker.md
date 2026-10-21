@@ -1,0 +1,9 @@
+# Issue tracker: GitHub
+
+GitHub Issues are the work tracker and discussion surface. Read the issue, comments, labels and dependencies before work. Use `gh` from the checkout when GitHub access is available. PRs are for review, not the initial request surface. Accepted product and technical documents and ADRs remain the authority for requirements and design; the issue holds the outcome, acceptance criteria, scope and progress.
+
+The Ballast [issue workflow](https://github.com/Hugo-Grellier/ballast/blob/v2.1.0/docs/issue-workflow.md) describes reading, scoping and decomposing an issue, planning, implementation, review and publication. Investigations can start as issues with durable findings under `docs/research/` when useful. Do not rewrite completed issues.
+
+A Milestone is a planned release target, an Epic/parent Issue coordinates a roadmap capability, and a leaf Issue owns one independently mergeable outcome. `ready-for-agent` dispatches an actionable leaf Issue with explicit acceptance criteria, known dependencies, resolved blocking product questions, initial R0/R1/R2 risk and relevant links. An unresolved Epic is a coordination object, never an implementation dispatch. A plan is **not** required before dispatch; planning follows. Ask a blocking question in a comment and add `ready-for-human`, which also marks an explicit human decision. See [triage labels](triage-labels.md); use a Project field for transient stages if an existing Project makes that simple, instead of inventing labels.
+
+For Epic children or substantial sub-issues, use GitHub issue dependencies when available; otherwise write `Blocked by: #...`. Work only on unblocked leaf issues. Keep fine-grained implementation steps in the plan or PR; do not export every step to a GitHub Issue. When a skill says "publish to the issue tracker," create an issue; when it says "fetch the relevant ticket," read the issue and comments.

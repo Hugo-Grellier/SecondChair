@@ -9,7 +9,6 @@ import json
 import os
 import re
 import sys
-import threading
 from datetime import datetime
 
 from secondchair.core import delegation
@@ -19,7 +18,6 @@ DIR = delegation.OBSERVATIONS_DIR
 KIND = re.compile(r"[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*")
 VISIBILITIES = ("players", "gm", "blind")  # only players attests what the party knows
 FIELDS = ("id", "session", "at", "scene", "actor", "kind", "visibility", "payload")
-_lock = threading.Lock()
 
 
 OUTSIDE = f"{DIR}/outside-sessions.jsonl"  # session null: captured outside a live session
@@ -69,7 +67,7 @@ def record(ws: Workspace, envelope: object) -> str | None:
     opened = delegation.last_session(ws)
     if envelope["session"] is not None and envelope["session"] > opened:
         return f"session {envelope['session']} has not been opened (the last is {opened})."
-    with _lock:
+    with delegation.locked(ws):  # a CLI gesture or rebuild may read or write it too (#211)
         if find(ws, locator(envelope)) is not None:
             return None
         file = ws.root / path(envelope["session"])

@@ -361,6 +361,7 @@ test("an action above the ceiling is refused as a ceiling refusal and nothing is
 test("a prepared scene is realised only at or under the ceiling, a GM's edit always", () => {
   assert.match(aboveCeiling("propose", "act-then-review") ?? "", /ceiling \(propose\)/);
   assert.equal(aboveCeiling("propose", "propose"), null);
+  assert.match(aboveCeiling("act-then-review", "autonomous") ?? "", /ceiling/); // #163
   assert.equal(aboveCeiling("manual", null), null); // a hand edit or an undo has no level
   assert.match(aboveCeiling("propose", "nonsense") ?? "", /ceiling/);
 });
