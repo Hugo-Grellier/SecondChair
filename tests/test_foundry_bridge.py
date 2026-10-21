@@ -502,11 +502,7 @@ def test_the_handshake_snapshot_answers_compendium_lookups_with_no_client(
     nothing = search_offline(bridge, query="ogre").structured_content
 
     assert by_slug["offline"] is True
-    assert by_slug["snapshot"]["system"] == {
-        "id": "sys",
-        "version": "7.1.0",
-        "translation": "Traduction",
-    }
+    assert by_slug["snapshot"] == "7.1.0"
     [entry] = by_slug["entries"]
     assert (entry["slug"], entry["level"], entry["publication"], entry["remaster"]) == (
         "grik",
