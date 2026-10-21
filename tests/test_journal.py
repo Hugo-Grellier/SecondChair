@@ -20,6 +20,7 @@ from test_world import ws as _ws  # noqa: F401  (a fixture)
 
 from secondchair.cli import main
 from secondchair.core import calls, delegation, index, workspace, world
+from secondchair.core import journal as jrnl
 from secondchair.core.delegation import DelegationError
 from secondchair.core.workspace import Workspace
 
@@ -44,6 +45,7 @@ import os, signal, sys, time
 from datetime import UTC, datetime
 from pathlib import Path
 from secondchair.core import delegation, workspace, world
+from secondchair.core import journal as jrnl
 
 class Frozen(datetime):
     @classmethod
@@ -61,7 +63,7 @@ def fault(step):
         flag.touch()
         time.sleep(1.5)
 
-delegation._fault = fault
+jrnl._fault = fault
 world.world_turn(workspace.load(root), "4725-01-08", since="4725-01-01")
 """
 
@@ -116,14 +118,14 @@ def cascade(_ws: Workspace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  #
                 raise Crash(step)
 
         labels.clear()
-        monkeypatch.setattr(delegation, "_fault", fault)
+        monkeypatch.setattr(jrnl, "_fault", fault)
         try:
             turn(copied)
             assert k is None
         except Crash:
             assert k is not None
         finally:
-            monkeypatch.setattr(delegation, "_fault", lambda step: None)
+            monkeypatch.setattr(jrnl, "_fault", lambda step: None)
         return copied
 
     labels: list[str] = []
@@ -242,13 +244,13 @@ def test_recovery_reached_from_an_event_loop_runs_in_a_worker_thread(
     run, _, _, _ = cascade
     crashed = run(5)
     where: list[threading.Thread] = []
-    original = delegation.recover
+    original = jrnl.recover
 
     def spy(ws: Workspace, force: bool = False) -> list[str]:
         where.append(threading.current_thread())
         return original(ws, force)
 
-    monkeypatch.setattr(delegation, "recover", spy)
+    monkeypatch.setattr(jrnl, "recover", spy)
 
     async def bridge_read() -> None:
         recover(crashed)  # on the loop, as the bridge's hello takes the lock
@@ -267,13 +269,13 @@ def test_a_plan_held_at_propose_journals_nothing_and_applies_whole_once_accepted
     table["prep"]["living_world"]["level"] = "propose"
     (ws.root / "delegation.yaml").write_text(yaml.safe_dump(table))
     journaled: list[dict] = []
-    real = delegation.apply_journal
+    real = jrnl.apply_journal
 
     def spy(ws: Workspace, journal: dict) -> None:
         journaled.append(journal)
         real(ws, journal)
 
-    monkeypatch.setattr(delegation, "apply_journal", spy)
+    monkeypatch.setattr(jrnl, "apply_journal", spy)
 
     turn(ws)
 
@@ -325,6 +327,6 @@ def test_two_core_processes_racing_the_second_waits_and_finds_nothing_to_recover
     started = time.monotonic()
     with delegation.locked(ws):
         waited = time.monotonic() - started
-        assert journals(ws) == [] and delegation.recover(ws) == []
+        assert journals(ws) == [] and jrnl.recover(ws) == []
     assert waited > 0.5 and child.wait(timeout=60) == 0
     assert state(ws.root) == expected and hand_edits(ws) == []
