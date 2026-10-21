@@ -644,13 +644,21 @@ def test_stat_blocks_and_tables_are_atomic_chunks_and_unreadable_ones_are_report
             [],
             [],
         ),
+        # a prose paragraph that opens with an ambiguous word is not stat block content
+        (
+            "A  CREATURE 1\nAC 10\nHP 5\n\nEffect of the storm was dire.\n\nProse.",
+            ["A  CREATURE 1\nAC 10\nHP 5"],
+            [],
+        ),
+        # trailing blank lines do not make the end uncertain
+        ("A  CREATURE 1\nAC 10\nHP 5\n\n", ["A  CREATURE 1\nAC 10\nHP 5"], []),
         # missing HP
         ("A  CREATURE 1\nAC 10\n\nProse.", [], ["no HP line found"]),
         # a header followed by another header inside the reach
         (
             "A  CREATURE 1\nB  CREATURE 2\nAC 10\nHP 5\n",
             ["B  CREATURE 2\nAC 10\nHP 5"],
-            ["no AC or HP line found", "runs to the end of its segment or reach; end uncertain"],
+            ["no AC or HP line found"],
         ),
         # a block that reaches the end of its segment has an uncertain end
         (
@@ -685,3 +693,6 @@ def test_a_long_stat_block_is_never_split_and_audit_is_permissioned(ws, tmp_path
     assert len(big["text"]) > 2800 and big["text"].endswith("HP 300")
     main(["sources", "audit", sid, "-w", str(ws.root)])
     assert '"stat block": 1' in capsys.readouterr().out
+    path.unlink()
+    with pytest.raises(WorkspaceError, match="not found"):
+        library.audit(ws, sid)

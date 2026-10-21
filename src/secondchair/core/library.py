@@ -394,8 +394,10 @@ STAT_HEADER = re.compile(r"^\S.*\s(?:CREATURE|HAZARD)\s+-?\d+$")
 # A paragraph opening with one of these belongs to the stat block above it.
 STAT_LINE = re.compile(
     r"(?:AC|HP|Speed|Melee|Ranged|Spells|Strike|Str|Perception|Skills|Languages|Items|Fort|"
-    r"Reflex|Will|Immunities|Resistances|Weaknesses|Cantrips|Constant|Reaction|Attack|Hardness|"
-    r"Stealth|Disable|Reset|Routine|Effect|Trigger|Arcane|Divine|Primal|Occult|Innate)\b"
+    r"Reflex|Will|Immunities|Resistances|Weaknesses|Cantrips|Reaction|Hardness|Disable|Routine|"
+    r"Trigger|Divine|Primal|Occult|Innate)\b"
+    # Words that also open ordinary sentences need a digit or colon on the line.
+    r"|(?:Items|Constant|Attack|Stealth|Reset|Effect|Arcane)\b(?=.*[\d:])"
 )
 CELLS = re.compile(r"\t|\||\s{2,}")
 STAT_REACH = 60  # lines after a header that may belong to its block
@@ -417,8 +419,8 @@ def _is_row(line: str) -> bool:
 def _spans(
     lines: list[str], begin: int, end: int
 ) -> tuple[list[tuple[int, int, str | None]], list[tuple[int, str, str]]]:
-    """Split lines[begin:end] into (first, stop, kind) spans: kind "stat block" and "table" are
-    atomic, None is running text. Also the blocks that could not be read confidently as
+    """Split lines[begin:end] into (first, stop, kind) spans: kind "stat block" and "table"
+    are atomic, None is running text. Also the blocks that could not be read confidently as
     (line number, kind, reason); those stay running text, except a stat block whose end is
     uncertain, which stays atomic and is reported. Pure and deterministic."""
     spans, errors, at, text = [], [], begin, begin
@@ -435,6 +437,8 @@ def _spans(
                     break
                 else:
                     last, pending = i, False
+            else:
+                closed = pending and limit == end  # only blank lines remain in the segment
             block = [w.strip() for w in lines[at + 1 : last + 1]]
             if missing := [
                 k for k in ("AC", "HP") if not any(re.match(k + r"\b", w) for w in block)
@@ -661,14 +665,17 @@ def _ocr_page(path: Path, page: int, languages: str) -> str:
 def audit(ws: Workspace, source_id: str) -> dict:
     """Re-run the CURRENT extraction on a source's own text, offline (not the stored index: an
     already indexed source keeps its old chunks until its content changes), and report what
-    would become atomic chunks
-    and which blocks could not be read confidently: {"atomic": {kind: n}, "errors": [{"location",
-    "line", "kind", "reason"}]}. Local GM audit of an indexing-permitted source; no source text."""
+    would become atomic chunks and which blocks could not be read confidently:
+    {"atomic": {kind: n}, "errors": [{"location", "line", "kind", "reason"}], "reflects": ...}.
+    Local GM audit of an indexing-permitted source; no source text."""
     _, entry = _source(ws, source_id)
     if not entry["index"]:
         raise WorkspaceError("Local indexing permission has not been granted.")
+    path = Path(entry["path"])
+    if not path.is_file():
+        raise WorkspaceError(f"Source file not found: {path.name}.")
     report: dict = {}
-    _passages(Path(entry["path"]), report)
+    _passages(path, report)
     return report | {"reflects": "current extraction of the file, not the stored index"}
 
 
