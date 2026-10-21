@@ -127,11 +127,7 @@ const SETTLE_MS = 1500;
  * inverts it (eventToRollParams), and an agent's call cannot wait on a dialog.
  * @param {"showCheckDialogs" | "showDamageDialogs"} key
  */
-const noDialog = (key) => ({
-  shiftKey: game.user.settings[key],
-  ctrlKey: false,
-  metaKey: false,
-});
+const noDialog = (key) => ({ shiftKey: game.user.settings[key], ctrlKey: false, metaKey: false });
 
 /** A token's placeable, which pf2e's roll functions take as their target. @param {Doc} token */
 function placeable(token) {
@@ -294,10 +290,7 @@ const combat = {
     const variant = strike.variants?.[map];
     if (!variant) throw new Error(`The strike "${slug}" has no attack ${map + 1}.`);
     const object = placeable(target);
-    const roll = await variant.roll({
-      target: object,
-      event: noDialog("showCheckDialogs"),
-    });
+    const roll = await variant.roll({ target: object, event: noDialog("showCheckDialogs") });
     if (!roll) throw new Error(`pf2e did not roll the strike "${slug}".`);
     const degree = DEGREES[roll.degreeOfSuccess] ?? null;
     const missed = { degree, damage: null, apply: null };
@@ -338,10 +331,7 @@ const combat = {
   async rollSave(token, save, dc) {
     const statistic = /** @type {Doc} */ (token).actor.saves?.[save];
     if (!statistic) throw new Error(`${token.uuid}'s actor has no ${save} save.`);
-    const roll = await statistic.roll({
-      dc: { value: dc },
-      event: noDialog("showCheckDialogs"),
-    });
+    const roll = await statistic.roll({ dc: { value: dc }, event: noDialog("showCheckDialogs") });
     return { degree: DEGREES[roll?.degreeOfSuccess] ?? null };
   },
   // pf2e's inline check: its player clicks it and rolls their own save (RUL-04).
@@ -389,6 +379,7 @@ const env = {
   sceneTokens: (token) => [.../** @type {Doc} */ (token).parent.tokens],
   distance: (from, to) => placeable(from).distanceTo(placeable(to)),
   reactionUsed: reactionSaid,
+  isGM: () => game.user.isGM,
   packs: () => game.packs,
   modules: () =>
     Object.fromEntries(
@@ -501,10 +492,7 @@ Hooks.once(
           scene: msg.speaker?.scene ? (game.scenes.get(msg.speaker.scene)?.uuid ?? null) : null,
           actor: /** @type {string | null} */ (payload.actor),
           kind: "pf2e.outcome",
-          visibility: visibilityOf({
-            blind: msg.blind,
-            whisper: msg.whisper ?? [],
-          }),
+          visibility: visibilityOf({ blind: msg.blind, whisper: msg.whisper ?? [] }),
           payload,
         });
       });
@@ -514,12 +502,7 @@ Hooks.once(
         if (item.type !== "condition" || !item.actor) return;
         const user = rest.at(-1);
         const payload = tracer.conditions(item.actor, typeof user === "string" ? user : null);
-        emit({
-          actor: item.actor.uuid,
-          kind: "pf2e.outcome",
-          visibility: "gm",
-          payload,
-        });
+        emit({ actor: item.actor.uuid, kind: "pf2e.outcome", visibility: "gm", payload });
       };
       for (const hook of ["createItem", "updateItem", "deleteItem"]) Hooks.on(hook, condition);
       // A resource grown back (a rest, Refocus) raises what the next cast starts from.

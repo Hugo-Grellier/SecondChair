@@ -26,6 +26,7 @@
  * @property {(token: any) => any[]} sceneTokens  the token documents on the token's scene
  * @property {(from: any, to: any) => number} distance  feet between two tokens, as the canvas measures
  * @property {(token: any) => boolean | null} reactionUsed  what a known reaction tracker says
+ * @property {() => boolean} isGM  whether this client is the GM's (hidden tokens are its to see)
  *   (RUL-07), null when none speaks
  */
 
@@ -271,7 +272,7 @@ export function createAdapter(env) {
         if (token?.documentName !== "Token" || !token.actor) {
           throw new Error(`No token ${String(params.token)} in this world.`);
         }
-        return turnCard(env, token, params.include_hidden === true);
+        return turnCard(env, token, params.include_hidden === true && env.isGM());
       },
       /**
        * An official entry's name in the GM's install (CAN-20), by its stable English key (the

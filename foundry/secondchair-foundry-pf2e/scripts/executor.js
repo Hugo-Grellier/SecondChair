@@ -71,15 +71,9 @@ import { canonical } from "../../secondchair-foundry/scripts/scenes.js";
  * @type {Record<string, Record<string, [string, number | null]>>}
  */
 export const FOLLOW_UPS = {
-  demoralize: {
-    success: ["frightened", 1],
-    criticalSuccess: ["frightened", 2],
-  },
+  demoralize: { success: ["frightened", 1], criticalSuccess: ["frightened", 2] },
   trip: { success: ["prone", null], criticalSuccess: ["prone", null] },
-  grapple: {
-    success: ["grabbed", null],
-    criticalSuccess: ["restrained", null],
-  },
+  grapple: { success: ["grabbed", null], criticalSuccess: ["restrained", null] },
 };
 
 const SAVES = ["fortitude", "reflex", "will"];
@@ -98,23 +92,9 @@ export function areaShape(area, feet, x, y, direction, perFoot) {
   const distance = feet * perFoot;
   if (area === "burst") return { type: "circle", x, y, radius: distance };
   if (area === "cone")
-    return {
-      type: "cone",
-      x,
-      y,
-      radius: distance,
-      angle: 90,
-      rotation: direction,
-    };
+    return { type: "cone", x, y, radius: distance, angle: 90, rotation: direction };
   if (area === "line") {
-    return {
-      type: "line",
-      x,
-      y,
-      length: distance,
-      width: 5 * perFoot,
-      rotation: direction,
-    };
+    return { type: "line", x, y, length: distance, width: 5 * perFoot, rotation: direction };
   }
   throw new Error(`area is burst, cone or line, not "${area}".`);
 }
@@ -349,10 +329,7 @@ export function createExecutor(env) {
       if (!spell.free && !spent.length) {
         throw new Error(`${spell.name} was not cast: pf2e found no slot, focus point or use left.`);
       }
-      return {
-        before: { state: before },
-        after: { state: after, spent, actions },
-      };
+      return { before: { state: before }, after: { state: after, spent, actions } };
     },
     /**
      * A GM creature uses one of its actions or feats that has a self-effect: the item goes to the
@@ -370,16 +347,9 @@ export function createExecutor(env) {
       const has = Object.values(env.state(creature).effects ?? {}).includes(effect.slug);
       if (!has) await env.addEffect(creature, effect.uuid);
       const follow_ups = [
-        {
-          token: creature.uuid,
-          effect: effect.slug,
-          result: has ? "already" : "applied",
-        },
+        { token: creature.uuid, effect: effect.slug, result: has ? "already" : "applied" },
       ];
-      return {
-        before: { state: before },
-        after: { state: snapshot([creature]), follow_ups },
-      };
+      return { before: { state: before }, after: { state: snapshot([creature]), follow_ups } };
     },
     /**
      * A GM creature places an area Region on its scene from an origin the agent chose (RUL-06).
@@ -435,10 +405,7 @@ export function createExecutor(env) {
       const state = snapshot([token]);
       if (env.pc(token)) {
         await env.requestSave(token, save, dc);
-        return {
-          before: { state },
-          after: { state, requested: true, degree: null },
-        };
+        return { before: { state }, after: { state, requested: true, degree: null } };
       }
       const { degree } = await env.rollSave(token, save, dc);
       return {
