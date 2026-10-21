@@ -8,18 +8,15 @@ template. Model names live only there, never in the Core or a playbook (ARC-25).
 import json
 import re
 import subprocess
-from importlib.metadata import entry_points
 from pathlib import Path
 
-import yaml
-
 from secondchair.core import jobs
+from secondchair.core.playbooks import playbook, playbook_dirs, skills  # noqa: F401
 from secondchair.core.workspace import Workspace
 
 # The Core's playbooks: a Claude Code plugin whose `skills/` is also the Codex skill bundle
 # (PKG-19). Each block ships its own the same way, registered under PLAYBOOK_GROUP (ARC-21).
 PLAYBOOKS = Path(__file__).parent / "playbooks"
-PLAYBOOK_GROUP = "secondchair.playbooks"
 
 # Headless invocations; `{prompt}`, `{model}`, `{effort}`, `{playbooks}` and `{job}` are filled
 # in, and an argument naming `{playbooks}` is repeated for each block's playbook directory. The
@@ -63,27 +60,6 @@ HOSTS: dict[str, list[str]] = {
 
 class RunnerError(Exception):
     """A playbook, job or runner the runner cannot use, with a message for the GM."""
-
-
-def playbook_dirs() -> list[Path]:
-    """Every installed block's playbook directory, from the PLAYBOOK_GROUP entry points."""
-    return [Path(ep.load()) for ep in sorted(entry_points(group=PLAYBOOK_GROUP), key=str)]
-
-
-def skills() -> list[Path]:
-    """Every installed playbook's skill directory."""
-    return sorted((s for d in playbook_dirs() for s in (d / "skills").iterdir()), key=str)
-
-
-def playbook(name: str) -> dict[str, str]:
-    """A playbook's SecondChair metadata, from its Agent Skills front matter."""
-    found = [s / "SKILL.md" for s in skills() if s.name == name]
-    if not found:
-        known = ", ".join(sorted(s.name for s in skills()))
-        raise RunnerError(f"No playbook {name!r}; known playbooks: {known}.")
-    front = yaml.safe_load(found[0].read_text().split("---", 2)[1])
-    prefix = "secondchair-"
-    return {k.removeprefix(prefix): v for k, v in front["metadata"].items() if k.startswith(prefix)}
 
 
 def queue(
@@ -139,17 +115,23 @@ def run(
     waits for the GM. When every configuration fails, the job stays queued, an exception is
     raised as a call on the GM, and `RunnerError` says so."""
     job = jobs.read(ws, job_id)
-    configs = runners.get(job["tier"], [])
-    if not configs:
-        return None
-    for config in configs:
-        job = jobs.start(ws, job_id, config, manual=False)
-        error = _launch(ws, job, config, hosts)
-        job = jobs.read(ws, job_id)
-        if job["status"] in ("done", "missed"):  # finish_job, or a live deadline passed (ARC-28)
-            return job
-        # A clean exit is no proof the playbook is complete: only finish_job is (#171).
-        jobs.end(ws, job_id, error or f"{config['host']} exited without calling finish_job")
+    while configs := runners.get(job["tier"], []):
+        for config in configs:
+            job = jobs.start(ws, job_id, config, manual=False)
+            error = _launch(ws, job, config, hosts)
+            job = jobs.read(ws, job_id)
+            # finish_job, or a live deadline passed (ARC-28)
+            if job["status"] in ("done", "missed"):
+                return job
+            # A clean exit is no proof the playbook is complete: only finish_job is (#171).
+            jobs.end(ws, job_id, error or f"{config['host']} exited without calling finish_job")
+        # The tier's list is exhausted: escalate one step, once, when a runner is configured there.
+        up = jobs.TIERS[min(jobs.TIERS.index(job["tier"]) + 1, len(jobs.TIERS) - 1)]
+        if not runners.get(up) or (escalated := jobs.escalate(ws, job_id)) is None:
+            break
+        job = escalated
+    else:
+        return None  # nothing configured for the job's first tier: the GM starts it
     call = jobs.raise_exception(
         ws,
         job_id,

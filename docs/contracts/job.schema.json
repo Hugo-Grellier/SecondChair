@@ -22,6 +22,7 @@
     "blocking": {"type": "boolean", "description": "Whether the call the job prepares blocks the current turn or scene."},
     "deadline": {"enum": ["now", "break", null], "description": "A live job's latency cap (ARC-28): the deadline of the call it prepares (DEL-30), set when it is queued in a live session. null outside a live session: no cap."},
     "status": {"enum": ["queued", "started", "done", "missed", "withdrawn"], "description": "queued until an attempt starts it; queued again when that attempt fails (ARC-27); done only when the agent calls `finish_job` (a runner's agent that exits cleanly without it is a failed attempt); missed when a live job's deadline passed first: its call's safe default applies, logged as a `safe_default` action log entry, and the job takes no further action; withdrawn when an entity override of its `entity` landed while it was queued, logged the same way and never started (DEL-16)."},
+    "escalated_from": {"enum": ["fast", "standard"], "description": "Set once, when every runner configuration of this tier failed the job's output contract and the runner requeued it one tier up (GM decision 17, #180): the tier it came from. `tier` is then the next one up. Never set on a deep job, on a live job (latency) or twice."},
     "attempts": {
       "type": "array",
       "description": "Every start attempt, in order, with the configuration used (ARC-27). No silent substitution: a configuration not in the list is never tried. When the list is exhausted the job stays queued and an exception is raised as a call on the GM, held for the break.",
@@ -34,7 +35,8 @@
           "runner_configuration": {"$ref": "#/$defs/runner_configuration"},
           "manual": {"type": "boolean", "description": "Started by the GM from their own agent host session (ARC-29), the configuration as that session reports it; otherwise by a runner."},
           "outcome": {"enum": ["started", "done", "failed"]},
-          "error": {"type": ["string", "null"], "description": "Why a failed attempt failed."}
+          "error": {"type": ["string", "null"], "description": "Why a failed attempt failed."},
+          "escalated_from": {"enum": ["fast", "standard"], "description": "The job's `escalated_from`, on every attempt made after the escalation."}
         }
       }
     }
