@@ -24,7 +24,7 @@ UNOFFICIAL = (
     "Options in this guide written by a model are unofficial: they are not published rules, "
     "and the GM decides whether the table uses them."
 )
-COMMENT = re.compile(r"<!--.*?-->", re.S)
+COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 QUOTE = re.compile(r"^[ \t>]*", re.M)
 
 
