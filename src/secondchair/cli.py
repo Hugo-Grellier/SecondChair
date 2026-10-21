@@ -375,7 +375,7 @@ def _describe_wrap(ws: workspace.Workspace, summary: dict) -> str:
         )
         if summary["spotlight"]:
             names = {e["id"]: e["names"][0] for e in index.search_entities(ws)}
-            counts = ", ".join(f"{names[i]} {n}" for i, n in summary["spotlight"].items())
+            counts = ", ".join(sorted(f"{names[i]} {n}" for i, n in summary["spotlight"].items()))
             lines.append(f"Spotlight (played facts citing each PC): {counts}.")
     return "\n".join(lines)
 
