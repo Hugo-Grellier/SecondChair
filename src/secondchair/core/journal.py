@@ -18,6 +18,7 @@ from secondchair.core.delegation import (
     LOG_DIR,
     OCCURRENCES_DIR,
     TABLE_FILE,
+    _forget,
     _read_yaml,
     _save,
     _sync_dir,
@@ -61,6 +62,7 @@ def _read(path: Path) -> str | None:
 
 def _put(path: Path, content: str | None) -> None:
     if content is None:
+        _forget(path.parent)
         path.unlink(missing_ok=True)
         _sync_dir(path.parent)
     else:

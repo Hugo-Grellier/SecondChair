@@ -1429,6 +1429,7 @@ def _apply(ws: Workspace, entry: dict, state: str) -> None:
         )
     content = entry[state]
     if content is None:
+        _forget(path.parent)
         path.unlink()
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1444,15 +1445,47 @@ def _append(ws: Workspace, entry: dict, directory: str = LOG_DIR) -> dict:
     time, and write it. Callers hold the lock."""
     (ws.root / directory).mkdir(exist_ok=True)
     entry = {"id": _next_id(ws, directory), "at": datetime.now(UTC).isoformat(), **entry}
+    target = ws.root / directory / f"{entry['id']:06d}.yaml"
+    if target.exists():  # a file made by hand behind the cache: never overwrite a record
+        _forget(target.parent)  # a retry in this hold re-globs and finds a free id
+        raise DelegationError(f"{target.name} already exists in {directory}; nothing was written.")
     _save(ws, entry, directory)
+    if _is_held(ws):  # _save dropped it: only ours is new
+        key = str((ws.root / directory).resolve())
+        _FILE_IDS[key] = max(_FILE_IDS.get(key, 0), entry["id"])
     return entry
+
+
+def _is_held(ws: Workspace) -> bool:
+    return ws.root.resolve() in _held.__dict__.get("roots", ())
+
+
+# Highest file id per directory, kept only while a lock is held (cleared on every acquisition and
+# release, so nobody else writes meanwhile) and dropped by every write or removal in that
+# directory (`_write`, `_apply`, the journal's `_put`): the glob runs once per directory per hold
+# instead of once per append.
+_FILE_IDS: dict[str, int] = {}
+
+
+def _forget(directory: Path) -> None:
+    _FILE_IDS.pop(str(directory.resolve()), None)
 
 
 def _next_id(ws: Workspace, directory: str) -> int:
     """The next record id in `directory`, past the ids a pending journal holds for it."""
     from secondchair.core import journal  # layer 5, applied through this module (ADR 0023)
 
-    ids = [int(p.stem) for p in (ws.root / directory).glob("*.yaml") if p.stem.isdigit()]
+    key = str((ws.root / directory).resolve())
+    held = _is_held(ws)
+    top = _FILE_IDS.get(key) if held else None
+    if top is None:
+        top = max(
+            (int(p.stem) for p in (ws.root / directory).glob("*.yaml") if p.stem.isdigit()),
+            default=0,
+        )
+        if held:
+            _FILE_IDS[key] = top
+    ids = [top]
     ids += [
         int(Path(w["path"]).stem)
         for _, j in journal._journals(ws)
@@ -1533,6 +1566,7 @@ def locked(ws: Workspace | Path) -> Generator[None]:
             if not current:
                 continue
             held.add(root)
+            _FILE_IDS.clear()  # before recovery: nothing cached outside a hold survives into one
             try:
                 if isinstance(ws, Workspace) and not on_loop:
                     journal.recover(
@@ -1541,6 +1575,7 @@ def locked(ws: Workspace | Path) -> Generator[None]:
                 yield
             finally:
                 held.discard(root)
+                _FILE_IDS.clear()
             return
 
 
@@ -1552,6 +1587,7 @@ def _recovered(ws: Workspace) -> None:
 def _write(path: Path, text: str) -> None:
     """Write `path` whole or not at all, durably: a temporary file synced, renamed over it, and
     the directory synced (ADR 0016)."""
+    _forget(path.parent)
     tmp = path.with_name(path.name + ".tmp")
     with tmp.open("w") as f:
         f.write(text)
