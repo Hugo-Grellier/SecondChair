@@ -176,6 +176,20 @@ def interactive() -> bool:
     return sys.stdin.isatty()
 
 
+def _consent_to_destructive(root: Path, versions: list[int]) -> bool:
+    """The GM types the workspace name at an interactive terminal (ADR 0018, ADR 0003)."""
+    if not interactive():
+        raise WorkspaceError(
+            f"The migration(s) from schema version {versions} rewrite or remove authoritative "
+            "content: run `secondchair upgrade` from an interactive terminal."
+        )
+    typed = input(
+        f"Migration(s) from schema version {versions} rewrite or remove authoritative content. "
+        f"Type the workspace name ({root.name}) to proceed: "
+    )
+    return typed.strip() == root.name
+
+
 def _gm_command(args: argparse.Namespace) -> str:
     """Run a GM gesture on the workspace; the message to print."""
     ws = workspace.load(args.workspace)
@@ -841,8 +855,14 @@ def main(argv: list[str] | None = None) -> int:
         parents=[in_workspace],
         help="make a logged hand edit a GM decision (interactive only)",
     ).add_argument("entry", type=int)
-    commands.add_parser(
+    upgrade_cmd = commands.add_parser(
         "upgrade", parents=[in_workspace], help="migrate the workspace to the current schema"
+    )
+    upgrade_cmd.add_argument(
+        "--preview", action="store_true", help="show the diff of the migration; change nothing"
+    )
+    upgrade_cmd.add_argument(
+        "--no-snapshot", action="store_true", help="skip the pre-upgrade backup archive"
     )
     log_cmd = commands.add_parser("log", help="the action log")
     log_sub = log_cmd.add_subparsers(dest="log_command", required=True)
@@ -1017,13 +1037,22 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "host":
             print(host_setup(args.host), end="")
         elif args.command == "upgrade":
-            before, after = workspace.upgrade(args.workspace)
+            before, after, diff = workspace.upgrade(
+                args.workspace,
+                check,
+                _consent_to_destructive,
+                preview=args.preview,
+                snapshot=not args.no_snapshot,
+            )
             if before == after:
                 print(f"{args.workspace} is already at schema version {after}.")
+            elif args.preview:
+                print(diff or f"Schema version {before} to {after} changes no file.", end="")
             else:
                 print(
-                    f"Upgraded {args.workspace} from schema version {before} to {after} in place; "
-                    "review the diff (git diff) and commit it."
+                    f"Upgraded {args.workspace} from schema version {before} to {after}; the "
+                    "workspace before it is kept beside it as .pre-upgrade (delete it, or rename "
+                    "it back to roll back). Review the diff (git diff) and commit it."
                 )
         elif args.command == "backup":
             manifest = snapshot.backup(
