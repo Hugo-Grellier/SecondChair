@@ -497,9 +497,9 @@ def test_the_handshake_snapshot_answers_compendium_lookups_with_no_client(
     )
     time.sleep(0.3)  # the client left; the Core notices
 
-    by_slug = search_offline(bridge, query="GRIK").structured_content["result"]
+    by_slug = search_offline(bridge, query="GRIK").structured_content
     by_uuid = search_offline(bridge, query="Compendium.sys.bestiary.Actor.a1", type="Actor")
-    nothing = search_offline(bridge, query="ogre").structured_content["result"]
+    nothing = search_offline(bridge, query="ogre").structured_content
 
     assert by_slug["offline"] is True
     assert by_slug["snapshot"]["system"] == {
@@ -514,7 +514,7 @@ def test_the_handshake_snapshot_answers_compendium_lookups_with_no_client(
         "Monster Core",
         True,
     )
-    assert by_uuid.structured_content["result"]["entries"][0]["uuid"] == entry["uuid"]
+    assert by_uuid.structured_content["entries"][0]["uuid"] == entry["uuid"]
     assert nothing["entries"] == []
     assert "PRIVATE TEXT" not in (workspace / ".secondchair/compendium/7.1.0.json").read_text()
 

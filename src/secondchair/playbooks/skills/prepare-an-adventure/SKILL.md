@@ -74,7 +74,7 @@ scenes: [<scene keys that have a desired state in scenes/>]
 cites: [<fact ids>]            # the guide's cited facts
 ```
 
-Find creature UUIDs with `search_compendium`; never invent one. List only what the file really uses.
+Find creature UUIDs with `search_compendium` (read `entries`; when `offline` is true they come from a snapshot, so check them again once the GM client connects); never invent one. List only what the file really uses.
 
 ## Before you finish
 

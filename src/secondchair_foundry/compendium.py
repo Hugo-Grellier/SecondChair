@@ -68,6 +68,12 @@ def store(ws: Workspace, payload: object) -> str | None:
     )
 
 
+def version(ws: Workspace) -> str | None:
+    """The system version of the latest snapshot, None when there is none."""
+    snapshot = _latest(ws)
+    return snapshot["system"]["version"] if snapshot else None
+
+
 def lookup(ws: Workspace, query: str, type: str | None, limit: int) -> dict[str, Any] | None:
     """The latest snapshot's entries whose name or slug contains `query`, or whose UUID is it;
     None when there is no snapshot."""
@@ -86,7 +92,7 @@ def lookup(ws: Workspace, query: str, type: str | None, limit: int) -> dict[str,
 
     found = [e for e in snapshot["entries"] if wanted(e)][: max(1, min(limit, 100))]
     return {
-        "offline": True,
-        "snapshot": {"system": snapshot["system"], "taken": snapshot["taken"]},
         "entries": found,
+        "offline": True,
+        "snapshot": snapshot["system"]["version"],
     }

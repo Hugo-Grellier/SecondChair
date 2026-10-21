@@ -607,20 +607,19 @@ def tools(ws: Workspace) -> list[Tool]:
         last are empty."""
         return check_assets(ws, key)
 
-    def search_compendium(
-        query: str, type: str | None = None, limit: int = 20
-    ) -> list[dict[str, Any]] | dict[str, Any]:
-        """The compendium entries of the GM's install whose name contains `query` (any case), each
-        `{uuid, name, type, pack, img, level, rarity, traits}`: the UUID to make a prepared
-        document or a token from, and pf2e's level, rarity and traits (null elsewhere) to
-        calibrate encounters. `type` keeps one document type (Actor, Item, JournalEntry, Scene,
-        Playlist, RollTable…) or one system type (pf2e: npc, hazard, loot, weapon, equipment…). At
-        most `limit` entries (up to 100). With no GM client connected, the metadata snapshot taken
-        at the last connection answers instead, as `{offline: true, snapshot: {system, taken},
-        entries}`: entries then also carry `slug`, `publication` and `remaster`, and match on
-        slug or exact UUID as well; no snapshot, no answer."""
+    def search_compendium(query: str, type: str | None = None, limit: int = 20) -> dict[str, Any]:
+        """The compendium entries of the GM's install whose name contains `query` (any case), as
+        `{entries, offline, snapshot}`. Each entry is `{uuid, name, type, pack, img, level, rarity,
+        traits}`: the UUID to make a prepared document or a token from, and pf2e's level, rarity
+        and traits (null elsewhere) to calibrate encounters. `type` keeps one document type
+        (Actor, Item, JournalEntry, Scene, Playlist, RollTable…) or one system type (pf2e: npc,
+        hazard, loot, weapon, equipment…). At most `limit` entries (up to 100). `offline` is true
+        when no GM client is connected and the metadata snapshot taken at the last connection
+        answered: entries then also carry `slug`, `publication` and `remaster`, match on slug or
+        exact UUID as well, and may be out of date; no snapshot, no answer. `snapshot` is the
+        game system version of the snapshot (null if none was taken)."""
         try:
-            return vtt.read("search_compendium", {"query": query, "type": type, "limit": limit})
+            entries = vtt.read("search_compendium", {"query": query, "type": type, "limit": limit})
         except vtt.VttError as e:
             # Both "no GM client" messages (the bridge's and the Core's) start alike.
             if not str(e).startswith("No GM client") or not (
@@ -628,6 +627,7 @@ def tools(ws: Workspace) -> list[Tool]:
             ):
                 raise
             return offline
+        return {"entries": entries, "offline": False, "snapshot": compendium.version(ws)}
 
     def document_report(key: str) -> dict[str, Any]:
         """How a prepared world document was last realised in Foundry: `realised`, then
