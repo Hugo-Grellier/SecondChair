@@ -8,6 +8,6 @@ Reported only. It never gates v4 and sets no floor (GM decision 24, [#182](https
 | [briefs.md](briefs.md) | Five fixed briefs on the public sample campaign |
 | [exemplars.md](exemplars.md) | One exemplar per brief; agent-drafted, **to be edited by the GM** |
 | [table-log.yaml](table-log.yaml) | Table-use log for one played session |
-| `src/secondchair/bench/editorial.py` | Deterministic metrics per prep artifact and the abandoned-prep count |
+| `src/secondchair/bench/editorial.py` | Deterministic metrics per prep artifact, the abandoned-prep count, and `blind` (one template, provenance stripped loosely and longest first, sealed key in a separate file, at most 26 candidates, empty output dir; same seed gives the same letters) |
 
 Reviewers: the GM plus one outside reader (decision 25). Editing effort is measured by diff size between the agent's draft and the version the GM adopted (decision 27).
