@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from secondchair.core import delegation, index, world
+from secondchair.core import admission, delegation, index, world
 from secondchair.core.index import EVENT_KINDS, EVENTS_DIR, FACTS_DIR, RANKS, CanonError
 from secondchair.core.tools import Change, Contradiction, Tool
 from secondchair.core.workspace import Workspace
@@ -92,6 +92,7 @@ def tools(ws: Workspace) -> list[Tool]:
     ) -> str:
         if not statement.strip():
             raise CanonError("A fact needs a statement in the campaign language.")
+        admission.admit(ws, origin)
         rank = index.rank_of(origin, authenticated=False)  # an agent never reaches gm_decision
         known = {e["id"] for e in index.search_entities(ws)}
         involved = list(entities)
@@ -138,8 +139,10 @@ def tools(ws: Workspace) -> list[Tool]:
     ) -> Change:
         """Record a fact: one statement in the campaign language about the given entity ids.
         `origin` is its provenance and sets its rank: {"kind": "observation", "quote", "locator"}
-        for what was said or done at the table (played; the quote verbatim), {"kind": "source",
-        "source", "page"} for a cited Source, {"kind": "job", "job"} for your own work, or
+        for what was said or done at the table (played; the quote verbatim, located
+        `observations/<session>.jsonl#<id>` or `<file>:<line>` in a Source of your job),
+        {"kind": "source", "source", "page", optional "excerpt"} for an indexed page of the
+        reference library (cited_source), {"kind": "job", "job"} for your own work, or
         {"kind": "gm", "words"} for the GM's words (an agent proposal until the GM confirms it
         with `secondchair confirm <id>` in a terminal).
         `relation` is optional: {"type", "subject", "object"} with a type from the Core list
@@ -153,7 +156,9 @@ def tools(ws: Workspace) -> list[Tool]:
         "front" {carrier, participants, capacity, every (7d, 1w), ticks, anchor (date),
         unless (text or null), active}, "clock" (an integer), "agenda" {id, when: {date} or
         {clock_gte}, status: pending}, "situation" {stage: available|active|resolved|expired,
-        deadline (date or null), participants}. The statement says the same in words."""
+        deadline (date or null), participants}. The statement says the same in words.
+        The Core looks the origin's evidence up and refuses it when it cannot find it: record
+        what it cannot find with a job origin, which may carry the same quote or page."""
         fact_id = f"f-{secrets.token_hex(4)}"
         after = fact_doc(
             fact_id, statement, entities, origin, relation, valid_from, valid_to, never_true, state
@@ -179,6 +184,7 @@ def tools(ws: Workspace) -> list[Tool]:
         if not found:
             raise CanonError(f"No fact {fact!r} in canon.")
         current = found[0]
+        admission.admit(ws, origin)
         rank = index.rank_of(origin, authenticated=False)
         if current["rank"] == "played":
             raise Contradiction(path, f"{fact} was played; a correction cannot contradict play.")
@@ -207,6 +213,7 @@ def tools(ws: Workspace) -> list[Tool]:
             raise CanonError(f"kind must be one of {', '.join(EVENT_KINDS)}.")
         if not description.strip():
             raise CanonError("An event needs a description in the campaign language.")
+        admission.admit(ws, origin)
         rank = index.rank_of(origin, authenticated=False)
         event_id = f"v-{secrets.token_hex(4)}"
         path = f"{EVENTS_DIR}/{event_id}.md"

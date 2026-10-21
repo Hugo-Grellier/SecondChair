@@ -42,7 +42,7 @@ You were given a job id. If you were not given its contract, the GM asked you to
 5. Call `search_entities` to read the ids of the entities canon now holds. Then record the bible's facts: for each statement the bible makes about them, secret ones included (canon is the GM's), call `record_fact` with:
    - `statement`: one atomic statement, in the campaign language. A paragraph stating several things gives several facts;
    - `entities`: the ids of the entities it is about;
-   - `origin`: `{"kind": "source", "source": <inputs.bible>, "page": <the label of the bible paragraph or section it comes from, such as B04>}`;
+   - `origin`: `{"kind": "job", "job": "<the job id>", "source": <inputs.bible>, "page": <the label of the bible paragraph or section it comes from, such as B04>}`. The bible is a job input, not an indexed Source of the reference library, so its facts rank as your proposals; `source` and `page` are their evidence;
    - `relation`: when the statement is one of the Core list, `{"type", "subject", "object"}` with entity ids: `member_of`, `leads`, `lives_in`, `located_in`, `owns`, `knows`, `allied_with`, `opposes`, `serves`, `kin_of`. One relation per fact; leave it out when none fits;
    - `valid_from` / `valid_to`: the campaign dates the bible gives it, if any;
    - `never_true: true` for a belief the bible says is false;

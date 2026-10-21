@@ -23,7 +23,7 @@ import hashlib
 from collections import Counter
 from typing import Any
 
-from secondchair.core import calls, delegation, index
+from secondchair.core import admission, calls, delegation, index
 from secondchair.core.calendar import Calendar, CalendarError
 from secondchair.core.delegation import (
     OCCURRENCES_DIR,
@@ -509,6 +509,7 @@ def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change
     def table(f: dict) -> bool:
         return f["rank"] == "played" and f["origin"].get("kind") != "rule"
 
+    admission.admit(ws, origin, admission.CORE)  # the world-turn composes its own origin
     played = [old] if old and table(old) else []
     played += [
         f
@@ -762,6 +763,7 @@ def set_active(ws: Workspace, front: str, active: bool, date: str, authenticated
         key = f"{front}/{'resume' if active else 'pause'}@{date}"
         words = f"{'Resume' if active else 'Pause'} {front} on {date}."
         origin = {"kind": "gm", "words": words}
+        admission.admit(ws, origin, admission.CORE)
         rank = "gm_decision" if authenticated else "agent_proposal"
         new_state = {**old["state"], "value": value}
         knowers = [value["carrier"], *value["participants"]]

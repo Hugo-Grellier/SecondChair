@@ -63,11 +63,13 @@ def wrap(ws: Workspace, n: int, notes: Path, duplicate_of: str | None = None) ->
         tier="standard",
     )["id"]
     jobs.start(ws, job, {"host": "h", "model": "m", "effort": "e"}, manual=True)
+    text = notes.read_text()
+    line = text[: text.index(LINES[n])].count("\n") + 1  # ADR 0015: the line the quote is on
     capture.capture(
         ws,
         job,
         source=str(notes),
-        locator=f"{notes.name}:1",
+        locator=f"{notes.name}:{line}",
         quote=LINES[n],
         statement=LINES[n],
         date="4726-01-02",

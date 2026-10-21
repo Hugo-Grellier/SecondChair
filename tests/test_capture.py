@@ -49,10 +49,17 @@ def wrap_job(ws: Workspace, session: int = 1, tier: str = "standard") -> int:
     return job["id"]
 
 
+def at(quote: str) -> str:
+    """The `<file>:<line>` locator of `quote` in the session 1 notes (line 7 when absent)."""
+    lines = SESSION_1.read_text().splitlines()
+    line = next((n for n, said in enumerate(lines, 1) if quote and quote in said), 7)
+    return f"01-dry-bell.md:{line}"
+
+
 def submit(ws: Workspace, job: int, quote: str, **fields: Any) -> dict:
     args: dict = {
         "source": str(SESSION_1),
-        "locator": "01-dry-bell.md:7",
+        "locator": at(quote),
         "quote": quote,
         "statement": quote,
         "date": "4726-01-02",
@@ -222,7 +229,9 @@ def test_an_approved_question_gets_its_knowledge_and_a_rejected_one_is_dropped(
         FEE: "rejected",
     }
     [fact] = index.search_facts(ws)
-    assert [k["fact"] for k in index.search_knowledge(ws, ["party"])] == [fact["id"]]
+    [known] = index.search_knowledge(ws, ["party"])
+    assert known["fact"] == fact["id"]
+    assert known["rank"] == "played"  # ADR 0015: admitted on the ended wrap job's Sources
 
 
 def test_a_near_miss_holds_even_a_duplicate_and_case_variants_are_known_names(

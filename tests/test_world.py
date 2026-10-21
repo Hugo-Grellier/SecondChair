@@ -16,7 +16,17 @@ from mcp import Client
 
 from secondchair import cli, runner
 from secondchair.cli import main
-from secondchair.core import calls, canon, delegation, index, jobs, knowledge, workspace, world
+from secondchair.core import (
+    calls,
+    canon,
+    delegation,
+    index,
+    jobs,
+    knowledge,
+    observations,
+    workspace,
+    world,
+)
 from secondchair.core.delegation import DelegationError
 from secondchair.core.server import build_server
 from secondchair.core.tools import Change, Tool
@@ -26,7 +36,12 @@ SCHEMA = json.loads(
     (Path(__file__).parents[1] / "docs/contracts/action-log-entry.schema.json").read_text()
 )
 GM = {"kind": "gm", "words": "The Council squeezes tolls every week."}
-SEEN = {"kind": "observation", "quote": "The bypass stays open.", "locator": "s1.md:4"}
+# A played origin quotes an observation the Core finds (ADR 0015); the `ws` fixture records it.
+SEEN = {
+    "kind": "observation",
+    "quote": "The bypass stays open.",
+    "locator": "observations/outside-sessions.jsonl#seen",
+}
 DAY0 = "4725-01-01"
 CONFIG = {"host": "h", "model": "m", "effort": "e"}
 
@@ -34,7 +49,11 @@ CONFIG = {"host": "h", "model": "m", "effort": "e"}
 @pytest.fixture
 def ws(tmp_path: Path) -> Workspace:
     main(["init", str(tmp_path / "camp"), "--language", "en", "--calendar", "absalom"])
-    return workspace.load(tmp_path / "camp")
+    ws = workspace.load(tmp_path / "camp")
+    seen = {"id": "seen", "session": None, "at": "2026-10-19T20:15:00+00:00", "scene": None}
+    seen |= {"actor": None, "kind": "chat", "visibility": "players"}
+    assert observations.record(ws, seen | {"payload": {"text": SEEN["quote"]}}) is None
+    return ws
 
 
 def act(ws: Workspace, tool: str, **args: Any) -> None:

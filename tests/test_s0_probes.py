@@ -9,6 +9,7 @@ import yaml
 
 from secondchair.bench import s0
 from secondchair.core import (
+    admission,
     canon,
     capture,
     delegation,
@@ -40,7 +41,8 @@ NAMES = (
 
 
 def bible(page: str) -> dict[str, str]:
-    return {"kind": "source", "source": "sample-campaign/bible.md", "page": page}
+    # ADR 0015: the bible is a job input, not an indexed Source: a job origin carrying the page.
+    return {"kind": "job", "job": "s0-rebuild", "source": "sample-campaign/bible.md", "page": page}
 
 
 def act(ws: Workspace, tool: str, **args: object) -> None:
@@ -150,7 +152,7 @@ CLUES = {  # id: (node, place, evidence, conclusion), as the bible's table lists
 
 def rebuild_mystery(ws: Workspace) -> str:
     """What the rebuild playbook writes for the secret-mystery section, through the Core."""
-    origin = {"kind": "source", "source": "sample-campaign/bible.md", "page": "secret-mystery"}
+    origin = bible("secret-mystery")
     for name in ("The Dry Bell", "Weir", "Toll Archive", "Abandoned Kiln"):  # Cistern exists
         act(ws, "create_entity", names=[name])
     ids = {e["names"][0]: e["id"] for e in index.search_entities(ws)}
@@ -304,7 +306,10 @@ def test_failed_probes_and_refused_contradictions_are_continuity_errors(tmp_path
     given = answers(ws, ids, facts)
     wrong = {"factions": {**given["factions"], ids["Lock Council"]: [ids["Edda Vale"]]}}
     seen = {"kind": "observation", "quote": "Edda paid 12 silver.", "locator": "S1-02"}
-    act(ws, "record_fact", statement="Edda paid 12 silver.", entities=[], origin=seen)
+    [record_fact] = [t for t in core_tools(ws) if t.name == "record_fact"]
+    with admission.under(admission.CORE):  # composed as the Core would: about ranks, not evidence
+        played = record_fact.fn(statement="Edda paid 12 silver.", entities=[], origin=seen)
+    delegation.act(ws, record_fact, "s0-rebuild", lambda: played)
     [fee] = index.search_facts(ws, text="silver")
     with pytest.raises(delegation.DelegationError, match="played"):
         act(
@@ -471,12 +476,12 @@ def wrap_notes(
         ]
         if chatter and session == 1:
             submitted.append(("chatter", CHATTER, "The cook is behind everything.", []))
-        for line, quote, statement, knowers in submitted:
+        for _, quote, statement, knowers in submitted:
             result = capture.capture(
                 ws,
                 job,
                 source=str(path),
-                locator=f"{name}#{line}",
+                locator=f"{name}:{text[: text.index(quote)].count(chr(10)) + 1}",  # its line
                 quote=quote,
                 statement=statement,
                 date=date,

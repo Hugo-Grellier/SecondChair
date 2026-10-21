@@ -79,3 +79,31 @@ def install_block(tmp_path: Path) -> InstallBlock:
         return site
 
     return install
+
+
+type IndexSource = Callable[..., str]
+
+
+@pytest.fixture
+def index_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> IndexSource:
+    """Register, permit and index a text Source in the workspace's reference library, on this
+    test's own machine directories with a constant embedding; returns its id (ADR 0015)."""
+    from secondchair.core import library
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setattr(library, "_embed", lambda texts, model: [[1.0, 0.0] for _ in texts])
+
+    def index(
+        ws, text: str, name: str = "rulebook.txt", indexed: bool = True, model: bool = True
+    ) -> str:
+        path = tmp_path / "library" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(text)
+        [source_id] = library.register(ws, path)
+        if indexed:
+            library.permit(ws, source_id, indexing=True, model=model, authenticated=True)
+            library.build_index(ws, source_id)
+        return source_id
+
+    return index

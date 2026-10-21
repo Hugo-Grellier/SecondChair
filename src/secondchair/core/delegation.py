@@ -413,6 +413,7 @@ def act(
     blocking: bool = False,
     occurrence: str | None = None,
     hold: str | None = None,
+    sources_of: int | None = None,
 ) -> ActionResult:
     """Take one delegated action (ARC-04): refused at manual, held at propose as a call on the
     GM (DEL-30), applied above. An action for a started job is bound by the table of the job's
@@ -420,16 +421,19 @@ def act(
     world-turn job's action is also governed by the job's responsibility, under which it is
     logged (ADR 0009), at the stricter of the two levels (DEL-23); a living-world action never
     discloses (LW-08). `hold` holds it at propose whatever the level, the call carrying it as
-    its message (a wrap's contradiction or blocking question, CAP-10)."""
-    from secondchair.core import calls
+    its message (a wrap's contradiction or blocking question, CAP-10). The block's function
+    runs under the admission context of the job (ADR 0015): evidence it cites resolves against
+    that job's Sources, or those of `sources_of`, a job that may have ended, outside it."""
+    from secondchair.core import admission, calls, jobs
 
     with locked(ws):
         moment, seq = current_moment(ws)
         table_moment, runner_configuration = moment, None
         governing = [tool.responsibility]
+        evidence = admission.Context()
+        if sources_of is not None:
+            evidence = admission.Context(sources=dict(jobs.read(ws, sources_of)["inputs"]))
         if job is not None:
-            from secondchair.core import jobs  # it builds on this module
-
             record = jobs.read(ws, job)
             if record["status"] != "started":
                 raise DelegationError(f"Job {job} is {record['status']}, not started.")
@@ -441,6 +445,7 @@ def act(
             if record["playbook"] == "propose-narrative-direction" and occurrence is None:
                 # its answer closes it (LW-19); a proposal from an observation has none (#177)
                 occurrence = record["inputs"].get("occurrence")
+            evidence = admission.Context(sources=dict(record["inputs"]))
         responsibility = governing[-1]
 
         def strictest(entity: str | None = None) -> tuple[str, str]:
@@ -461,7 +466,8 @@ def act(
         if responsibility == "living_world" and tool.responsibility == "disclosure":
             raise DelegationError(_NEVER_DISCLOSES)
         try:
-            change, refusal = describe(), None
+            with admission.under(evidence):
+                change, refusal = describe(), None
         except Contradiction as c:  # logged: a Core-detected contradiction with canon (MET-01)
             change, refusal = Change(path=c.path, after=None), str(c)
         entity = getattr(change, "entity", None)
@@ -1036,7 +1042,7 @@ def _known_to_party(ws: Workspace) -> set[str]:
 def _party_learns(ws: Workspace, disclosure: dict, fact: str, session: int | None) -> dict:
     """The irreversible action entry writing the party's knowledge of `fact`, learned from
     `disclosure` on the current date, logged as the disclosure was."""
-    from secondchair.core import capture, index
+    from secondchair.core import admission, capture, index
 
     locator = f"{LOG_DIR}/{disclosure['id']:06d}.yaml"
     record = {
@@ -1054,6 +1060,7 @@ def _party_learns(ws: Workspace, disclosure: dict, fact: str, session: int | Non
         },
         "session": session,
     }
+    admission.admit(ws, record["origin"], admission.CORE)  # the Core quotes its own entry
     return {
         **{k: disclosure[k] for k in ("kind", "moment", "moment_seq", "tool")},
         **{k: disclosure[k] for k in ("responsibility", "effective_level", "agent", "job")},

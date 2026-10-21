@@ -27,7 +27,16 @@ from typing import Any
 
 import yaml
 
-from secondchair.core import calls, canon, delegation, index, jobs, knowledge, observations
+from secondchair.core import (
+    admission,
+    calls,
+    canon,
+    delegation,
+    index,
+    jobs,
+    knowledge,
+    observations,
+)
 from secondchair.core.calendar import CalendarError
 from secondchair.core.delegation import (
     ActionResult,
@@ -141,11 +150,18 @@ def capture(
     if source == record["inputs"].get("transcript"):
         if (segment := _segment(source, locator)) is None:
             return {"key": None, "status": "dropped", "reason": f"{locator} is not a segment"}
-        said, speaker = segment["text"], segment["speaker"]
-    else:
-        said = Path(source).read_text()
-    if quote not in said:
-        return {"key": None, "status": "dropped", "reason": f"the quote is not in {source}"}
+        speaker = segment["speaker"]
+    if not admission.substantive(quote):
+        return {
+            "key": None,
+            "status": "dropped",
+            "reason": f"a quote needs {admission.MIN_WORDS} words",
+        }
+    # ADR 0015: the evidence its fact is admitted on, the quote at its locator in this Source.
+    if not admission.quoted(
+        {k: v for k, v in record["inputs"].items() if v == source}, locator, quote
+    ):
+        return {"key": None, "status": "dropped", "reason": f"the quote is not at {locator}"}
     candidate_key = key(source, quote)
     path = ws.root / CAPTURE_DIR / f"{candidate_key}.yaml"
     if path.exists():
@@ -295,13 +311,16 @@ def _cascade(c: dict, fact: str, act: Any) -> None:
     c["status"] = "duplicate" if c["duplicate_of"] else "applied"
 
 
-def _actor(ws: Workspace, job: int | None) -> Any:
-    """Take a Core memory action for the wrap, under `job` when given."""
+def _actor(ws: Workspace, job: int | None, sources_of: int | None = None) -> Any:
+    """Take a Core memory action for the wrap, under `job` when given, its evidence resolved
+    against the Sources of `sources_of` otherwise (ADR 0015)."""
     tools = {t.name: t for t in _tools(ws)}
 
     def act(tool: str, hold: str | None = None, **args: Any) -> ActionResult:
         fn = tools[tool].fn
-        return delegation.act(ws, tools[tool], "wrap", lambda: fn(**args), job, hold=hold)
+        return delegation.act(
+            ws, tools[tool], "wrap", lambda: fn(**args), job, hold=hold, sources_of=sources_of
+        )
 
     return act
 
@@ -313,15 +332,15 @@ def _written(ws: Workspace, entry: int) -> str:
 
 def _answered(ws: Workspace, session: int) -> None:
     """Finish the session's candidates whose call the GM answered: an approved fact gets its
-    event and knowledge (CAP-08), a rejected one is dropped."""
-    act = _actor(ws, None)
+    event and knowledge (CAP-08), a rejected one is dropped. Outside the wrap job, which may have
+    ended: its evidence resolves against the Sources of the job that captured it."""
     for c in candidates(ws, session):
         if c["status"] not in ("held", "pending"):
             continue
         status = delegation.read_entry(ws, c["entries"][0])["status"]
         if status == "applied":
             try:
-                _cascade(c, _written(ws, c["entries"][0]), act)
+                _cascade(c, _written(ws, c["entries"][0]), _actor(ws, None, c["job"]))
             except (DelegationError, CanonError) as e:
                 c.update(status="failed", error=str(e))
         elif status in ("rejected", "undone", "refused", "failed"):
