@@ -2,7 +2,16 @@
 
 from typing import TypedDict
 
-from secondchair.core import PROTOCOL_VERSION, canon, knowledge, library, mystery, prep, world
+from secondchair.core import (
+    PROTOCOL_VERSION,
+    canon,
+    knowledge,
+    library,
+    mystery,
+    prep,
+    signals,
+    world,
+)
 from secondchair.core.tools import Block, Tool
 from secondchair.core.workspace import Workspace
 
@@ -31,6 +40,7 @@ def tools(ws: Workspace) -> list[Tool]:
         *knowledge.tools(ws),
         *world.tools(ws),
         *prep.tools(ws),
+        *signals.tools(ws),
     ]
 
 

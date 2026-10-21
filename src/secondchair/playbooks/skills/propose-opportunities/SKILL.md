@@ -29,10 +29,10 @@ Write the note in the **campaign language** (`campaign_language` of `workspace.y
 1. **Played facts** of the session: `search_facts` at the played rank, with the quote and locator each carries. This is your only evidence of what happened.
 2. **Adopted notes**: the notes under `notes/` whose front matter (ADR 0017) has `status: adopted`, and the opportunity notes of earlier sessions (adopted, rejected or still draft). Skip `rejected` and `superseded` ones except to avoid proposing again what the GM refused.
 3. **NPC dossiers**, when present: `notes/npcs/<entity id>.md`, in particular their change triggers.
-4. **Deterministic signals**, only these:
-   - **Unused prep**: the clue ids of the session's handoff (`prep/session-<n>/handoff.md`) that `check_mystery` still reports as not found.
-   - **Spotlight**: how many played facts concern each PC this session (the count the wrap summary shows). A PC with few is a prompt to offer them a hook, never a verdict.
-   - **Change triggers**: a dossier trigger whose cited facts now hold in canon.
+4. **Deterministic signals**: call `session_signals(session)` once and use only what it returns, recomputing nothing:
+   - `unused_prep`: the handoff's clue ids that no played fact of the session found, with the open `check_mystery` warnings of their mysteries.
+   - `spotlight`: how many played facts concern each PC this session. A PC with few is a prompt to offer them a hook, never a verdict.
+   - `fulfilled_triggers`: the dossier change triggers (`triggers:` in the front matter) whose cited facts now all hold in canon.
 
 You apply no judgement of your own to decide that a beat is due, that foreshadowing was contradicted or that a faction repeats itself. If the GM wants that, they ask in conversation.
 
