@@ -659,6 +659,8 @@ def _sources_command(args: argparse.Namespace) -> None:
         print(f"Index ready for {args.id}.")
         if diff:
             print(json.dumps(diff, ensure_ascii=False, indent=2))
+    elif action == "audit":
+        print(json.dumps(library.audit(ws, args.id), ensure_ascii=False, indent=2))
     elif action == "list":
         print(json.dumps(library.listing(ws), ensure_ascii=False, indent=2))
     else:
@@ -728,6 +730,10 @@ def main(argv: list[str] | None = None) -> int:
     index_cmd = source_sub.add_parser("index", parents=[in_workspace])
     index_cmd.add_argument("id")
     index_cmd.add_argument("--replace-changed", action="store_true")
+    audit_cmd = source_sub.add_parser(
+        "audit", parents=[in_workspace], help="list stat blocks and tables that could not be read"
+    )
+    audit_cmd.add_argument("id")
     search_cmd = source_sub.add_parser("search", parents=[in_workspace])
     search_cmd.add_argument("query")
     search_cmd.add_argument("--limit", type=int, default=10)

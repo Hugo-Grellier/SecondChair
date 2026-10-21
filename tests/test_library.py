@@ -582,3 +582,51 @@ def test_search_leaves_out_closed_notes_unless_asked(ws):
         "notes/plain.md": None,
     }
     assert len(library.search(ws, "harbor", include_closed=True)["matches"]) == 4
+
+
+# Invented fixture: no publisher text. The shapes (header with a level, AC/HP lines, aligned rows)
+# are what the detector reads.
+BLOCKS = (
+    "The Mossy Vault\n"
+    + "Filler line about damp stones. " * 60
+    + "\n\nGlimmer Toad  CREATURE 2\nSmall beast\nPerception +5; darkvision\n"
+    "AC 15; Fort +6, Ref +4, Will +3\nHP 28\n\n"
+    "Speed 20 feet, swim 30 feet\n\n"
+    "Rubble Heap  HAZARD 1\nStealth DC 18\nHP 12\n\n"
+    "Roll   Find\n1-3    Rust\n4-6    A button\n7-9    Moth dust\n\n"
+    "Name  Cost\nRope  1\nOil  3  4\nLamp  2  extra\n\n"
+    "Closing words about the vault."
+)
+
+
+def test_stat_blocks_and_tables_are_atomic_chunks_and_unreadable_ones_are_reported(tmp_path):
+    path = tmp_path / "vault.txt"
+    path.write_text(BLOCKS)
+    report: dict = {}
+    passages = library._passages(path, report)
+    texts = [p["text"] for p in passages]
+    toad = next(t for t in texts if t.startswith("Glimmer Toad"))
+    assert toad.endswith("HP 28") and "swim 30 feet" not in toad  # a blank line after HP ends it
+    assert sum(t.count("Glimmer Toad") for t in texts) == 1
+    assert next(t for t in texts if t.startswith("Roll")).endswith("Moth dust")
+    assert report["atomic"] == {"stat block": 1, "table": 1}
+    assert [(e["line"], e["kind"], e["reason"]) for e in report["errors"]] == [
+        (12, "stat block", "no AC line found"),
+        (21, "table", "rows have differing column counts"),
+    ]
+    assert library._passages(path)[0]["chunk_id"] == passages[0]["chunk_id"]  # deterministic
+    # An unreadable block stays running text, never dropped.
+    assert any("Rubble Heap" in t for t in texts) and any("Oil  3  4" in t for t in texts)
+
+
+def test_a_long_stat_block_is_never_split_and_audit_is_permissioned(ws, tmp_path, capsys):
+    block = "Big Thing  CREATURE 9\nAC 30\n" + "Ability line. " * 200 + "\nHP 300\n"
+    sid, path = source(ws, tmp_path, "Intro\n\n" + block + "\nOutro text.")
+    with pytest.raises(WorkspaceError, match="indexing permission"):
+        library.audit(ws, sid)
+    library.permit(ws, sid, True, False, True)
+    assert library.audit(ws, sid) == {"atomic": {"stat block": 1}, "errors": []}
+    [big] = [p for p in library._passages(path) if p["text"].startswith("Big Thing")]
+    assert len(big["text"]) > 2800 and big["text"].endswith("HP 300")
+    main(["sources", "audit", sid, "-w", str(ws.root)])
+    assert '"stat block": 1' in capsys.readouterr().out
