@@ -1,5 +1,7 @@
 # GM guide: create, prepare, play, wrap
 
+New to SecondChair? Start with [Your first hour](first-hour.md); for what to say to which playbook, see [What to ask your agent](what-to-ask.md).
+
 This guide follows one campaign through SecondChair's loop. Each step names what you say to your agent (Claude Code or Codex, opened in the campaign workspace and connected to `secondchair serve`) and the commands you run yourself. You decide; agents propose, prepare and record what you confirm.
 
 ```text
