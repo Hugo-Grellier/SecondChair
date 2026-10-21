@@ -34,10 +34,10 @@ my-campaign/
 ├── speakers.yaml      # the speaker table (CAP-02); written by the GM
 ├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
-└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/ and documents/: each prepared scene's and world document's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content, compendium/: the Foundry compendium metadata snapshot, one file per game system version); git-ignored, rebuildable
+└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/ and documents/: each prepared scene's and world document's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content, compendium/: the Foundry compendium metadata snapshot, one file per game system version, journal/: an interrupted world-turn's roll-forward journal); git-ignored, rebuildable
 ```
 
-Later contracts add decisions, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
+Later contracts add decisions, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing, except a pending `journal/` (see `.secondchair/journal/`).
 
 ## `workspace.yaml`
 
@@ -240,6 +240,25 @@ rescheduled_date: null
 ```
 
 Keys: `<front>/tick@<date>`, `<front>/<step id>`, `<situation>/deadline@<date>`, `<front>/pause@<date>`, `<front>/resume@<date>`, and `<key>~<date>` for a rescheduled one. A rule effect is applied through the action log under living world, every entry carrying the key (`occurrence`); an `unless` tick queues a `settle-an-unless` job (input `occurrence`) and an engaged situation's deadline a `propose-narrative-direction` job, whose every action carries the deadline's key: approving one applies the occurrence (its `entries`), rejecting it leaves the occurrence queued, and undoing the last approved one returns it to the queue (LW-19); a world-turn that applied anything queues one `propose-consequences` job (input `occurrences`, the keys). On the CLI, in the workspace: `secondchair world turn <date> [--since <date>]` (refused in a live session; `--since` on the first one), `secondchair world forecast <date>` (writes nothing), `secondchair world decide <key> accept|reject|reschedule [--date <date>]`, `secondchair world undo <key> --reason <reason>` (with its cascade; the keys return to the queue) and `secondchair world pause|resume <front> <date>`.
+
+### `.secondchair/journal/`
+
+An occurrence and the threshold steps its tick crosses are applied as one (ADR 0016): planned in memory, the level checked once (held at propose, nothing is written but the record and its call), then written through one journal, `.secondchair/journal/<16 hex digits of the SHA-256 of the key>.yaml`, before any of its files:
+
+```yaml
+key: e-1a2b3c4d/tick@4725-01-08
+version: 0.1.0                    # the Core that planned it
+entity: e-1a2b3c4d
+reads: [canon/entities/e-1a2b3c4d.md, canon/facts/f-5e6f7a8b.md]   # the canon files it read
+writes:                           # in order: each target, its log entries, step records, its record
+  - {path: canon/facts/f-0c1d2e3f.md, before: null, after: "---\n…"}
+  - {path: action-log/000012.yaml, before: null, after: "id: 12\n…"}
+  - {path: occurrences/000003.yaml, before: "…status: queued…", after: "…status: applied…"}
+stopped: null                     # the exception call recovery stopped it behind
+inputs_digest: 3f2a…              # SHA-256 of what it read but does not write
+```
+
+Its last write, the occurrence's record reading `applied`, is the commit marker; the journal is deleted after it. The first acquisition of the workspace lock (any Core process, outside an event loop) recovers a journal left behind, before anything else, hand-edit logging included: when the digest of `workspace.yaml`, `delegation.yaml`, the `reads`, the entity's other occurrence records, the targets' `before` and the action log before its first entry still matches, it finishes the writes; when it differs, it rolls back (each target back to `before`, each logged action `undone` with `reason: recovery`) and opens an exception call, and the next world-turn plans the occurrence afresh. When a target holds neither its `before` nor its `after`, recovery stops: the journal is kept with `stopped` set to an exception call naming the file and its three versions, its targets are not logged as hand edits, and the occurrence cannot be applied, until the GM makes the file one of the two and runs `secondchair recover` (exit 1 while a journal is still stopped). Deleting `.secondchair/` while a journal is pending loses the roll-forward: the next `check` reports its written files as hand edits.
 ## `frictions/`
 
 The per-moment friction report (TRC-03, TRC-04), the only trace-derived content the workspace keeps: one Markdown file per moment, named by the moment's `seq` on six digits, written by the Core from the raw behaviour traces ([foundry-bridge.md](foundry-bridge.md), "Behaviour traces"), which stay outside the workspace. It is rewritten when a gap arrives for that moment, and once a user's first records of the next moment arrive, when the moment's traces are complete.
@@ -578,7 +597,7 @@ A hand edit of `canon/` bypasses the Core (CAN-11). When it rebuilds the index, 
 
 ## `.secondchair/index.sqlite`
 
-The derived index (CAN-10): entities, facts, events and knowledge with their derived validity and status, and full-text tables over names, statements and descriptions (CAN-12). It records a fingerprint of `workspace.yaml`, `canon/` and `action-log/`, and any read rebuilds it when they changed. `secondchair check` (in the workspace, or with `-w <workspace>`) rebuilds it from the directory alone, with no Foundry and no Source (PKG-15), logs any hand edit, also validates `moment.yaml`, `delegation.yaml`, the action log, job, call and occurrence files, names each invalid file and exits 1 if there is one. It lists the hand edits awaiting promotion. Deleting `.secondchair/` loses nothing.
+The derived index (CAN-10): entities, facts, events and knowledge with their derived validity and status, and full-text tables over names, statements and descriptions (CAN-12). It records a fingerprint of `workspace.yaml`, `canon/`, `action-log/` and `.secondchair/journal/`, and any read rebuilds it when they changed, recovering a pending journal first. `secondchair check` (in the workspace, or with `-w <workspace>`) rebuilds it from the directory alone, with no Foundry and no Source (PKG-15), logs any hand edit, also validates `moment.yaml`, `delegation.yaml`, the action log, job, call and occurrence files, names each invalid file and exits 1 if there is one. It lists the hand edits awaiting promotion. Deleting `.secondchair/` loses nothing but a pending journal.
 
 ## What is not in the workspace
 

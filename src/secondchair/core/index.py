@@ -175,7 +175,8 @@ def _fingerprint(ws: Workspace) -> str:
     # ponytail: hashes every canon and log file on each query; mtimes if campaigns grow large.
     digest = hashlib.sha256((ws.root / "workspace.yaml").read_bytes())
     digest.update(_SCHEMA.encode())  # a newer Core with new columns rebuilds the index
-    for top in ("canon", LOG_DIR):
+    # A pending journal (ADR 0016) changes it: a read then rebuilds, which recovers first.
+    for top in ("canon", LOG_DIR, delegation.JOURNAL_DIR):
         for p in sorted((ws.root / top).rglob("*")):
             if p.is_file():
                 digest.update(p.relative_to(ws.root).as_posix().encode() + b"\0")
