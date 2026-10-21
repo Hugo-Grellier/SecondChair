@@ -19,6 +19,7 @@ from secondchair.cli import main
 from secondchair.core import (
     calls,
     canon,
+    capture,
     delegation,
     index,
     jobs,
@@ -43,6 +44,7 @@ SEEN = {
     "locator": "observations/outside-sessions.jsonl#seen",
 }
 DAY0 = "4725-01-01"
+DATES = ("4725-01-07", "4725-01-08", "4725-01-14", "4725-01-15")
 CONFIG = {"host": "h", "model": "m", "effort": "e"}
 
 
@@ -418,11 +420,126 @@ def test_unless_ticks_settled_out_of_order_move_the_one_clock(ws: Workspace) -> 
     world.settle_unless(ws, k1, False, [closed], unless_job(ws, k1))  # applied after a later one
 
     assert clock(ws, silt) == 2  # #205 review: the head of the chain, not a second open clock
+    # #170: the late tick takes hold on the head's start, so the history never overlaps: one
+    # clock holds on each date, and no fact ends before it starts.
+    on = {d: world._current(ws, at=d)[silt]["clock"]["state"]["value"] for d in DATES}
+    assert on == {"4725-01-07": 0, "4725-01-08": 0, "4725-01-14": 0, "4725-01-15": 2}
     turn(ws, "4725-01-22")
     k3 = f"{silt}/tick@4725-01-22"
     world.settle_unless(ws, k3, False, [closed], unless_job(ws, k3))
     assert clock(ws, silt) == 3  # the head is the fact no event closes, not the latest start
     assert not inverted(ws)
+
+
+def test_a_retcon_of_an_out_of_order_tick_replaces_every_event_of_its_key(ws: Workspace) -> None:
+    silt, _ = front(ws, "Silt Choke", unless="the bypass is open")
+    closed = fact(ws, "The bypass is closed.", valid_from=DAY0)
+    turn(ws, "4725-01-15")
+    k1, k2 = f"{silt}/tick@4725-01-08", f"{silt}/tick@4725-01-15"
+    world.settle_unless(ws, k2, False, [closed], unless_job(ws, k2))
+    world.settle_unless(ws, k1, False, [closed], unless_job(ws, k1))
+    delegation.change_moment(ws, "between-sessions")  # frozen: only a retcon changes it now
+    with pytest.raises(DelegationError, match="frozen"):
+        world.undo(ws, k1, "other", "cli", authenticated=True)
+
+    # #170: the GM retcons exactly the event dated on the tick; its other event goes with it.
+    retcon = {"kind": "gm", "words": "That first silt tick never happened."}
+    act(
+        ws,
+        "record_event",
+        description="No silt that week.",
+        date="4725-01-08",
+        origin=retcon,
+        replaces=world._id("v", k1, "event"),
+    )
+    [pending] = [e for e in index.search_events(ws) if e["replaces"]]
+    with patch.object(cli, "interactive", return_value=True):
+        assert main(["confirm", pending["id"], "-w", str(ws.root)]) == 0
+
+    assert clock(ws, silt) == 1  # the tick of 01-15 stands, as after an in-order retcon
+    assert world._current(ws, head=True)[silt]["clock"]["state"]["value"] == 1  # one head
+    replaced = {e["id"] for e in index.search_events(ws) if e["status"] == "replaced"}
+    assert replaced == {world._id("v", k1, "event"), world._id("v", k1, "close")}
+
+
+def test_before_the_first_world_turn_the_world_is_read_on_the_current_date(
+    ws: Workspace,
+) -> None:
+    flood = situation(ws, "Spring Flood", stage="available", deadline=None)
+    late = world._current(ws)[flood]["situation"]
+    act(
+        ws,
+        "correct_fact",
+        fact=late["id"],
+        statement=late["statement"],
+        entities=[],
+        origin=GM,
+        state=late["state"],
+        valid_from="4725-02-01",
+    )
+    assert flood in world.state(ws)["situations"]  # no date at all: the open state facts
+
+    capture.set_current_date(ws, "4725-01-20")
+    assert flood not in world.state(ws)["situations"]  # #170: it starts after the date
+    capture.set_current_date(ws, "4725-02-01")
+    assert flood in world.state(ws)["situations"]  # start-inclusive
+
+
+def test_one_entity_holds_one_state_per_key_on_a_date(ws: Workspace) -> None:
+    flood = situation(ws, "Spring Flood", stage="available")
+    old = world._current(ws)[flood]["situation"]
+    act(
+        ws,
+        "correct_fact",
+        fact=old["id"],
+        statement=old["statement"],
+        entities=[],
+        origin=GM,
+        state=old["state"],
+        valid_to="4725-01-10",
+    )
+    rising = {**old["state"], "value": {**old["state"]["value"], "stage": "active"}}
+    new = fact(ws, "The flood rises.", state=rising, entities=[flood], valid_from="4725-01-10")
+
+    # A same-day transition: the old state ends where the new one starts (end-exclusive).
+    assert world._current(ws, at="4725-01-09")[flood]["situation"]["id"] == old["id"]
+    assert world._current(ws, at="4725-01-10")[flood]["situation"]["id"] == new
+    act(
+        ws,
+        "correct_fact",
+        fact=new,
+        statement="The flood rises.",
+        entities=[flood],
+        origin=GM,
+        state=rising,
+        valid_from="4725-01-09",
+    )
+    with pytest.raises(index.CanonError, match="two situation facts"):
+        world._current(ws, at="4725-01-09")  # two stages at once is refused, never picked
+
+
+def test_a_dated_step_fires_while_its_front_holds_end_exclusive(ws: Workspace) -> None:
+    tolls, _ = front(
+        ws,
+        "Toll Squeeze",
+        capacity=9,
+        steps={"inside": {"date": "4725-01-19"}, "on-end": {"date": "4725-01-20"}},
+    )
+    rule = world._current(ws)[tolls]["front"]
+    act(
+        ws,
+        "correct_fact",
+        fact=rule["id"],
+        statement=rule["statement"],
+        entities=[],
+        origin=GM,
+        state=rule["state"],
+        valid_to="4725-01-20",
+    )
+
+    keys = turn(ws, "4725-02-01")
+
+    assert f"{tolls}/inside" in keys and f"{tolls}/on-end" not in keys
 
 
 def test_a_front_starting_inside_the_window_ticks_from_its_start(ws: Workspace) -> None:

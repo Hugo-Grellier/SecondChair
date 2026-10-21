@@ -8,7 +8,7 @@ import pytest
 from mcp import Client
 
 from secondchair.cli import main
-from secondchair.core import index, mystery, workspace
+from secondchair.core import capture, index, mystery, workspace
 from secondchair.core.index import CanonError
 from secondchair.core.server import build_server
 
@@ -288,6 +288,14 @@ def test_the_core_records_a_mystery_and_flags_a_lost_clue(ws) -> None:
     )
     report = call(ws, "check_mystery", mystery=ids["Who"]).structured_content
     assert "mystery-unreachable" in codes(report)
+    assert {c["id"]: c["state"] for c in report["clues"]}["clue-4"] == "lost"
+
+    # #170: as of the campaign's current date, a clue the future burns is still there.
+    capture.set_current_date(ws, "4726-01-31")
+    report = call(ws, "check_mystery", mystery=ids["Who"]).structured_content
+    assert {c["id"]: c["state"] for c in report["clues"]}["clue-4"] == "hidden"
+    capture.set_current_date(ws, "4726-02-01")
+    report = call(ws, "check_mystery", mystery=ids["Who"]).structured_content
     assert {c["id"]: c["state"] for c in report["clues"]}["clue-4"] == "lost"
 
 

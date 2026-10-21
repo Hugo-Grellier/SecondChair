@@ -112,6 +112,22 @@ def date_key(calendar: Calendar, value: str) -> int:
     return year * 10000 + month * 100 + day
 
 
+def holds(calendar: Calendar, f: dict, at: str | None) -> bool:
+    """The as-of rule (#170), the one `search_facts(at=...)` applies in SQL: fact `f` holds on
+    `at` when it is not a belief (`never_true`), started by then and not yet ended (validity is
+    start-inclusive, end-exclusive; a partial date is the start of its period). With no date,
+    an open fact holds."""
+    if f.get("never_true"):
+        return False
+    start, end = f.get("valid_from"), f.get("valid_to")
+    if at is None:
+        return end is None
+    on = date_key(calendar, at)
+    return (start is None or date_key(calendar, start) <= on) and (
+        end is None or date_key(calendar, end) > on
+    )
+
+
 def split_doc(text: str) -> tuple[dict, str]:
     """YAML front matter and body of a canon document."""
     if not text.startswith("---\n") or text.count("---\n") < 2:
@@ -211,7 +227,11 @@ def _load(ws: Workspace) -> tuple[tuple[dict, dict, dict, dict], list[str]]:
                 continue
             # The entry that wrote this very content. A hand edit ranks agent_proposal, or
             # gm_decision once promoted, whatever its front matter claims (CAN-11).
-            doc["admitted_by"], hand_rank = admitted.get((relative, text), (None, None))
+            doc["admitted_by"], hand_rank, occurrence = admitted.get(
+                (relative, text), (None, None, None)
+            )
+            if folder == EVENTS_DIR:
+                doc["occurrence"] = occurrence  # the world-turn occurrence that wrote it
             if hand_rank and "rank" in doc:
                 doc["rank"] = hand_rank
             found[doc["id"]] = doc
@@ -252,8 +272,9 @@ def knowledge_problem(k: dict, entities: dict, facts: dict, events: dict) -> str
     return None
 
 
-def _admitted(entries: list[dict]) -> dict[tuple, tuple[int, str | None]]:
-    """(target, content) -> the last entry that wrote it, and the rank a hand edit gives it."""
+def _admitted(entries: list[dict]) -> dict[tuple, tuple[int, str | None, str | None]]:
+    """(target, content) -> the last entry that wrote it, the rank a hand edit gives it, and
+    the world-turn occurrence key it applied, if any."""
     found = {}
     for entry in entries:
         if isinstance(entry.get("after"), str) and (  # a VTT action's `after` is its fields
@@ -261,7 +282,8 @@ def _admitted(entries: list[dict]) -> dict[tuple, tuple[int, str | None]]:
             or entry.get("kind") == "hand_edit"
             or entry.get("interaction") == "confirm"
         ):
-            found[(entry.get("target"), entry["after"])] = (entry["id"], entry.get("rank"))
+            key = entry.get("occurrence") if entry.get("tool") == "world_turn" else None
+            found[(entry.get("target"), entry["after"])] = (entry["id"], entry.get("rank"), key)
     return found
 
 
@@ -376,6 +398,13 @@ def _fill(calendar: Calendar, conn: sqlite3.Connection, entities, facts, events,
         for ev in sorted(events.values(), key=lambda ev: ev["id"])
         if ev.get("replaces") in events and ev["rank"] == "gm_decision"
     }
+    # A world-turn occurrence may write two events (world._evolution): retconning one replaces
+    # every event its key wrote, or its chain is left with no head (#170).
+    for old, retcon in list(replaced_by.items()):
+        key = events[old]["occurrence"]
+        for ev in events.values():
+            if key and ev["occurrence"] == key:
+                replaced_by.setdefault(ev["id"], retcon)
     status = {}
     for ev in events.values():
         if ev["id"] in replaced_by:

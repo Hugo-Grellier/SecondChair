@@ -269,6 +269,37 @@ def test_an_evolution_closes_the_old_fact_and_opens_the_new_one(ws: Workspace) -
     assert event["closes"] == [closed] and event["rank"] == "played"
 
 
+def test_one_as_of_rule_for_partial_dates_same_day_transitions_and_beliefs(
+    ws: Workspace,
+) -> None:
+    march = fact(ws, "The ferry runs in March.", valid_from="4725-03", valid_to="4725-04")
+    fact(ws, "The ferry is cursed.", never_true=True)
+    brief = fact(ws, "The ferry is moored.")
+    after = fact(ws, "The ferry sank.")
+    for opens, closes in (([brief], []), ([after], [brief])):  # both on one day
+        act(
+            ws,
+            "record_event",
+            description="Ferry.",
+            date="4725-05-02",
+            opens=opens,
+            closes=closes,
+            origin=JOB,
+        )
+
+    def at(date: str) -> set[str]:
+        found = {f["id"] for f in read(ws, "search_facts", text="ferry", at=date)}
+        everything = index.search_facts(ws, text="ferry", include_retconned=True)
+        assert found == {f["id"] for f in everything if index.holds(ws.calendar, f, date)}
+        return found
+
+    # A partial date is the start of its period; validity is start-inclusive, end-exclusive.
+    assert at("4725-02-28") == set() and at("4725-03") == at("4725-03-01") == {march}
+    assert at("4725-03-31") == {march} and at("4725-04") == at("4725-04-01") == set()
+    # Opened and closed on one day, a fact never holds; a belief never does (CAN-15).
+    assert at("4725-05-01") == set() and at("4725-05-02") == {after}
+
+
 def test_a_retcon_keeps_the_earlier_event_on_record(ws: Workspace) -> None:
     party = fact(ws, "The party opened the bypass.", origin=SEEN)
     act(

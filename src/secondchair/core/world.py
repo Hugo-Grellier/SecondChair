@@ -132,7 +132,10 @@ def _current(
     fact no event closes whatever its dates (#205), which an effect transforms (an occurrence
     may be applied after a later one, LW-17) and whose dates `_holds` checks; a `valid_to` the
     GM scheduled does not close it; `overlay`, planned changes not yet written, counts as canon
-    (ADR 0016). Before the first world-turn, the open ones."""
+    (ADR 0016). Before the first world-turn, on the campaign's current date (`time.yaml`); with
+    neither date, the open ones. The rule is `index.holds`."""
+    from secondchair.core import capture  # it builds on canon, which builds on this module
+
     if head:
         docs = [(c.path, *index.split_doc(c.after)) for c in overlay if c.after is not None]
         planned = [d for path, d, _ in docs if path.startswith(f"{index.EVENTS_DIR}/")]
@@ -145,10 +148,10 @@ def _current(
             for path, d, body in docs
             if path.startswith(f"{index.FACTS_DIR}/") and d["id"] not in closed
         ]
-    elif at := at or cursor(ws):
+    elif at := at or cursor(ws) or capture.time(ws)["current_date"]:
         facts = index.search_facts(ws, at=at)
     else:
-        facts = [f for f in index.search_facts(ws) if not f["never_true"] and f["valid_to"] is None]
+        facts = [f for f in index.search_facts(ws) if index.holds(ws.calendar, f, None)]
     found: dict[str, dict[str, Any]] = {}
     for f in facts:
         if f.get("state") is None:
@@ -167,12 +170,8 @@ def _current(
 
 
 def _holds(ws: Workspace, f: dict, date: str) -> bool:
-    """Whether fact `f` holds on `date`: started by then and not yet ended."""
-    on = index.date_key(ws.calendar, date)
-    start, end = f["valid_from"], f["valid_to"]
-    return (start is None or index.date_key(ws.calendar, start) <= on) and (
-        end is None or index.date_key(ws.calendar, end) > on
-    )
+    """Whether fact `f` holds on `date`, by the as-of rule of `search_facts`."""
+    return index.holds(ws.calendar, f, date)
 
 
 def state(ws: Workspace) -> dict[str, dict]:
@@ -472,7 +471,10 @@ def _evolution(
 ) -> list[Change]:
     """An offscreen event closing `old` and opening the new state fact, and what its knowers
     learn (LW-03, LW-11). File ids derive from the occurrence key, used once. `closed_on`: `old`
-    starts after `date`, so a second event closes it on its start, never before (#205)."""
+    starts after `date` (a later occurrence applied first, LW-17), so a second event, on its
+    start, closes it and opens the new fact: no fact ends before it starts (#205) and the chain
+    never overlaps (#170). The first event keeps the occurrence's date and changes nothing; a
+    retcon of either replaces both (`index`)."""
     fact_id, event_id = _id("f", key, "fact"), _id("v", key, "event")
     fact: dict[str, Any] = {"id": fact_id, "entities": [new_state["of"]], "relation": None}
     fact |= {"valid_from": None, "valid_to": None, "rank": rank, "origin": origin}
@@ -482,8 +484,9 @@ def _evolution(
     event |= {"rank": rank, "origin": origin}
     events = [event]
     if closed_on:
-        events.insert(0, {**event, "id": _id("v", key, "close"), "date": closed_on, "opens": []})
-        event["closes"] = []
+        events.insert(0, {**event, "id": _id("v", key, "close"), "date": closed_on})
+        event |= {"opens": [], "closes": []}
+    opener = events[0]  # what the knowers learn it at, when it starts
     changes = [Change(f"{index.FACTS_DIR}/{fact_id}.md", index.join_doc(fact, statement), key)]
     changes += [
         Change(f"{index.EVENTS_DIR}/{e['id']}.md", index.join_doc(e, description), key)
@@ -492,7 +495,7 @@ def _evolution(
     for knower in dict.fromkeys(knowers):  # LW-11: the carrier and named participants only
         k_id = _id("k", key, knower)
         record: dict[str, Any] = {"id": k_id, "knower": knower, "fact": fact_id, "mode": "knows"}
-        record |= {"date": date, "event": event_id, "rank": rank, "origin": origin}
+        record |= {"date": opener["date"], "event": opener["id"], "rank": rank, "origin": origin}
         changes.append(Change(f"{index.KNOWLEDGE_DIR}/{k_id}.md", index.join_doc(record, ""), key))
     return changes
 

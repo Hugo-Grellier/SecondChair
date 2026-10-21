@@ -14,10 +14,10 @@ failure), optionally simulating the loss of some clues.
 
 import re
 from collections import deque
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from typing import Any
 
-from secondchair.core import index, knowledge
+from secondchair.core import capture, index, knowledge
 from secondchair.core.index import PARTY, CanonError
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
@@ -40,10 +40,12 @@ def check(
     entities: set[str],
     known: Collection[str] = frozenset(),
     lose: Sequence[str] = (),
+    now: Callable[[dict], bool] | None = None,
 ) -> dict[str, Any]:
     """The mystery's report. `facts` are canon facts by id, retconned ones included (with their
     `status` and `valid_to`); `known` the fact ids the party knows; `lose` clue ids whose loss
-    is simulated (nothing is written). Problems are reported, never raised; a bad `lose` is."""
+    is simulated (nothing is written); `now` whether a canon fact holds now, by default while
+    it is open. Problems are reported, never raised; a bad `lose` is."""
     problems: list[str] = []
     if not isinstance(doc, dict):
         doc, problems = {}, ["a mystery must be a mapping"]
@@ -61,7 +63,7 @@ def check(
 
     def holds(fact_id: str) -> bool:
         f = facts[fact_id]
-        return f["status"] == "canon" and f["valid_to"] is None
+        return f["status"] == "canon" and (now(f) if now else f["valid_to"] is None)
 
     def fact_of(lid: str, value: Any) -> str | None:
         if not isinstance(value, str) or value not in facts:
@@ -265,7 +267,12 @@ def tools(ws: Workspace) -> list[Tool]:
         entities = {e["id"] for e in index.search_entities(ws)}
         held = knowledge.known(ws, PARTY)
         known = {f for f, h in held.items() if h["mode"] == "knows"}  # a suspicion finds nothing
-        return check(doc, facts, entities, known, lose)
+        today = capture.time(ws)["current_date"]
+
+        def now(f: dict) -> bool:  # on the current date (#170); a belief clue is never lost
+            return bool(f.get("never_true")) or index.holds(ws.calendar, f, today)
+
+        return check(doc, facts, entities, known, lose, now)
 
     def record_mystery(
         mystery: str,
