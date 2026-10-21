@@ -14,7 +14,7 @@ from test_canon import entity, fact
 from test_knowledge import learn
 
 from secondchair.cli import main
-from secondchair.core import delegation, knowledge, observations, workspace
+from secondchair.core import delegation, director, knowledge, observations, workspace
 from secondchair.core.server import build_server
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
@@ -343,3 +343,128 @@ def test_i_voice_this_one_withdraws_its_calls_and_hand_back_removes_it(ws: Works
     assert delegation.overrides(ws) == []
     assert state(ws)["cue"]["voiced"] is False
     assert gesture(ws, "hand_back", entity=tovan)["ok"] is False
+
+
+def written(ws: Workspace) -> dict[str, int]:
+    """How many action log entries, calls and jobs the workspace holds."""
+    return {d: len(list((ws.root / d).glob("*.yaml"))) for d in ("action-log", "calls", "jobs")}
+
+
+def tower_scene(ws: Workspace) -> tuple[str, str, str, str]:
+    """Tovan Reed speaks in the Tower; Mira Pell only in the Market. The party knows the bell
+    rings on dry nights; only Tovan knows where the key is. Returns Tovan, the bell, the key and
+    Mira."""
+    tovan, bell, _ = npc_who_knows(ws)
+    key = fact(ws, "The vault key hides under the altar.", entities=[tovan])
+    learn(ws, tovan, key)
+    learn(ws, "party", bell)
+    mira = entity(ws, "Mira Pell")
+    learn(ws, mira, fact(ws, "Mira forged the tithe ledger.", entities=[mira]))
+    handoff = ws.root / "prep/session-1/handoff.md"
+    handoff.parent.mkdir(parents=True)
+    handoff.write_text(
+        "# Session 1\n\n- Tovan Reed lies about the relay.\n- The market is busy.\n"
+        "Tower: the bell is cracked.\n"
+    )
+    gesture(ws, "start_session")
+    observe(ws, "o1", 0, "scene", "Scene.tower", action="activate", name="Tower")
+    observe(ws, "o2", 1, "chat", "Scene.tower", speaker="Tovan Reed", text="Go home.")
+    observe(ws, "o3", 2, "chat", "Scene.market", speaker="Mira Pell", text="Coins!")
+    return tovan, bell, key, mira
+
+
+def test_the_situation_card_shows_who_is_here_what_the_party_knows_and_what_to_keep_secret(
+    ws: Workspace,
+) -> None:
+    tovan, bell, key, _ = tower_scene(ws)
+    assert state(ws)["situation"] is None  # nothing until the GM pulls it
+    before = written(ws)
+
+    # The result says nothing of the card: it reaches the Desk only in its state.
+    assert gesture(ws, "situation") == {"type": "result", "id": "g1", "ok": True}
+    card = state(ws)["situation"]
+    assert {k: v for k, v in card["as_of"].items() if k != "at"} == {
+        "moment": delegation.current_moment(ws)[1],
+        "session": 1,
+        "observation": "o1",
+        "scene": "Scene.tower",
+        "round": None,
+        "turn": None,
+    }
+    assert (card["scene"], card["acting"], card["calls"]) == ("Tower", None, [])
+    assert card["npcs"] == [
+        {
+            "id": tovan,
+            "name": "Tovan Reed",
+            "shared": [{"id": bell, "statement": "The bell rings on dry nights.", "mode": "knows"}],
+            "secret": [
+                {"id": key, "statement": "The vault key hides under the altar.", "mode": "knows"}
+            ],
+        }
+    ]  # Mira spoke in another scene: not here, and nothing of hers is on the card
+    assert card["handoff"] == ["Tovan Reed lies about the relay.", "Tower: the bell is cracked."]
+    # A read: no action logged, no call raised, no job queued, so no model is asked.
+    assert written(ws) == before
+
+
+def test_the_situation_card_is_withdrawn_once_play_moves_on_and_names_who_acts(
+    ws: Workspace,
+) -> None:
+    tower_scene(ws)
+    gesture(ws, "situation")
+    assert state(ws)["situation"] is not None
+    observe(ws, "o4", 3, "chat", "Scene.tower", speaker="Tovan Reed", text="Leave.")
+    assert state(ws)["situation"] is not None  # a chat line moves nothing
+
+    observe(
+        ws,
+        "o5",
+        4,
+        "combat",
+        "Scene.tower",
+        action="start",
+        round=1,
+        turn=0,
+        combatant="Tovan Reed",
+    )
+    assert state(ws)["situation"] is None  # combat started: stale
+    gesture(ws, "situation")
+    card = state(ws)["situation"]
+    assert (card["acting"], card["as_of"]["round"], card["as_of"]["turn"]) == ("Tovan Reed", 1, 0)
+
+    observe(ws, "o6", 5, "combat", "Scene.tower", action="turn", round=1, turn=1, combatant="Ada")
+    assert state(ws)["situation"] is None
+    gesture(ws, "end_session")
+    gesture(ws, "situation")
+    assert state(ws)["situation"]["as_of"]["session"] is None
+    gesture(ws, "start_session")
+    assert state(ws)["situation"] is None  # a new moment withdraws it
+
+
+def test_the_situation_card_lists_the_open_calls_about_an_npc_present(ws: Workspace) -> None:
+    tovan, *_ = tower_scene(ws)
+
+    def speak(text: str) -> Change:
+        return Change(path=f"lines/{text}.md", after=text, entity=tovan)
+
+    tool = Tool(fn=speak, responsibility="disclosure", delegated_action=True, reversible=False)
+    pending = delegation.act(ws, tool, "claude-live", lambda: speak("Go home."), blocking=True)
+    gesture(ws, "situation")
+    [found] = state(ws)["situation"]["calls"]
+    assert (found["kind"], found["deadline"]) == ("proposal", "now")
+    assert found["text"] == "speak on lines/Go home..md"
+    assert pending["status"] == "pending"
+
+
+def test_a_situation_card_file_with_no_as_of_or_garbled_is_never_shown(ws: Workspace) -> None:
+    (ws.root / director.CARD_FILE).write_text(json.dumps({"scene": "Tower"}))
+    assert state(ws)["situation"] is None
+    (ws.root / director.CARD_FILE).write_text("{not json")
+    assert state(ws)["situation"] is None
+
+    # A client that sends a speaker or a scene name that is not text gets a card all the same.
+    gesture(ws, "start_session")
+    observe(ws, "o1", 0, "scene", "Scene.tower", action="activate", name=["Tower"])
+    observe(ws, "o2", 1, "chat", "Scene.tower", speaker={"name": "Tovan Reed"})
+    assert gesture(ws, "situation")["ok"] is True
+    assert (state(ws)["situation"]["scene"], state(ws)["situation"]["npcs"]) == (None, [])

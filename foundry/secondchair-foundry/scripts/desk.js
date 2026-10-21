@@ -1,13 +1,15 @@
 // The Director's Desk (ARC-12, ARC-14, docs/contracts/foundry-bridge.md): the calls due now,
-// approve or reject with a reason, the break pile, Start / End session, decisions to confirm and
-// the ceiling, read-only. No tabs. It holds no state of its own (ARC-11): the Core sends what to
+// approve or reject with a reason, the break pile, Start / End session, the situation card the GM
+// pulls, decisions to confirm and the ceiling, read-only. No tabs. It holds no state of its own (ARC-11): the Core sends what to
 // show and takes the gestures. Free of Foundry globals, so it runs under `node --test`.
 
 /**
  * @typedef {{id: number, kind: string, responsibility: string, deadline: string, status: string, entry: number | null, message: string | null, detail: string | null, reversible: boolean | null}} DeskCall
  * @typedef {{npc: string, name: string, goal: string, posture?: string, line: string | null, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean, as_of?: CueAsOf}} ActingCue
  * @typedef {{moment: number, session: number | null, observation: string | null, scene: string | null, round: number | null, turn: number | null, at: string}} CueAsOf
- * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, turn_driver?: string | null}} DeskState
+ * @typedef {{id: string, statement: string, mode: string}} CardFact
+ * @typedef {{as_of: CueAsOf, scene: string | null, acting: string | null, npcs: {id: string, name: string, shared: CardFact[], secret: CardFact[]}[], handoff: string[], calls: {id: number, kind: string, deadline: string, text: string}[]}} SituationCard
+ * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */
 
@@ -127,29 +129,77 @@ const callsHtml = (calls, none) =>
   calls.length ? `<ul>${calls.map(callHtml).join("")}</ul>` : `<p>${none}</p>`;
 
 /**
+ * When a cue was shown or a card pulled, and its round in combat; "" from a Core before as_of.
+ * @param {CueAsOf | undefined} asOf
+ */
+function ageHtml(asOf) {
+  if (!asOf?.at) return "";
+  const time = new Date(asOf.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const round = asOf.round == null ? "" : `, round ${esc(asOf.round)}`;
+  return `<time datetime="${esc(asOf.at)}">As of ${esc(time)}${round}</time>`;
+}
+
+/**
+ * Facts as a list, a belief or a suspicion labelled as such.
+ * @param {{statement: string, mode?: string}[]} facts @param {string} none
+ */
+const factsHtml = (facts, none) =>
+  facts.length
+    ? `<ul>${facts.map((f) => `<li>${esc(f.statement)}${f.mode && f.mode !== "knows" ? ` <em>(${esc(f.mode)})</em>` : ""}</li>`).join("")}</ul>`
+    : `<p>${none}</p>`;
+
+/**
+ * The situation card the GM pulled (#188 D1): GM only, assembled by the Core with no model,
+ * withdrawn by the Core once play moves on. Plain words and an empty-state line in each part.
+ * @param {SituationCard | null | undefined} card
+ */
+function situationHtml(card) {
+  const pull = `<p><button type="button" data-action="gesture" data-gesture="situation">${card ? "Refresh" : "Show the situation"}</button> <kbd>Shift</kbd>+<kbd>S</kbd></p>`;
+  if (!card)
+    return `<p>A read of the scene: who is here, what the party knows, what to keep secret.</p>\n${pull}`;
+  const npcs = card.npcs.length
+    ? card.npcs
+        .map(
+          (n) => `<h4>${esc(n.name)}</h4>
+<p>The party knows:</p>
+${factsHtml(n.shared, "Nothing they know.")}
+<p>Keep secret (the party does not know):</p>
+${factsHtml(n.secret, "Nothing.")}`,
+        )
+        .join("\n")
+    : "<p>No NPC seen here yet. An NPC shows up once it speaks in chat or takes a combat turn.</p>";
+  const handoff = card.handoff.length
+    ? `<ul>${card.handoff.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`
+    : "<p>Nothing in your handoff about this scene.</p>";
+  const calls = card.calls.length
+    ? `<ul>${card.calls.map((c) => `<li>${esc(c.kind)}${c.deadline === "now" ? " · due now" : " · at the break"}: ${esc(c.text)}</li>`).join("")}</ul>`
+    : "<p>Nothing waiting about them.</p>";
+  return `<details class="secondchair-card" open>
+<summary><strong>GM only</strong> · ${ageHtml(card.as_of)}</summary>
+<p>Scene: ${card.scene ? esc(card.scene) : "none seen yet"}${card.acting ? ` · Turn: <strong>${esc(card.acting)}</strong>` : ""}</p>
+<h4>Who is here</h4>
+${npcs}
+<h4>From your handoff</h4>
+${handoff}
+<h4>Waiting on you</h4>
+${calls}
+</details>
+${pull}`;
+}
+
+/**
  * The active NPC's acting cue (DEL-15): shown at every level, manual included, since it is a read.
  * Its age is the time it was shown; the Core withdraws it once play moves on (ADR 0020 item 3).
  * @param {ActingCue | null} cue
  */
 function cueHtml(cue) {
   if (!cue) return "<p>No acting cue.</p>";
-  // A Core from before as_of sends none: no age line rather than a broken one.
-  const asOf = cue.as_of?.at ? cue.as_of : null;
-  const time = asOf
-    ? new Date(asOf.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : "";
-  const round = asOf?.round == null ? "" : `, round ${esc(asOf.round)}`;
-  const age = asOf
-    ? `<p><time datetime="${esc(asOf.at)}">As of ${esc(time)}${round}</time></p>\n`
-    : "";
-  /** @param {{statement: string, mode?: string}[]} facts */
-  const list = (facts) =>
-    facts.length
-      ? `<ul>${facts.map((f) => `<li>${esc(f.statement)}${f.mode && f.mode !== "knows" ? ` <em>(${esc(f.mode)})</em>` : ""}</li>`).join("")}</ul>`
-      : "<p>None.</p>";
+  const age = ageHtml(cue.as_of);
+  const list = (/** @type {{statement: string, mode?: string}[]} */ facts) =>
+    factsHtml(facts, "None.");
   const [gesture, label] = cue.voiced ? ["hand_back", "Hand back"] : ["voice", "I voice this one"];
   return `<p><strong>${esc(cue.name)}</strong> · ${esc(cue.goal)}</p>
-${age}${cue.posture ? `<p><em>${esc(cue.posture)}</em></p>\n` : ""}${cue.line === null ? "" : `<p><em>“${esc(cue.line)}”</em></p>\n`}<p>Knows:</p>
+${age ? `<p>${age}</p>\n` : ""}${cue.posture ? `<p><em>${esc(cue.posture)}</em></p>\n` : ""}${cue.line === null ? "" : `<p><em>“${esc(cue.line)}”</em></p>\n`}<p>Knows:</p>
 ${list(cue.knows)}
 <p>Does not know:</p>
 ${list(cue.does_not_know)}
@@ -180,6 +230,8 @@ export function deskHtml({ isGM, state, pile, ceiling }) {
 <p>${session} <button type="button" data-action="gesture" data-gesture="break">Break</button></p>
 <h3>Due now</h3>
 ${callsHtml(state.calls, "Nothing due now.")}
+<h3>Situation</h3>
+${situationHtml(state.situation)}
 <h3>Acting cue</h3>
 ${state.turn_driver ? `<p><em>${esc(state.turn_driver)} runs the GM creatures' turns: agents stay silent.</em></p>\n` : ""}${cueHtml(state.cue)}
 ${

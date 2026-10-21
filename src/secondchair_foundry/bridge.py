@@ -22,6 +22,7 @@ from secondchair.core import (
     PROTOCOL_VERSION,
     capture,
     delegation,
+    director,
     knowledge,
     observations,
     traces,
@@ -263,6 +264,7 @@ class Bridge:
                         delegation.current_moment(self.ws),
                         desk.due_now(self.ws),
                         knowledge.active_cue(self.ws),
+                        director.current(self.ws),  # withdrawn once play moves on
                         self.turn_driver,
                         len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
                     )

@@ -231,3 +231,82 @@ test("once the bridge closes, waiting gestures fail and no new one is sent", asy
   await assert.rejects(d.gesture("break"), /Not connected/);
   assert.equal(sent.length, 1);
 });
+
+/** @type {NonNullable<DeskState["situation"]>} */
+const CARD = {
+  as_of: {
+    moment: 7,
+    session: 3,
+    observation: "o-18",
+    scene: "Scene.s1",
+    round: 2,
+    turn: 1,
+    at: "2026-10-21T20:20:00+00:00",
+  },
+  scene: "Tower",
+  acting: "Tovan Reed",
+  npcs: [
+    {
+      id: "e-1",
+      name: "Tovan Reed",
+      shared: [{ id: "f-2", statement: "The bell rings on dry nights.", mode: "knows" }],
+      secret: [
+        { id: "f-4", statement: "The vault key hides under the <b>altar</b>.", mode: "knows" },
+      ],
+    },
+  ],
+  handoff: ["Tovan Reed lies about the relay."],
+  calls: [{ id: 4, kind: "proposal", deadline: "now", text: "speak on lines/1.md" }],
+};
+
+test("the situation card reads in plain words: scene, turn, who is here, secrets, handoff", () => {
+  const state = { ...STATE, situation: CARD };
+  assert.ok(valid(state), JSON.stringify(valid.errors));
+  const html = deskHtml({ isGM: true, state, pile: null, ceiling: "propose" });
+  assert.match(
+    html,
+    /<summary><strong>GM only<\/strong> · <time [^>]+>As of [^<]+, round 2<\/time>/,
+  );
+  assert.match(html, /Scene: Tower · Turn: <strong>Tovan Reed<\/strong>/);
+  assert.match(html, /<h4>Tovan Reed<\/h4>\n<p>The party knows:<\/p>\n<ul><li>The bell rings/);
+  assert.match(
+    html,
+    /Keep secret \(the party does not know\):<\/p>\n<ul><li>The vault key hides under the &lt;b&gt;altar/,
+  );
+  assert.match(html, /<li>Tovan Reed lies about the relay.<\/li>/);
+  assert.match(html, /<li>proposal · due now: speak on lines\/1.md<\/li>/);
+  assert.match(html, /data-gesture="situation">Refresh<\/button>/);
+});
+
+test("an empty situation card says so in each part, and none offers to show one", () => {
+  const empty = { ...CARD, scene: null, acting: null, npcs: [], handoff: [], calls: [] };
+  const state = { ...STATE, situation: empty };
+  assert.ok(valid(state), JSON.stringify(valid.errors));
+  const html = deskHtml({ isGM: true, state, pile: null, ceiling: "x" });
+  assert.match(html, /Scene: none seen yet<\/p>/);
+  assert.doesNotMatch(html, /Turn:/);
+  assert.match(html, /No NPC seen here yet/);
+  assert.match(html, /Nothing in your handoff about this scene/);
+  assert.match(html, /Nothing waiting about them/);
+  // Withdrawn or never pulled (and from a Core before it): a button to pull it.
+  for (const situation of [null, undefined]) {
+    const none = deskHtml({ isGM: true, state: { ...STATE, situation }, pile: null, ceiling: "x" });
+    assert.match(none, /data-gesture="situation">Show the situation<\/button> <kbd>Shift<\/kbd>/);
+    assert.doesNotMatch(none, /GM only/);
+  }
+});
+
+test("a player never sees the situation card nor pulls one", async () => {
+  const state = { ...STATE, situation: CARD };
+  assert.equal(deskHtml({ isGM: false, state, pile: null, ceiling: "propose" }), "");
+  const { d, sent } = desk({ isGM: false });
+  await assert.rejects(d.gesture("situation"), /GM/);
+  assert.deepEqual(sent, []);
+});
+
+test("pulling the situation sends the gesture; the card comes with the Core's next state", async () => {
+  const { d, sent } = desk();
+  const result = await d.gesture("situation");
+  assert.deepEqual(sent, [{ type: "gesture", id: "g1", gesture: "situation" }]);
+  assert.deepEqual(result, { type: "result", id: "g1", ok: true });
+});

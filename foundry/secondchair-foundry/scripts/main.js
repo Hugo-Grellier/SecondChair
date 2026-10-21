@@ -334,6 +334,28 @@ Hooks.once("init", () => {
       return true;
     },
   });
+  // The situation card (#188 D1): a read the GM pulls; the Core sends it in the Desk's state.
+  game.keybindings.register(MODULE, "situation", {
+    name: "Show the situation on the Director's Desk",
+    editable: [{ key: "KeyS", modifiers: ["Shift"] }],
+    restricted: true,
+    onDown: () => {
+      if (!desk || desk.closed) {
+        ui.notifications.warn("SecondChair: not connected to the Core.");
+        return true;
+      }
+      showDesk(true);
+      desk
+        .gesture("situation")
+        .then((result) => {
+          if (!result.ok) ui.notifications.error(`SecondChair: ${result.error}`);
+        })
+        .catch((/** @type {Error} */ error) =>
+          ui.notifications.error(`SecondChair: ${error.message}`),
+        );
+      return true;
+    },
+  });
 });
 
 Hooks.once("ready", () => {

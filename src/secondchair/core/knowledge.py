@@ -81,7 +81,7 @@ def guard(
             for e in index.search_entities(ws)
             if e["id"] != audience
             for name in e["names"] + e["aliases"]
-            if _mentions(text, name) and not _mentions(said, name)
+            if mentions(text, name) and not mentions(said, name)
         }
     )
     if secret:
@@ -154,16 +154,12 @@ def active_cue(ws: Workspace) -> dict[str, Any] | None:
         cue = json.loads((ws.root / CUE_FILE).read_text())
     except OSError, ValueError:
         return None
-    as_of = cue.get("as_of") if isinstance(cue, dict) else None
-    if not isinstance(as_of, dict) or {**as_of, "at": None} != {
-        **observations.position(ws),
-        "at": None,
-    }:
+    if not isinstance(cue, dict) or not observations.still(ws, cue.get("as_of")):
         return None
     return cue
 
 
-def _mentions(text: str, name: str) -> bool:
+def mentions(text: str, name: str) -> bool:
     # ponytail: exact, case-sensitive whole-word match; inflected or misspelt names slip through.
     return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text) is not None
 

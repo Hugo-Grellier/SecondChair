@@ -7,7 +7,7 @@ to the GM whose client holds the bridge, which the token authenticates. It holds
 
 import json
 
-from secondchair.core import calls, canon, delegation, index, knowledge, vtt
+from secondchair.core import calls, canon, delegation, director, index, knowledge, vtt
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.workspace import Workspace, WorkspaceError
@@ -40,7 +40,7 @@ def decisions(ws: Workspace) -> list[dict]:
 def state(ws: Workspace, turn_driver: str | None = None) -> dict:
     """What the Desk shows, sent by the Core whenever it changes. While a turn driver is active
     (the last rules context names one), agents stay silent: the cue shows no agent's line
-    (RUL-12, ADR 0013)."""
+    (RUL-12, ADR 0013). The situation card the GM last pulled shows until play moves on."""
     moment, _seq = delegation.current_moment(ws)
     shown = cue(ws)
     if shown and turn_driver:
@@ -52,6 +52,7 @@ def state(ws: Workspace, turn_driver: str | None = None) -> dict:
         "calls": due_now(ws),
         "decisions": decisions(ws),
         "cue": shown,
+        "situation": director.current(ws),
         "turn_driver": turn_driver,
     }
 
@@ -94,6 +95,8 @@ def take(ws: Workspace, message: dict) -> dict:
                 result["message"] = pushed
         elif name == "end_session":
             delegation.end_session(ws)
+        elif name == "situation":  # a read: shown in the next desk message, never in the result
+            director.pull(ws)
         elif name == "voice":  # tightening, in force at once; withdraws its calls (DEL-14, 16)
             for responsibility in VOICED:
                 delegation.add_override(
