@@ -29,7 +29,7 @@ my-campaign/
 │   └── knowledge/     # one Markdown file per knowledge record: k-1a2b3c4d.md
 ├── scenes/            # one YAML file per prepared scene's desired state: goblin-cave.yaml
 ├── documents/         # one YAML file per prepared world document's desired state: ransom-note.yaml
-├── prep/              # the GM's prep notes, Markdown written by `write_prep`: session-3/handoff.md
+├── prep/              # the GM's prep notes, Markdown written by `write_prep`: session-3/handoff.md; production/<scene>.yaml, a scene's asset manifest (below)
 ├── .gitignore         # contains `.secondchair/`; `init` appends to an existing one
 ├── speakers.yaml      # the speaker table (CAP-02); written by the GM
 ├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
@@ -412,6 +412,37 @@ cites: [f-1a2b3c4d]                                    # fact ids a player-facin
 - `check_prep(path)` (a PF2e read; `secondchair prep check <path>`) lints it and fixes nothing. It looks each `uuid` up by its `name` with the connector's compendium search, and reports the ones it cannot check as `unchecked` when no GM client is connected; recomputes each encounter's XP and threat with GM Core and compares any `xp` or `threat` stated; compares `total_gp` with the level's `treasure_budget`; and requires every clue id in a `clues` list under `canon/mysteries/` or the front matter of a `notes/` draft, and every scene key to have `scenes/<key>.yaml`. It returns `{ok, problems, unchecked, encounters, treasure}`.
 - `check_prep_guide(path)` (a Core read; `secondchair prep guard <path>`) runs the audience guard for the party over the whole note and the `cites` of its block, as `check_audience_content` does for a line. It writes and discloses nothing.
 
+### Production manifest (`prep/production/<scene>.yaml`)
+
+A scene's desired asset list, written by `write_production_manifest` (prep, reversible, logged and undoable) and read by `asset_check`. It is prep, not canon (ADR 0007). The files it names stay in the GM's Foundry data, never in the workspace or the repo (LIC-11); a purchased module's files are referenced by path, never copied (LIC-12), and generated assets stay local to the GM's world (LIC-16).
+
+```yaml
+map: {scale: 5ft, grid: 70, levels: 2}     # optional: the map spec
+packs:                                     # a licence record per pack; an entry's own `licence` overrides it
+  cave-tiles: {licence: CC-BY 4.0, path: modules/cave-tiles}
+entries:
+  - key: cave-map                          # lowercase words joined by dashes, unique
+    kind: map                              # map, portrait, token, music, ambience or handout
+    need: A goblin cave, 40 by 30 squares
+    source: install                        # install, user-file or provider
+    path: modules/cave-tiles/map.webp      # relative to Foundry's data; required once found or approved
+    pack: cave-tiles
+    consent: local                         # local, or model: it may go to a third-party model
+    status: found                          # wanted (the GM must supply it), found or approved
+  - key: boss-portrait
+    kind: portrait
+    need: The goblin chief, scarred, in profile
+    source: provider
+    provider: imagegen                     # required for source provider and for consent model
+    licence: provider terms, personal use
+    consent: model
+    status: approved
+    path: worlds/campaign/boss.webp
+    provenance: {prompt: ..., version: ..., seed: 7, terms: ...}   # required once a generated asset is found or approved
+```
+
+Every entry has a licence, its own or its pack's. `write_production_manifest` also refuses an entry whose `path` lies in a purchased content directory (`purchased_content`, matched by its trailing `modules/<id>`) unless `source` is `install`, and `consent: model` unless the provider is in `model_providers`. `asset_check` resolves a `found` or `approved` entry like a scene file; a `wanted` one is listed under `wanted` (production still to supply) and does not fail `passed`.
+
 ## `canon/entities/`
 
 An entity carries identity only (CAN-02): YAML front matter, then its player-facing description in the campaign language.
@@ -638,11 +669,14 @@ The derived index (CAN-10): entities, facts, events and knowledge with their der
   purchased_content:   # LIC-12: directories or files of purchased content (e.g. a premium Foundry module)
     - path: ~/foundrydata/Data/modules/pf2e-beginner-box
       opt_in: false    # true sends its content to models; default false
+  model_providers: [imagegen]   # #179: third-party model providers that may receive assets; default none
   ```
 
   Next to it, `foundry-token` (mode 0600) holds the token the Foundry module connects with, created by `secondchair token` ([foundry-bridge.md](foundry-bridge.md)).
 
   `runners` is keyed by tier only (`fast`, `standard`, `deep`); a tier with no entry has no runner, and its jobs wait for the GM to start them from their own agent host session. Each entry names a host, a model and an effort; model names appear only here (ARC-25). A host is a command template whose `{prompt}`, `{model}`, `{effort}`, `{playbooks}` (a block's playbook directory; an argument naming it is repeated for each installed block) and `{job}` are filled in; the built-in `claude` and `codex` templates run Claude Code (`claude -p`, with each block's playbooks as a plugin directory and only the SecondChair tools and file reads allowed) and Codex (`codex exec`, with the SecondChair tools approved since `exec` never asks) headless, both reaching the Core through the MCP configuration `secondchair host setup` prints. Neither gives the job `approve_proposal`: a job has no GM at hand to relay (DEL-27); a GM-defined host should withhold it too. An entry whose command cannot be run, exits with an error, or exits without the agent successfully calling `finish_job` (a writing playbook's is refused while no action is logged under the job) is a failed attempt, and the next entry is tried.
+
+`model_providers` lists the third-party model providers the GM allows to receive assets (LIC-12, LIC-16): one switch per provider, empty by default. A production manifest entry with `consent: model` is refused unless its `provider` is listed.
 
 `purchased_content` lists the GM's purchased content (LIC-12). Without `opt_in: true`, it is indexed by metadata only: when a job is queued, an input naming such a path, or a directory holding one, is replaced by the path of its **metadata index**, `.secondchair/purchased/<16 hex digits of the SHA-256 of the path>.yaml`, so none of its text reaches the job. The index holds the path's name, `opt_in: false`, a note for the agent and each file's relative `path` and size in `bytes`; nothing of the content. With `opt_in: true` the input is passed as given.
 

@@ -23,7 +23,7 @@ from secondchair.core import vtt
 from secondchair.core.vtt import VttError
 from secondchair.core.workspace import Workspace
 from secondchair_foundry.bridge import scene_level
-from secondchair_foundry.tools import check_assets, digest
+from secondchair_foundry.tools import check_assets, digest, validate_manifest
 
 CAVE = {
     "scene": {"name": "Goblin cave", "width": 2000, "height": 1500},
@@ -489,3 +489,161 @@ def test_the_scene_report_keeps_realised_valid_and_smoke_tested_apart(ws: Worksp
     with foundry():
         conflicted = call(ws, "scene_report", {"key": "cave"}).structured_content
     assert conflicted["production"]["realised"] is False
+
+
+# --- the production manifest (#179): what a scene needs, with licence and consent ---
+
+
+def entry(**over: Any) -> dict:
+    base = {
+        "key": "cave-map",
+        "kind": "map",
+        "need": "A goblin cave, 40 by 30 squares",
+        "source": "user-file",
+        "path": MAP,
+        "licence": "GM's own",
+        "consent": "local",
+        "status": "found",
+    }
+    return {**base, **over}
+
+
+def manifest(*entries: dict, **over: Any) -> dict:
+    return {"entries": list(entries), **over}
+
+
+def test_a_good_manifest_validates() -> None:
+    generated = entry(
+        key="boss-portrait",
+        kind="portrait",
+        source="provider",
+        provider="imagegen",
+        pack="generated",
+        licence=None,
+        consent="model",
+        provenance={"prompt": "a goblin", "version": "1", "seed": 7, "terms": "personal use"},
+    )
+    del generated["licence"]
+    validate_manifest(
+        manifest(
+            entry(),
+            entry(key="drip", kind="ambience", status="wanted", path=None, pack="pack"),
+            generated,
+            packs={"pack": {"licence": "CC-BY"}, "generated": {"licence": "provider terms"}},
+            map={"grid": 70, "levels": 1},
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("bad", "error"),
+    [
+        (manifest(entry(status="done")), "status"),
+        (manifest(entry(licence=None)), "no licence"),
+        (manifest(entry(pack="nope")), "no licence record"),
+        (manifest(entry(consent="maybe")), "consent"),
+        (manifest(entry(path=None)), "needs its `path`"),
+        (manifest(entry(path="/etc/passwd")), "not a path in Foundry"),
+        (manifest(entry(), entry()), "own key"),
+        (manifest(entry(source="provider")), "provider"),
+        (
+            manifest(entry(source="provider", provider="x", provenance={"prompt": "p"})),
+            "provenance",
+        ),
+        (manifest(entry(provenance={"prompt": "p"})), "only a generated"),
+        (manifest(entry(), packs={"p": {}}), "licence"),
+    ],
+)
+def test_a_bad_manifest_is_refused(bad: dict, error: str) -> None:
+    with pytest.raises(ValueError, match=error):
+        validate_manifest(bad)
+
+
+def write_manifest(ws: Workspace, *entries: dict, **over: Any) -> Any:  # noqa: F811
+    arguments = {"key": "cave", "entries": list(entries), "agent": "claude-prep", **over}
+    return call(ws, "write_production_manifest", arguments)
+
+
+def machine(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, config: dict) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    (tmp_path / "config/secondchair").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config/secondchair/config.yaml").write_text(yaml.safe_dump(config))
+
+
+def test_the_manifest_is_written_in_prep(
+    ws: Workspace,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    machine(monkeypatch, tmp_path, {})
+
+    result = write_manifest(ws, entry())
+
+    assert result.structured_content == {"entry": 1, "status": "applied"}
+    written = yaml.safe_load((ws.root / "prep/production/cave.yaml").read_text())
+    assert written["entries"] == [entry()]
+    assert log(ws)[0]["responsibility"] == "prep"
+
+
+def test_a_purchased_module_file_is_referenced_never_taken_as_another_source(
+    ws: Workspace,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    machine(monkeypatch, tmp_path, {"purchased_content": [{"path": "/data/Data/modules/premium"}]})
+    inside = "modules/premium/assets/map.webp"
+
+    refused = write_manifest(ws, entry(path=inside))
+    allowed = write_manifest(ws, entry(path=inside, source="install"))
+    elsewhere = write_manifest(ws, entry(path="modules/free/map.webp"))
+
+    assert refused.is_error
+    assert "purchased" in refused.content[0].text
+    assert not allowed.is_error
+    assert not elsewhere.is_error
+
+
+def test_sending_to_a_model_needs_the_providers_switch(
+    ws: Workspace,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    sent = entry(consent="model", provider="imagegen")
+
+    machine(monkeypatch, tmp_path, {})
+    assert "off" in write_manifest(ws, sent).content[0].text
+
+    machine(monkeypatch, tmp_path, {"model_providers": ["other"]})
+    assert write_manifest(ws, sent).is_error
+
+    machine(monkeypatch, tmp_path, {"model_providers": ["imagegen"]})
+    assert not write_manifest(ws, sent).is_error
+
+
+def test_an_asset_check_reports_wanted_production_apart_from_a_broken_scene(
+    ws: Workspace,  # noqa: F811
+) -> None:
+    staged(ws, good_scene(), {"diary": DIARY["JournalEntry"]})
+    (ws.root / "prep/production").mkdir(parents=True)
+    wanted = entry(key="theme", kind="music", status="wanted", path=None)
+    gone = entry(key="portrait", kind="portrait", path="tokens/gone.webp")
+    document = manifest(entry(), wanted, gone, map={"grid": 70})
+    (ws.root / "prep/production/cave.yaml").write_text(yaml.safe_dump(document))
+
+    report = checks(ws)
+
+    assert [w["where"].split(": ")[-1] for w in report["wanted"]] == ["theme"]
+    assert where(report, "missing") == ["file:portrait"]
+    assert "file:cave-map" in where(report, "ok")
+
+    document["entries"].pop()
+    (ws.root / "prep/production/cave.yaml").write_text(yaml.safe_dump(document))
+    assert checks(ws)["passed"] is True  # wanted production is not a broken scene
+
+
+def test_an_asset_check_of_a_hand_broken_manifest_is_a_mismatch(ws: Workspace) -> None:  # noqa: F811
+    staged(ws, good_scene(), {"diary": DIARY["JournalEntry"]})
+    (ws.root / "prep/production").mkdir(parents=True)
+    (ws.root / "prep/production/cave.yaml").write_text("entries: [1]")
+
+    assert where(checks(ws), "mismatched") == ["schema:prep/production/cave.yaml"]

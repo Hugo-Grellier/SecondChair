@@ -10,12 +10,13 @@ import json
 import posixpath
 import re
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 from urllib.parse import unquote
 
 import yaml
 
-from secondchair.core import index, vtt
+from secondchair.core import index, machine, vtt
 from secondchair.core.tools import Block, Change, Tool, VttAction
 from secondchair.core.workspace import STATE_DIR, Workspace
 from secondchair_foundry import compendium
@@ -25,6 +26,7 @@ SCENES_DIR = "scenes"  # the desired scenes, one YAML file per scene key
 REPORTS_DIR = f"{STATE_DIR}/scenes"  # each scene's last reconciliation report (derived)
 DOCUMENTS_DIR = "documents"  # the desired world documents, one YAML file per document key
 DOCUMENT_REPORTS_DIR = f"{STATE_DIR}/documents"  # each document's last report (derived)
+PRODUCTION_DIR = "prep/production"  # a scene's asset manifest: prep, not canon (#179)
 DOCUMENT_TYPES = ("JournalEntry", "Actor", "Item", "Playlist", "RollTable")
 EMBEDDED = ("pages", "sounds", "items", "results")  # embedded documents, each replaced whole
 # A world or compendium document's UUID, its type captured: Actor.<id>, Compendium.<pack>.Actor.<id>
@@ -143,6 +145,128 @@ def prepare_scene(
     _check(key, desired)
     text = yaml.safe_dump(desired, sort_keys=False, allow_unicode=True)
     return Change(path=f"{SCENES_DIR}/{key}.yaml", after=text)
+
+
+ASSET_KINDS = ("map", "portrait", "token", "music", "ambience", "handout")
+SOURCES = ("install", "user-file", "provider")
+CONSENTS = ("local", "model")  # model: the asset may be sent to a third-party provider
+STATUSES = ("wanted", "found", "approved")
+PROVENANCE = ("prompt", "version", "seed", "terms")  # the provider is the entry's own
+
+
+def validate_manifest(manifest: Any) -> None:
+    """Refuse a production manifest the pipeline could not use (pure; #179, docs/contracts/
+    workspace-layout.md `prep/production/`). Policy that needs the machine is `_refuse_policy`."""
+    if not isinstance(manifest, dict) or set(manifest) - {"map", "packs", "entries"}:
+        raise ValueError("A manifest has only map, packs and entries.")
+    if not isinstance(manifest.get("map", {}), dict):
+        raise ValueError("`map` is the map spec: scale, grid, levels.")
+    packs = manifest.get("packs", {})
+    if not isinstance(packs, dict):
+        raise ValueError("`packs` maps a pack key to its licence record.")
+    for name, pack in packs.items():
+        if not KEY.match(str(name)) or not isinstance(pack, dict) or not pack.get("licence"):
+            raise ValueError(f"Pack {name!r}: a key and a `licence` record are required.")
+        if set(pack) - {"licence", "path"}:
+            raise ValueError(f"Pack {name!r}: a pack has only licence and path.")
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError("`entries` is the list of wanted assets.")
+    seen: set[str] = set()
+    for e in entries:
+        k = e.get("key") if isinstance(e, dict) else None
+        if not isinstance(k, str) or not KEY.match(k) or k in seen:
+            raise ValueError(f"Entry key {k!r}: give each entry its own key, lowercase and dashes.")
+        seen.add(k)
+        if set(e) - {
+            *("key", "kind", "need", "source", "path", "pack", "licence", "consent"),
+            *("status", "provider", "provenance"),
+        }:
+            raise ValueError(f"{k}: unknown field.")
+        for field, allowed in (
+            ("kind", ASSET_KINDS), ("source", SOURCES), ("consent", CONSENTS), ("status", STATUSES)
+        ):  # fmt: skip
+            if e.get(field) not in allowed:
+                raise ValueError(f"{k}: `{field}` is one of {', '.join(allowed)}.")
+        if not isinstance(e.get("need"), str) or not e["need"]:
+            raise ValueError(f"{k}: say what is `need`ed.")
+        if e.get("pack") is not None and e["pack"] not in packs:
+            raise ValueError(f"{k}: pack {e['pack']!r} has no licence record in `packs`.")
+        if not (e.get("licence") or (e.get("pack") and packs[e["pack"]]["licence"])):
+            raise ValueError(f"{k}: no licence: give `licence` or a `pack` with a record.")
+        if e["status"] != "wanted" and not isinstance(e.get("path"), str):
+            raise ValueError(f"{k}: a {e['status']} asset needs its `path`.")
+        if "path" in e:
+            _data_path(str(e["path"]))
+        if (e["source"] == "provider" or e["consent"] == "model") and not e.get("provider"):
+            raise ValueError(f"{k}: name the `provider`.")
+        prov = e.get("provenance")
+        if e["source"] == "provider" and e["status"] != "wanted":
+            if not isinstance(prov, dict) or any(f not in prov for f in PROVENANCE):
+                raise ValueError(f"{k}: a generated asset needs `provenance`: {PROVENANCE}.")
+        elif prov is not None:
+            raise ValueError(f"{k}: only a generated asset has `provenance`.")
+
+
+def _in_purchased(path: str, roots: list[Path]) -> bool:
+    """Whether a Foundry data path (`modules/<id>/...`) lies in a purchased directory, by the
+    trailing components of the configured root (`.../Data/modules/<id>`)."""
+    parts = unquote(path).split("/")
+    return any(
+        parts[:k] == list(r.parts[-k:])
+        for r in roots
+        for k in range(2, min(len(r.parts), len(parts)) + 1)
+    )
+
+
+def _refuse_policy(manifest: dict[str, Any], purchased: list[Path], providers: list[str]) -> None:
+    """Decisions 19 and 20 (#179): purchased module assets are referenced, never copied;
+    nothing goes to a third-party model unless the GM switched that provider on."""
+    for e in manifest["entries"]:
+        if e.get("path") and e["source"] != "install" and _in_purchased(e["path"], purchased):
+            raise ValueError(
+                f"{e['key']}: {e['path']} is purchased content: reference it with `source: "
+                "install`, never as another source (LIC-12)."
+            )
+        if e["consent"] == "model" and e["provider"] not in providers:
+            raise ValueError(
+                f"{e['key']}: sending to {e['provider']!r} is off. The GM adds it to "
+                "`model_providers` in the machine configuration (LIC-12, LIC-16)."
+            )
+
+
+def write_production_manifest(
+    key: str,
+    entries: list[dict[str, Any]],
+    packs: dict[str, dict[str, str]] | None = None,
+    map_spec: dict[str, Any] | None = None,
+) -> Change:
+    """Write a scene's production manifest, `prep/production/<key>.yaml`: the assets the scene
+    needs and where each stands. It is prep, not canon; `asset_check` reads it.
+
+    `entries` are `{key, kind, need, source, consent, status, path?, pack?, licence?, provider?,
+    provenance?}`. `kind` is map, portrait, token, music, ambience or handout; `need` says what
+    is wanted. `source` is `install` (a Foundry module's or system's file), `user-file` (the
+    GM's own) or `provider` (generated). `status` is `wanted` (the GM must supply it), `found`
+    or `approved`; these two need `path`, relative to Foundry's data. `licence` is the asset's
+    own; without it the entry takes its `pack`'s record. `packs` maps a pack key to
+    `{licence, path?}`. `consent` is `local` (nothing leaves the machine) or `model` (it may go
+    to a third-party model: the entry names its `provider`, and the GM must have switched that
+    provider on). A generated, found asset records `provenance`: `prompt`, `version`, `seed`,
+    `terms`. A purchased module's files are referenced with `source: install`, never copied.
+    `map_spec` is `{scale, grid, levels}`."""
+    manifest: dict[str, Any] = {}
+    if map_spec:
+        manifest["map"] = map_spec
+    if packs:
+        manifest["packs"] = packs
+    manifest["entries"] = entries
+    if not KEY.match(key):
+        raise ValueError(f"Scene key {key!r}: use lowercase words joined by dashes.")
+    validate_manifest(manifest)
+    _refuse_policy(manifest, [p for p, _ in machine.purchased_content()], machine.model_providers())
+    text = yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True)
+    return Change(path=f"{PRODUCTION_DIR}/{key}.yaml", after=text)
 
 
 def _check(key: str, desired: dict[str, Any]) -> None:
@@ -420,6 +544,7 @@ def check_assets(ws: Workspace, key: str) -> dict[str, Any]:
         "mismatched": [],
         "ok": [],
         "skipped": [],
+        "wanted": [],  # production the GM still has to supply: the scene itself is not broken
     }
 
     def add(bucket: str, where: str, check: str, value: str, detail: str = "") -> None:
@@ -550,6 +675,21 @@ def check_assets(ws: Workspace, key: str) -> dict[str, Any]:
                 w, h = got["width"], got["height"]
                 fits = w % grid == 0 and h % grid == 0
                 add("ok" if fits else "mismatched", where, "grid", str(grid), f"map {w}x{h}")
+        manifest_file = ws.root / PRODUCTION_DIR / f"{key}.yaml"
+        if manifest_file.is_file():
+            where = f"{PRODUCTION_DIR}/{key}.yaml"
+            try:
+                manifest = yaml.safe_load(manifest_file.read_text())
+                validate_manifest(manifest)
+            except (ValueError, yaml.YAMLError, AttributeError, TypeError) as e:
+                add("mismatched", where, "schema", key, str(e))
+            else:
+                for entry in manifest["entries"]:
+                    here = f"{where}: {entry['key']}"
+                    if entry["status"] == "wanted":
+                        add("wanted", here, "production", entry["need"], entry["source"])
+                    else:
+                        check_file(here, entry["path"])
     except _Offline:
         add("skipped", f"{SCENES_DIR}/{key}.yaml", "foundry", key, vtt.NO_VTT)
     passed = not (report["missing"] or report["mismatched"] or report["skipped"])
@@ -604,7 +744,9 @@ def tools(ws: Workspace) -> list[Tool]:
         Reads only, fixes nothing. `missing`, `mismatched` and `ok` list each check as
         `{where, check, value, detail}`; `skipped` the checks that could not run, such as every
         Foundry read when no GM client is connected. `passed` is true when the first, second and
-        last are empty."""
+        last are empty. The scene's production manifest, when written, is read too: a `found` or
+        `approved` asset must resolve like a scene file; a `wanted` one is listed under `wanted`,
+        production the GM must supply, which does not fail `passed`."""
         return check_assets(ws, key)
 
     def search_compendium(query: str, type: str | None = None, limit: int = 20) -> dict[str, Any]:
@@ -648,6 +790,12 @@ def tools(ws: Workspace) -> list[Tool]:
         Tool(fn=speak, responsibility="disclosure", delegated_action=True, reversible=False),
         Tool(fn=whisper, responsibility="disclosure", delegated_action=True, reversible=False),
         Tool(fn=prepare_scene, responsibility="prep", delegated_action=True, reversible=True),
+        Tool(
+            fn=write_production_manifest,
+            responsibility="prep",
+            delegated_action=True,
+            reversible=True,
+        ),
         Tool(fn=scene_report, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=prepare_document, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=asset_check, responsibility="prep", delegated_action=False, reversible=True),
