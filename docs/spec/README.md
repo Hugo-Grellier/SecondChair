@@ -59,7 +59,7 @@ Two ticket resolutions disagreed with an ADR or with each other. The GM settled 
 | [0012](../adr/0012-behaviour-traces-capture-raw-input-with-consent.md) | Behaviour traces capture raw input, locally and only with consent | [04](04-canon-memory-capture.md), [10](10-success-bench.md) |
 | [0013](../adr/0013-third-party-modules-are-evidence-turn-drivers-take-over.md) | Third-party modules are optional evidence; a turn driver takes over; house rules come from discrepancies | [06](06-pf2e-rules.md) |
 | [0014](../adr/0014-declarative-campaign-calendar-core-follows-paizo.md) | Declarative campaign calendar; the Core follows Paizo over the PF2e clock | [05](05-living-world-calendar.md) |
-| [0019](../adr/0019-post-v4-live-assistance-and-world-horizon.md) | **Proposed**, awaiting the GM: post-v4 horizon; live help pull-first, live speech, faction intents and an AI GM each amend one decision, in order | [11](11-out-of-scope.md) |
+| [0019](../adr/0019-post-v4-live-assistance-and-world-horizon.md) | Post-v4 horizon: live help pull-first, live speech, faction intents and an AI GM each amend one decision, in order | [11](11-out-of-scope.md), [03](03-delegation.md), [04](04-canon-memory-capture.md), [05](05-living-world-calendar.md) |
 
 ### Ticket resolutions without an ADR
 

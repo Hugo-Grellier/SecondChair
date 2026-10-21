@@ -1,6 +1,6 @@
 # After v4, live assistance stays pull-first and below propose; live speech, faction proposals and an AI GM each amend one decision
 
-Status: proposed — awaiting the GM's decision. Nothing here changes v4 until the GM accepts it; until then [11-out-of-scope.md](../spec/11-out-of-scope.md), ADR 0008 and ADR 0009 hold as written.
+Status: accepted 2026-10-21. Nothing here changes v4 by itself: [11-out-of-scope.md](../spec/11-out-of-scope.md), ADR 0005, ADR 0008 and ADR 0009 hold as written until each amendment below lands in its own ADR.
 
 Epic [#187](https://github.com/Hugo-Grellier/SecondChair/issues/187) asks for a live director, speech fusion, faction agency, tactical help and a researched AI GM. v4 excludes live capture, faction simulation by agents, a world-turn during play and the AI GM as a goal, each "from v4 only". This ADR draws the post-v4 horizon so none of them enters through a playbook: it says which issue amends which decision, under which invariants, in which order. Each amendment is then its own accepted ADR, written when its leaf work starts.
 
@@ -16,10 +16,10 @@ Invariants every amendment must keep, checked on the bench as today:
 
 1. **GM authority.** Narrative direction at most *propose* (DEL-08); anything players see or hear goes through disclosure with its irreversible hold (DEL-09); played outranks every agent output (CAN-06). A suggestion never writes canon or advances the plot.
 2. **The Core schedules.** Anything shown to the GM unasked during play is a call with a deadline and a safe default (ADR 0005). A GM-asked answer is not an interruption; an unasked one is.
-3. **Consent.** Off by default, per participant and per session, revocable, filtered at the participant's own client before anything is emitted (as ADR 0012). The GM cannot consent for a player.
+3. **Consent.** Off by default, in ADR 0012's shape (per user) plus per session, revocable, filtered at the participant's own client before anything is emitted. The GM cannot consent for a player.
 4. **Determinism.** Fictional time, resources and world effects move only through deterministic Core steps with keys used once; model output is a proposal a deterministic step validates. The Core calls no model (ADR 0001).
 5. **Degradation.** With speech, a runner, the network or SecondChair off, Foundry play and canon are unaffected, and the Desk says what is degraded.
-6. **Zero invariants.** Leaks 0 and narrative direction 0 on every run; no paraphrase-leak regression on the bench.
+6. **Zero invariants.** Leaks 0 and narrative direction 0 on every run; once the paraphrase-leak metric exists (ai-gm-mode.md G2), no regression on it, and the amendments that widen voicing wait for that metric.
 
 Recommended sequencing, each step gated on the previous one's bench result:
 
