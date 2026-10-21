@@ -27,3 +27,9 @@ def test_benchmark_reports_columns_and_unchanged_connect_reads_all_inputs(capsys
     _, _, inputs, _ = bench_index.benchmark(2, unchanged_paths)
     assert inputs
     assert inputs <= unchanged_paths
+
+
+def test_benchmark_takes_the_synthetic_campaign_by_size_name() -> None:
+    files, byte_count, inputs, measurements = bench_index.benchmark("S")
+    assert files > 100 and byte_count > 0 and inputs
+    assert len(measurements) == 3
