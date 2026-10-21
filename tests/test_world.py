@@ -4,6 +4,7 @@ the deterministic world-turn and the read-only forecast. The v3 world-turn crite
 
 import asyncio
 import json
+from functools import partial
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -106,6 +107,16 @@ def unless_job(ws: Workspace, key: str) -> int:
 
 def snapshot(root: Path) -> dict[str, bytes]:
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def inverted(ws: Workspace) -> list[str]:
+    """The facts whose validity ends before it starts."""
+    on = partial(index.date_key, ws.calendar)
+    return [
+        f["id"]
+        for f in index.search_facts(ws, include_retconned=True)
+        if f["valid_from"] and f["valid_to"] and on(f["valid_to"]) < on(f["valid_from"])
+    ]
 
 
 # v3 world-turn criteria
@@ -388,6 +399,11 @@ def test_unless_ticks_settled_out_of_order_move_the_one_clock(ws: Workspace) -> 
     world.settle_unless(ws, k1, False, [closed], unless_job(ws, k1))  # applied after a later one
 
     assert clock(ws, silt) == 2  # #205 review: the head of the chain, not a second open clock
+    turn(ws, "4725-01-22")
+    k3 = f"{silt}/tick@4725-01-22"
+    world.settle_unless(ws, k3, False, [closed], unless_job(ws, k3))
+    assert clock(ws, silt) == 3  # the head is the fact no event closes, not the latest start
+    assert not inverted(ws)
 
 
 def test_a_front_starting_inside_the_window_ticks_from_its_start(ws: Workspace) -> None:

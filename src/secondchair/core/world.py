@@ -123,22 +123,17 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
 
 def _current(ws: Workspace, at: str | None = None, head: bool = False) -> dict[str, dict[str, Any]]:
     """Entity id -> its state facts valid on `at`, by default the cursor (#170): one per key, a
-    list of agenda steps. A belief (`never_true`) never is. `head`: the last fact of each chain,
-    whatever its dates, which an effect transforms (an occurrence may be applied after a later
-    one, LW-17) and whose dates `_holds` checks. Before the first world-turn, the open ones."""
-    at = None if head else at or cursor(ws)
-    if at:
+    list of agenda steps. A belief (`never_true`) never is. `head`: the head of each chain, the
+    fact no event closes whatever its dates (#205), which an effect transforms (an occurrence
+    may be applied after a later one, LW-17) and whose dates `_holds` checks; a `valid_to` the
+    GM scheduled does not close it. Before the first world-turn, the open ones."""
+    if head:
+        closed = {c for e in index.search_events(ws) if e["status"] == "canon" for c in e["closes"]}
+        facts = [f for f in index.search_facts(ws) if not f["never_true"] and f["id"] not in closed]
+    elif at := at or cursor(ws):
         facts = index.search_facts(ws, at=at)
     else:
-        facts = [f for f in index.search_facts(ws) if not f["never_true"] and f.get("state")]
-        if not head:
-            facts = [f for f in facts if f["valid_to"] is None]
-        last: dict[tuple, dict] = {}
-        for f in sorted(facts, key=lambda f: _order(ws, f)):  # later in the chain wins
-            st = f["state"]
-            step = st["value"].get("id") if st["key"] == AGENDA else None
-            last[(st["of"], st["key"], step)] = f
-        facts = list(last.values())
+        facts = [f for f in index.search_facts(ws) if not f["never_true"] and f["valid_to"] is None]
     found: dict[str, dict[str, Any]] = {}
     for f in facts:
         if f.get("state") is None:
@@ -154,16 +149,6 @@ def _current(ws: Workspace, at: str | None = None, head: bool = False) -> dict[s
         else:
             mine[key] = f
     return found
-
-
-def _order(ws: Workspace, f: dict) -> tuple:
-    """A state fact's place in its chain: by start, an open fact last."""
-    start = f["valid_from"]
-    return (
-        start is not None,
-        index.date_key(ws.calendar, start) if start else 0,
-        f["valid_to"] is None,
-    )
 
 
 def _holds(ws: Workspace, f: dict, date: str) -> bool:
@@ -458,9 +443,11 @@ def _evolution(
     rank: str,
     origin: dict,
     knowers: list[str],
+    closed_on: str | None = None,
 ) -> list[Change]:
     """An offscreen event closing `old` and opening the new state fact, and what its knowers
-    learn (LW-03, LW-11). File ids derive from the occurrence key, used once."""
+    learn (LW-03, LW-11). File ids derive from the occurrence key, used once. `closed_on`: `old`
+    starts after `date`, so a second event closes it on its start, never before (#205)."""
     fact_id, event_id = _id("f", key, "fact"), _id("v", key, "event")
     fact: dict[str, Any] = {"id": fact_id, "entities": [new_state["of"]], "relation": None}
     fact |= {"valid_from": None, "valid_to": None, "rank": rank, "origin": origin}
@@ -468,9 +455,14 @@ def _evolution(
     event: dict[str, Any] = {"id": event_id, "date": date, "kind": "offscreen"}
     event |= {"opens": [fact_id], "closes": [old["id"]] if old else [], "replaces": None}
     event |= {"rank": rank, "origin": origin}
-    changes = [
-        Change(f"{index.FACTS_DIR}/{fact_id}.md", index.join_doc(fact, statement), key),
-        Change(f"{index.EVENTS_DIR}/{event_id}.md", index.join_doc(event, description), key),
+    events = [event]
+    if closed_on:
+        events.insert(0, {**event, "id": _id("v", key, "close"), "date": closed_on, "opens": []})
+        event["closes"] = []
+    changes = [Change(f"{index.FACTS_DIR}/{fact_id}.md", index.join_doc(fact, statement), key)]
+    changes += [
+        Change(f"{index.EVENTS_DIR}/{e['id']}.md", index.join_doc(e, description), key)
+        for e in events
     ]
     for knower in dict.fromkeys(knowers):  # LW-11: the carrier and named participants only
         k_id = _id("k", key, knower)
@@ -530,7 +522,9 @@ def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change
     ]
     if played:
         raise _Blocked(f"it contradicts played fact {played[0]['id']}")
-    return _evolution(key, old, new_state, statement, key, date, rank, origin, knowers)
+    late = old and old["valid_from"] and not _holds(ws, {**old, "valid_to": None}, date)
+    closed_on = old["valid_from"] if late else None  # LW-17: the event keeps the date
+    return _evolution(key, old, new_state, statement, key, date, rank, origin, knowers, closed_on)
 
 
 def _rule_rank(ws: Workspace, record: dict) -> tuple[str, dict]:
