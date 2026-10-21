@@ -120,10 +120,8 @@ def run(
             job = jobs.start(ws, job_id, config, manual=False)
             error = _launch(ws, job, config, hosts)
             job = jobs.read(ws, job_id)
-            if job["status"] in (
-                "done",
-                "missed",
-            ):  # finish_job, or a live deadline passed (ARC-28)
+            # finish_job, or a live deadline passed (ARC-28)
+            if job["status"] in ("done", "missed"):
                 return job
             # A clean exit is no proof the playbook is complete: only finish_job is (#171).
             jobs.end(ws, job_id, error or f"{config['host']} exited without calling finish_job")

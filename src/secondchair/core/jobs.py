@@ -57,8 +57,9 @@ def queue(
     gets the deadline of the call it prepares as its latency cap (ARC-28); a blocking one forced
     to break misses it at once (DEL-31). Its vocabulary is that of the entity ids it is about, or
     the whole campaign vocabulary (CAN-22). `entity` is the acting entity the job works for,
-    whose override withdraws it while queued (DEL-16). No `tier` means the playbook's (ARC-25). `writes` is the playbook's declaration that
-    it must log a delegated action (`finish_job` refuses otherwise, #171)."""
+    whose override withdraws it while queued (DEL-16). No `tier` means the playbook's (ARC-25).
+    `writes` is the playbook's declaration that it must log a delegated action (`finish_job`
+    refuses otherwise, #171)."""
     from secondchair.core import calls  # it builds on this module
 
     tier = tier or playbooks.playbook(playbook)["tier"]
