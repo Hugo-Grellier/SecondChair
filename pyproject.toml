@@ -45,6 +45,7 @@ dev = [
     "jsonschema>=4.26.0",
     "pre-commit",
     "pytest",
+    "pytest-timeout",
     "ruff",
     "ty",
     "zizmor",
@@ -67,3 +68,5 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A hung test fails instead of holding a run (or a sandboxed worker) forever.
+timeout = 120

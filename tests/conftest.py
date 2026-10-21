@@ -1,4 +1,6 @@
+import functools
 import os
+import socket
 import subprocess
 import sys
 import textwrap
@@ -25,9 +27,23 @@ def machine_config(tmp_path: Path) -> dict[str, str]:
     }
 
 
+@functools.cache
+def _loopback() -> bool:
+    """Whether this process can listen on and connect to 127.0.0.1 (a sandbox may forbid it)."""
+    try:
+        with socket.create_server(("127.0.0.1", 0)) as server:
+            socket.create_connection(server.getsockname(), timeout=2).close()
+    except OSError:
+        return False
+    return True
+
+
 @contextmanager
 def _serving(ws: Path, env: dict[str, str]) -> Generator[str]:
-    """Run `secondchair serve` on `ws` and yield its first output line."""
+    """Run `secondchair serve` on `ws` and yield its first output line.
+    Skips the test where loopback is unavailable, rather than hang reading that line."""
+    if not _loopback():
+        pytest.skip("no loopback network in this environment")
     proc = subprocess.Popen(
         [sys.executable, "-m", "secondchair.cli", "serve", str(ws)],
         env=env,
