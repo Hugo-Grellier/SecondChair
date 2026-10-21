@@ -20,6 +20,7 @@ from secondchair.core import (
     jobs,
     library,
     machine,
+    mystery,
     notes,
     rules,
     workspace,
@@ -519,6 +520,16 @@ def _prep_command(args: argparse.Namespace) -> int:
     return 0 if result.get("ok", True) else 1
 
 
+def _mystery_command(args: argparse.Namespace) -> str:
+    """Check a mystery draft note against canon (#177); nothing is written."""
+    ws = workspace.load(args.workspace)
+    [check] = [t for t in mystery.tools(ws) if t.name == "check_draft_mystery"]
+    found = check.fn(args.slug, args.lose)
+    lines = [f"problem: {p}" for p in found["problems"]]
+    lines += [f"{w['code']}: {w['message']}" for w in found["warnings"]]
+    return "\n".join(lines) or "No problem, no warning."
+
+
 def _world_command(args: argparse.Namespace) -> str:
     """The living world's GM gestures (LW-04, LW-05, LW-09, LW-12, LW-14, LW-16, LW-18)."""
     ws = workspace.load(args.workspace)
@@ -843,6 +854,15 @@ def main(argv: list[str] | None = None) -> int:
     ):
         cmd = prep_sub.add_parser(name, parents=[in_workspace], help=help_text)
         cmd.add_argument("path", help="relative to prep/: adventure-x/players-guide.md")
+    mystery_cmd = commands.add_parser("mystery", help="mystery drafts")
+    mystery_sub = mystery_cmd.add_subparsers(dest="mystery_command", required=True)
+    draft_cmd = mystery_sub.add_parser(
+        "check-draft",
+        parents=[in_workspace],
+        help="check notes/mysteries/<slug>.md as record_mystery would; writes nothing",
+    )
+    draft_cmd.add_argument("slug")
+    draft_cmd.add_argument("--lose", action="append", default=[], help="simulate losing a clue id")
     world_cmd = commands.add_parser("world", help="advance, forecast and steer the living world")
     world_sub = world_cmd.add_subparsers(dest="world_command", required=True)
     for name, help_text in (
@@ -973,6 +993,8 @@ def main(argv: list[str] | None = None) -> int:
             return _bench_command(args)
         elif args.command == "prep":
             return _prep_command(args)
+        elif args.command == "mystery":
+            print(_mystery_command(args))
         elif args.command == "world":
             print(_world_command(args))
         else:

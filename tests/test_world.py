@@ -691,7 +691,9 @@ def test_every_world_turn_job_has_a_playbook_matching_its_contract(ws: Workspace
         assert meta["responsibility"] == job["responsibility"]
         assert meta["tier"] == job["tier"]
         assert meta["expected-output"] == job["expected_output"]
-        assert meta["inputs"] == ",".join(sorted(job["inputs"]))
+        declared = {i.strip().removesuffix("?") for i in meta["inputs"].split(",")}
+        assert set(job["inputs"]) <= declared  # an optional input (`?`) a job may leave out
+        assert {i for i in meta["inputs"].split(",") if not i.endswith("?")} <= set(job["inputs"])
 
 
 def test_new_narrative_is_held_at_propose_whatever_its_cell(ws: Workspace) -> None:
@@ -714,6 +716,27 @@ def test_new_narrative_is_held_at_propose_whatever_its_cell(ws: Workspace) -> No
     entry = delegation.read_entry(ws, result["entry"])
     assert result["status"] == "pending"
     assert (entry["responsibility"], entry["effective_level"]) == ("narrative_direction", "propose")
+
+
+def test_a_proposal_from_an_observation_stays_pending_never_applied(ws: Workspace) -> None:
+    set_level(ws, "prep", "narrative_direction", "autonomous")
+    chain = situation(ws, "Inspect the Chain", stage="active", deadline="4725-01-10")
+    queued = runner.queue(ws, "propose-narrative-direction", {"observation": "f-1"})
+    jobs.start(ws, queued["id"], CONFIG, manual=True)
+    result = job_act(
+        ws,
+        "record_fact",
+        queued["id"],
+        statement="The bridge guild notices the party.",
+        entities=[chain],
+        origin={"kind": "job", "job": str(queued["id"])},
+    )
+    entry = delegation.read_entry(ws, result["entry"])
+    assert result["status"] == "pending"
+    assert (entry["responsibility"], entry["effective_level"]) == ("narrative_direction", "propose")
+    assert "occurrence" not in entry
+    with pytest.raises(runner.RunnerError):  # an unknown input is still refused
+        runner.queue(ws, "propose-narrative-direction", {"nope": "x"})
 
 
 def test_a_narrative_occurrence_follows_the_gm_answer_to_its_proposal(ws: Workspace) -> None:
