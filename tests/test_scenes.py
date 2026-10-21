@@ -14,7 +14,7 @@ import jsonschema
 import pytest
 import yaml
 from mcp import Client
-from test_delegation import call, log, ws  # noqa: F401  (ws is a fixture)
+from test_delegation import call, gm, log, ws  # noqa: F401  (ws is a fixture)
 from test_foundry_bridge import SCHEMA, bridge, hello, token, workspace  # noqa: F401
 from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Origin
@@ -91,6 +91,35 @@ def test_a_prepared_scene_is_not_read_as_a_hand_edit_of_canon(ws: Workspace) -> 
     assert [e["kind"] for e in log(ws)] == ["action"]
     path = ws.root / "scenes/cave.yaml"
     assert scene_level(ws, path, path.read_text()) == "act-then-review"  # bounded by the ceiling
+
+
+@pytest.mark.parametrize("folder", ["scenes", "documents"])
+def test_a_desired_state_written_outside_prep_is_realised_at_autonomous(
+    ws: Workspace,  # noqa: F811
+    folder: str,
+) -> None:
+    """#163: a file no entry wrote is bounded by every ceiling below autonomous (DEL-19a)."""
+    path = ws.root / folder / "cave.yaml"
+    path.parent.mkdir()
+    path.write_text(yaml.safe_dump(CAVE))
+    assert scene_level(ws, path, path.read_text()) == "autonomous"
+
+
+def test_an_undo_or_a_logged_hand_edit_is_the_gms_and_has_no_level(ws: Workspace) -> None:  # noqa: F811
+    call(ws, "prepare_scene", {"key": "cave", **CAVE, "agent": "claude-prep"})
+    changed = {**CAVE, "choices": {"boss": "recreate"}}
+    call(ws, "prepare_scene", {"key": "cave", **changed, "agent": "claude-prep"})
+    assert gm("log", "undo", "2", "--reason", "other", root=ws.root) == 0
+    path = ws.root / "scenes/cave.yaml"
+    assert scene_level(ws, path, path.read_text()) is None
+
+    # Hand edits are logged for canon files only (CAN-11).
+    path = ws.root / "canon/entities/e-1.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("# Grik\n")
+    call(ws, "search_entities", {"text": ""})  # rebuilds the index, logging hand edits
+    assert log(ws)[-1]["kind"] == "hand_edit"
+    assert scene_level(ws, path, path.read_text()) is None
 
 
 def test_a_malformed_desired_scene_is_refused(ws: Workspace) -> None:  # noqa: F811
@@ -228,14 +257,14 @@ def test_a_realisation_carries_the_level_of_the_preparation_that_wrote_it(
     token: str,  # noqa: F811
     workspace: Path,  # noqa: F811
 ) -> None:
-    """DEL-19a: a GM hand edit, like an undo, has no level, so the ceiling does not bound it."""
+    """DEL-19a: a scene written outside `prepare_scene` is realised at autonomous (#163)."""
     prepare(bridge, CAVE)
     with gm_client(bridge, token) as socket:
         assert realise(socket)["level"] == "act-then-review"
         edited = {**CAVE, "choices": {"boss": "keep"}}
         (workspace / "scenes/cave.yaml").write_text(yaml.safe_dump(edited, sort_keys=False))
         request = realise(socket)
-        assert (request["desired"], request["level"]) == (edited, None)
+        assert (request["desired"], request["level"]) == (edited, "autonomous")
 
 
 def test_a_realisation_above_the_ceiling_is_reported_and_sent_again_when_it_changes(

@@ -521,13 +521,19 @@ def _outcome(reply: dict) -> tuple[dict, dict]:
 
 def scene_level(ws: Workspace, path: Path, text: str) -> str | None:
     """The level a desired scene or document is realised at (DEL-19a): the effective level of
-    the `prepare_scene` or `prepare_document` entry that last wrote it, or None when the GM did,
-    by hand or by an undo."""
+    the `prepare_scene` or `prepare_document` entry that last wrote it, None when the GM did by
+    a logged hand edit or an undo, and `autonomous` for any other origin, so that a lower
+    ceiling refuses it (#163)."""
     entries, _ = delegation.read_log(ws)
     target = path.relative_to(ws.root).as_posix()
     writer, content = delegation.last_writes(entries).get(target, ({}, None))
-    is_prep = writer.get("kind") == "action" and content == text
-    return writer.get("effective_level") if is_prep else None
+    if content != text:
+        return "autonomous"  # no entry, or written since the last one the log knows
+    if writer["kind"] == "hand_edit" or (
+        writer["kind"] == "gm_interaction" and writer["interaction"] == "undo"
+    ):
+        return None
+    return writer["effective_level"] if writer["kind"] == "action" else "autonomous"
 
 
 async def _close_quietly(socket: WebSocket) -> None:
