@@ -5,7 +5,7 @@
 
 /**
  * @typedef {{id: number, kind: string, responsibility: string, deadline: string, status: string, entry: number | null, message: string | null, detail: string | null, reversible: boolean | null}} DeskCall
- * @typedef {{npc: string, name: string, goal: string, line: string | null, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean}} ActingCue
+ * @typedef {{npc: string, name: string, goal: string, posture?: string, line: string | null, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean}} ActingCue
  * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */
@@ -138,7 +138,7 @@ function cueHtml(cue) {
       : "<p>None.</p>";
   const [gesture, label] = cue.voiced ? ["hand_back", "Hand back"] : ["voice", "I voice this one"];
   return `<p><strong>${esc(cue.name)}</strong> · ${esc(cue.goal)}</p>
-${cue.line === null ? "" : `<p><em>“${esc(cue.line)}”</em></p>\n`}<p>Knows:</p>
+${cue.posture ? `<p><em>${esc(cue.posture)}</em></p>\n` : ""}${cue.line === null ? "" : `<p><em>“${esc(cue.line)}”</em></p>\n`}<p>Knows:</p>
 ${list(cue.knows)}
 <p>Does not know:</p>
 ${list(cue.does_not_know)}

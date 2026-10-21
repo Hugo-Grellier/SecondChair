@@ -709,6 +709,10 @@
                 "goal": {
                   "type": "string"
                 },
+                "posture": {
+                  "type": "string",
+                  "description": "The NPC's emotional state in a few words, GM-only direction shown under the goal; absent when the agent gave none. Never audience content."
+                },
                 "line": {
                   "type": [
                     "string",
