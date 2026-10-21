@@ -6,6 +6,7 @@ compatibility: Needs the SecondChair MCP server (secondchair serve) with the Fou
 metadata:
   secondchair-responsibility: prep
   secondchair-tier: standard
+  secondchair-writes: "true"
   secondchair-inputs: brief, scene
   secondchair-expected-output: The scene's desired state written with prepare_scene under the key given as the scene input, and its reconciliation report read with scene_report, with every conflict and error listed for the GM.
 ---

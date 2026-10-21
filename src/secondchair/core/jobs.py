@@ -29,12 +29,14 @@ from secondchair.core.delegation import (
     bound_job,
     current_moment,
     locked,
+    read_log,
 )
 from secondchair.core.tools import RESPONSIBILITIES
 from secondchair.core.workspace import STATE_DIR, Workspace
 
 TIERS = ("fast", "standard", "deep")  # ARC-25
 PURCHASED_DIR = f"{STATE_DIR}/purchased"  # metadata indexes of purchased content (LIC-12)
+LIVE = ("applied", "pending")  # what counts as an output: not undone, rejected or refused
 CONFIG_KEYS = ("host", "model", "effort")  # a runner configuration (ARC-26)
 
 
@@ -49,12 +51,14 @@ def queue(
     blocking: bool = False,
     entities: list[str] | None = None,
     entity: str | None = None,
+    writes: bool = False,
 ) -> dict:
     """Queue a job in the current moment; the Core starts nothing itself (ARC-23). A live job
     gets the deadline of the call it prepares as its latency cap (ARC-28); a blocking one forced
     to break misses it at once (DEL-31). Its vocabulary is that of the entity ids it is about, or
     the whole campaign vocabulary (CAN-22). `entity` is the acting entity the job works for,
-    whose override withdraws it while queued (DEL-16)."""
+    whose override withdraws it while queued (DEL-16). `writes` is the playbook's declaration that
+    it must log a delegated action (`finish_job` refuses otherwise, #171)."""
     from secondchair.core import calls  # it builds on this module
 
     if tier not in TIERS:
@@ -83,6 +87,7 @@ def queue(
                 "vocabulary": canon.vocabulary(ws, entities),
                 "blocking": blocking,
                 "entity": entity,
+                "writes": writes,
                 "deadline": due,
                 "status": "queued",
                 "attempts": [],
@@ -189,6 +194,34 @@ def end(ws: Workspace, job_id: int, error: str | None = None) -> dict:
         return job
 
 
+def actions(ws: Workspace, job_id: int) -> list[dict]:
+    """The delegated actions the action log holds under a job, whatever their status."""
+    return [e for e in read_log(ws)[0] if e.get("kind") == "action" and e.get("job") == job_id]
+
+
+def finish(ws: Workspace, job_id: int) -> dict:
+    """The agent's `finish_job`. A job whose playbook writes needs at least one applied or
+    pending (held for the GM) action logged under it: an empty success is refused and the
+    attempt keeps running (#171). Finishing a done job again changes nothing."""
+    job = read(ws, job_id)
+    if job["status"] == "done":
+        return job
+    if job.get("writes") and not [a for a in actions(ws, job_id) if a["status"] in LIVE]:
+        raise DelegationError(
+            f"Job {job_id} ({job['playbook']}) must write, but no applied or pending action is "
+            f"logged under it. Take its actions passing `job: {job_id}`, then finish. "
+            f"{taken(ws, job_id) or 'Nothing is logged under the job.'}"
+        )
+    return end(ws, job_id)
+
+
+def taken(ws: Workspace, job_id: int) -> str:
+    """The job's logged actions, one per line, as a retry or an exception names them."""
+    return "\n".join(
+        f"- {e['id']}: {e['tool']} on {e['target']}, {e['status']}" for e in actions(ws, job_id)
+    )
+
+
 def raise_exception(ws: Workspace, job_id: int, message: str) -> dict:
     """An exception as a call on the GM (ARC-27, DEL-30); the job stays queued."""
     from secondchair.core import calls
@@ -213,9 +246,10 @@ def agent_tools(ws: Workspace) -> list[Callable[..., Any]]:
             return record
 
     def finish_job(job: int) -> dict[str, Any]:
-        """Mark a started SecondChair job done once its playbook is complete."""
+        """Mark a started SecondChair job done once its playbook is complete. A playbook that
+        writes needs at least one action taken for the job, or this is refused and you go on."""
         with _for_agent():
-            return end(ws, job)
+            return finish(ws, job)
 
     return [start_job, finish_job]
 
