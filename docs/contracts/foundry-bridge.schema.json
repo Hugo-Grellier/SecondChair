@@ -770,6 +770,60 @@
                 "voiced": {
                   "type": "boolean",
                   "description": "The GM voices this NPC: npcs and disclosure overrides at manual for it, every moment."
+                },
+                "as_of": {
+                  "type": "object",
+                  "description": "Where play stood when the cue was shown (ADR 0020 item 3). The Core withdraws the cue (sends null) as soon as any field but `at` differs from where play stands now; the Desk shows its age from `at`.",
+                  "properties": {
+                    "session": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "The live session, null outside one."
+                    },
+                    "observation": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The id of the last scene or combat observation of that session, null before the first."
+                    },
+                    "scene": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "The scene last activated, null before an activation was observed."
+                    },
+                    "round": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "The combat round, null out of combat."
+                    },
+                    "turn": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "The combat turn index, null out of combat."
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "When the cue was shown, ISO 8601 in UTC."
+                    }
+                  },
+                  "required": [
+                    "session",
+                    "observation",
+                    "scene",
+                    "round",
+                    "turn",
+                    "at"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -779,7 +833,8 @@
                 "line",
                 "knows",
                 "does_not_know",
-                "voiced"
+                "voiced",
+                "as_of"
               ],
               "additionalProperties": false
             }

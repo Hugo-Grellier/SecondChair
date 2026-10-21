@@ -33,6 +33,14 @@ const STATE = {
     knows: [{ id: "f-2", statement: "The bell rings on dry nights.", mode: "knows" }],
     does_not_know: [{ id: "f-3", statement: "A cracked relay rings the bell." }],
     voiced: false,
+    as_of: {
+      session: 3,
+      observation: "o-17",
+      scene: "Scene.s1",
+      round: null,
+      turn: null,
+      at: "2026-10-21T20:15:00+00:00",
+    },
   },
 };
 
@@ -152,6 +160,16 @@ test("the acting cue shows its posture under the goal only when given", () => {
     html,
     /Keep the party away[\s\S]*<em>Wary &lt;b&gt;and&lt;\/b&gt; tired<\/em>[\s\S]*dry nights/,
   );
+});
+
+test("the acting cue shows its age, and its round in combat", () => {
+  const cue = /** @type {NonNullable<DeskState["cue"]>} */ (STATE.cue);
+  const html = deskHtml({ isGM: true, state: STATE, pile: null, ceiling: "propose" });
+  assert.match(html, /<time datetime="2026-10-21T20:15:00\+00:00">As of [^<,]+<\/time>/);
+  const fighting = { ...STATE, cue: { ...cue, as_of: { ...cue.as_of, round: 2, turn: 1 } } };
+  assert.ok(valid(fighting), JSON.stringify(valid.errors));
+  const combat = deskHtml({ isGM: true, state: fighting, pile: null, ceiling: "propose" });
+  assert.match(combat, /As of [^<]+, round 2<\/time>/);
 });
 
 test("while a turn driver is active the acting cue shows no agent's line", () => {

@@ -14,7 +14,7 @@ from test_canon import entity, fact
 from test_knowledge import learn
 
 from secondchair.cli import main
-from secondchair.core import delegation, workspace
+from secondchair.core import delegation, knowledge, observations, workspace
 from secondchair.core.server import build_server
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
@@ -239,6 +239,57 @@ def test_a_line_citing_a_fact_the_npc_does_not_know_is_refused(ws: Workspace) ->
 
     wrong = cue(ws, tovan, "It only rings when the nights are dry.", [bell], does_not_know=[bell])
     assert wrong.is_error and "knows" in wrong.content[0].text
+
+
+def observe(ws: Workspace, id: str, minute: int, kind: str, scene: str, **payload: Any) -> None:
+    envelope: dict[str, Any] = {"id": id, "session": 1, "at": f"2026-10-21T20:{minute:02d}:00Z"}
+    envelope |= {"scene": scene, "actor": None, "kind": kind, "visibility": "players"}
+    assert observations.record(ws, envelope | {"payload": payload}) is None
+
+
+def test_a_cue_is_withdrawn_once_play_moves_on_and_a_stale_one_is_never_shown(
+    ws: Workspace,
+) -> None:
+    tovan, bell, _ = npc_who_knows(ws)
+    line = "It only rings when the nights are dry."
+    gesture(ws, "start_session")
+    observe(ws, "o1", 0, "scene", "Scene.tower", action="activate", name="Tower")
+    observe(ws, "o2", 1, "combat", "Scene.tower", action="start", combat="c1", round=1, turn=0)
+    cue(ws, tovan, line, [bell])
+
+    shown = state(ws)["cue"]
+    assert shown["line"] == line
+    assert {k: v for k, v in shown["as_of"].items() if k != "at"} == {
+        "session": 1,
+        "observation": "o2",
+        "scene": "Scene.tower",
+        "round": 1,
+        "turn": 0,
+    }
+    # A chat in the same turn moves nothing: the cue stays.
+    observe(ws, "o3", 2, "chat", "Scene.tower", text="The bell rings.")
+    assert state(ws)["cue"] == shown
+
+    # The next turn withdraws it, for good: nothing renders a cue built for an earlier turn.
+    observe(ws, "o4", 3, "combat", "Scene.tower", action="turn", combat="c1", round=1, turn=1)
+    assert state(ws)["cue"] is None
+    observe(ws, "o5", 4, "combat", "Scene.tower", action="end", combat="c1", round=1, turn=1)
+    assert state(ws)["cue"] is None
+
+    # A cue shown now stays until the scene changes, even back to an earlier one.
+    cue(ws, tovan, line, [bell])
+    assert state(ws)["cue"]["as_of"]["round"] is None
+    observe(ws, "o6", 5, "scene", "Scene.market", action="activate", name="Market")
+    assert state(ws)["cue"] is None
+    observe(ws, "o7", 6, "scene", "Scene.tower", action="activate", name="Tower")
+    assert state(ws)["cue"] is None
+
+    # A new session withdraws it too, and a cue file with no as_of is never shown.
+    cue(ws, tovan, line, [bell])
+    gesture(ws, "end_session")
+    assert state(ws)["cue"] is None
+    (ws.root / knowledge.CUE_FILE).write_text(json.dumps({"npc": tovan, "line": line}))
+    assert state(ws)["cue"] is None
 
 
 def test_i_voice_this_one_withdraws_its_calls_and_hand_back_removes_it(ws: Workspace) -> None:
