@@ -776,9 +776,14 @@ def _journal(
     record: dict,
     planned: _Plan,
     entries: list[dict],
+    entities: Sequence[str] = (),
+    facts: Sequence[str] = (),
+    files: Sequence[str] = (),
 ) -> None:
     """Write the plan through its journal (ADR 0016): each target then its log entries, then the
-    step records, then `record`'s, the commit marker. Updates the records in memory."""
+    step records, then `record`'s, the commit marker. Updates the records in memory. What the
+    plan read, for the digest: `record`'s entity and `entities` (their facts), `facts`, the
+    rules and cites, and other workspace `files`."""
     groups: list[list[dict]] = []  # each action entry, with its approval if any
     for e in entries:
         if e["kind"] == "action":
@@ -820,11 +825,13 @@ def _journal(
             next_id += 1
         path = f"{OCCURRENCES_DIR}/{r['id']:06d}.yaml"
         records.append({"path": path, "before": before, "after": delegation.dump(r)})
-    entity = record["entity"]
-    read = {f["id"] for f in index.search_facts(ws, entity=entity, include_retconned=True)}
+    entity, read = record["entity"], set(facts)
+    for e in (entity, *entities):
+        read |= {f["id"] for f in index.search_facts(ws, entity=e, include_retconned=True)}
     read |= {r["rule"] for r, _, _ in planned} | {c for r, _, _ in planned for c in r["cites"]}
     events = [e["id"] for e in index.search_events(ws) if read & {*e["opens"], *e["closes"]}]
-    reads = [f"{index.ENTITIES_DIR}/{entity}.md", *(f"{index.FACTS_DIR}/{f}.md" for f in read)]
+    reads = [f"{index.ENTITIES_DIR}/{e}.md" for e in (entity, *entities)]
+    reads += [*(f"{index.FACTS_DIR}/{f}.md" for f in read), *files]
     reads += [f"{index.EVENTS_DIR}/{e}.md" for e in events]
     plan = journal.new_journal(ws, record["key"], entity, reads, writes + records[1:] + records[:1])
     journal.apply_journal(ws, plan)
@@ -863,18 +870,20 @@ def validate(ws: Workspace, date: str, choices: Any) -> list[dict]:
     truth on `date`, not belief, in rank order: its pools name every pool the action costs or
     contests, it has capacity left, every prerequisite holds, its pools cover the cost. Two
     accepted choices contesting one target resolve by the committed pool (the action's cost in
-    its contest pool), then `roll`, then the key; a loser commits nothing, so the budgets are
-    computed again without the losers until no new one loses. A failed prerequisite some fact
-    the faction knows or believes would meet is a false belief. Only `_decided` faction facts
-    count. One verdict per choice, `reason` None when accepted; writes nothing. `CanonError`,
-    the whole output refused, when it is malformed or a choice names no action of its
-    faction's catalogue or a used key."""
+    its contest pool), then `roll`, then the key; a loser stays lost, whatever happens to its
+    winner later, and commits nothing, so the budgets are computed again without the losers
+    until no new one loses. A failed prerequisite some fact the faction knows or believes would
+    meet is a false belief. Only `_decided` faction facts count. One verdict per choice,
+    `reason` None when accepted; writes nothing. `CanonError`, the whole output refused, when
+    it is malformed, cites an id that is no canon fact (a belief may be cited), or a choice
+    names no action of its faction's catalogue or a used key."""
     if not isinstance(choices, dict) or not all(isinstance(r, list) for r in choices.values()):
         raise CanonError(
             "Choices map each faction to its ranked list: the whole output is refused."
         )
     truth, current = index.search_facts(ws, at=date), _current(ws, at=date)
     used = {r["key"] for r in occurrences(ws)}
+    facts = {f["id"] for f in index.search_facts(ws)}  # beliefs too: a faction may cite one
     factions = []
     for faction, ranked in sorted(choices.items()):
         s = {k: f for k, f in current.get(faction, {}).items() if k != AGENDA and _decided(f)}
@@ -892,6 +901,10 @@ def validate(ws: Workspace, date: str, choices: Any) -> list[dict]:
                     f"A choice is {{action, cites: [fact ids]}}, not {choice!r}: the whole "
                     "output is refused."
                 )
+            if unknown := [c for c in choice["cites"] if c not in facts]:
+                raise CanonError(
+                    f"Cites {unknown} are not canon fact ids: the whole output is refused."
+                )
             a, key = catalogue.get(choice["action"]), f"{faction}/{choice['action']}@{date}"
             if a is None:
                 raise CanonError(
@@ -904,7 +917,8 @@ def validate(ws: Workspace, date: str, choices: Any) -> list[dict]:
             picked.append((key, a, choice["cites"]))
         factions.append((faction, s, picked))
     held: dict[str, list[dict]] = {}  # each faction's known or believed facts, read when needed
-    lost: set[str] = set()
+    lost: dict[str, tuple[str, dict]] = {}  # a contest loser stays lost, with its reason
+    seen: dict[str, dict] = {}  # each contest result, by key
     while True:
         verdicts: list[dict[str, Any]] = []
         for faction, s, picked in factions:
@@ -920,8 +934,9 @@ def validate(ws: Workspace, date: str, choices: Any) -> list[dict]:
                 }
                 v |= {"cites": cites, "reason": None, "belief": None, "contest": None}
                 verdicts.append(v)
-                if key in lost:
-                    continue  # a contest loser commits nothing
+                if key in lost:  # it commits nothing
+                    v["reason"], v["contest"] = lost[key]
+                    continue
                 contested = [a["contest"]["pool"]] if a["contest"] else []
                 failed = [p for p in a["prerequisites"] if not any(_meets(p, f) for f in truth)]
                 short = {
@@ -936,12 +951,7 @@ def validate(ws: Workspace, date: str, choices: Any) -> list[dict]:
                 elif failed:
                     v["reason"] = f"prerequisite {json.dumps(failed[0])} does not hold on {date}"
                     if faction not in held:
-                        known = knowledge.known(ws, faction, at=date)
-                        held[faction] = [
-                            f
-                            for f in index.search_facts(ws)
-                            if f["id"] in known and known[f["id"]]["mode"] != "suspects"
-                        ]
+                        held[faction] = _held(ws, faction, date)
                     v["belief"] = next(
                         (f["id"] for f in held[faction] if _meets(failed[0], f)), None
                     )
@@ -952,8 +962,9 @@ def validate(ws: Workspace, date: str, choices: Any) -> list[dict]:
                     spent.update(a["cost"])
         contests: dict[str, list[dict]] = {}
         for v in verdicts:
-            if v["action"]["contest"] and (v["reason"] is None or v["key"] in lost):
+            if v["action"]["contest"] and v["reason"] is None:
                 contests.setdefault(v["action"]["target"], []).append(v)
+        losers: dict[str, tuple[str, dict]] = {}
         for target, rivals in contests.items():
             if len(rivals) < 2:
                 continue
@@ -965,12 +976,26 @@ def validate(ws: Workspace, date: str, choices: Any) -> list[dict]:
             )
             for v in rivals:
                 v["contest"]["won"] = v is won
+                seen[v["key"]] = v["contest"]
                 if v is not won:
                     v["reason"] = f"lost the contest for {target} to {won['key']}"
-        losers = {v["key"] for v in verdicts if v["contest"] and not v["contest"]["won"]}
-        if losers <= lost:
+                    losers[v["key"]] = (v["reason"], v["contest"])
+        if not losers:
+            for v in verdicts:  # a winner whose rivals all lost keeps the contest it won
+                if v["reason"] is None and v["contest"] is None:
+                    v["contest"] = seen.get(v["key"])
             return verdicts
         lost |= losers
+
+
+def _held(ws: Workspace, faction: str, date: str) -> list[dict]:
+    """The facts `faction` knows or believes on `date`, its suspicions left out."""
+    known = knowledge.known(ws, faction, at=date)
+    return [
+        f
+        for f in index.search_facts(ws)
+        if f["id"] in known and known[f["id"]]["mode"] != "suspects"
+    ]
 
 
 def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None) -> list[dict]:
@@ -1013,8 +1038,10 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
         ]:
             raise DelegationError(f"One faction turn per step: {near[0]} is within {step}.")
         planned: _Plan = []
+        prereqs: list[dict] = []
         for v in validate(ws, date, choices):
             a, failed = v["action"], v["reason"] is not None
+            prereqs += a["prerequisites"]
             occ = {"key": v["key"], "kind": FAILURE if failed else ACTION}
             occ |= {"class": "derived" if failed else a["effect"]["class"]}
             occ |= {"entity": v["faction"], "date": date, "rule": v["rule"], "job": job}
@@ -1034,7 +1061,22 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
         held = entries is None  # at propose: the false beliefs wait, queued, behind a call each
         if held:
             planned = [(r, None, why) for r, _, why in planned]
-        _journal(ws, planned[0][0], planned, entries or [])
+        # What the plan read (ADR 0016): every faction's facts and knowledge, and the facts its
+        # prerequisites name, so a hand edit to any of them before recovery rolls it back.
+        entities, facts, files = list(choices), set(), set()
+        for p in prereqs:
+            if "holds" in p:
+                facts.add(p["holds"])
+            else:
+                entities.append(p.get("front") or p["situation"])
+        for faction in choices:
+            known = knowledge.known(ws, faction, at=date)
+            facts |= set(known)
+            via = sorted({faction, *(k["via"] for k in known.values())})
+            files |= {
+                f"{index.KNOWLEDGE_DIR}/{k['id']}.md" for k in index.search_knowledge(ws, via)
+            }
+        _journal(ws, planned[0][0], planned, entries or [], entities, sorted(facts), sorted(files))
         records = [r for r, _, _ in planned]
         for r in records:
             if held and r["belief"]:

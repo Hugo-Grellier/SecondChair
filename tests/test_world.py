@@ -5,6 +5,7 @@ the deterministic world-turn and the read-only forecast. The v3 world-turn crite
 import asyncio
 import json
 import shutil
+from collections import Counter
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -1512,6 +1513,111 @@ def test_a_contest_loser_commits_nothing_so_its_faction_can_afford_its_next_choi
         f"{council}/toll@{TURN}": "ok",  # its 3 coins cover it once the lost seize is dropped
         f"{guild}/seize@{TURN}": "ok",
     }
+
+
+def dissolving(ws: Workspace, c_coin: int, c_capacity: int, *c_more: dict) -> tuple[str, ...]:
+    """A loses X to B, which frees coin for `ay`, which then starves `a1`, which had beaten C's
+    `c1` on T: the contest on T dissolves after `c1` lost it."""
+    x, t = entity(ws, "X"), entity(ws, "T")
+    cx = {"target": x, "contest": {"pool": "coin"}}
+    ct = {"target": t, "contest": {"pool": "coin"}}
+    a = gm_faction(
+        ws,
+        "A",
+        3,
+        3,
+        action("ax", {"coin": 2}, **cx),
+        action("ay", {"coin": 3}),
+        action("a1", {"coin": 1}, **ct),
+    )
+    b = gm_faction(ws, "B", 5, 1, action("bx", {"coin": 3}, **cx))
+    c = gm_faction(ws, "C", c_coin, c_capacity, action("c1", {"coin": 0}, **ct), *c_more)
+    return a, b, c
+
+
+def test_a_contest_loser_stays_lost_when_its_winner_fails_later(ws: Workspace) -> None:
+    a, b, c = dissolving(ws, 0, 1, action("c2", {"coin": 0}))
+
+    records = fturn(ws, TURN, {a: chose("ax", "ay", "a1"), b: chose("bx"), c: chose("c1", "c2")})
+
+    by = {r["key"].split("/")[1].split("@")[0]: r for r in records}
+    assert by["a1"]["validation"] == 'pools cannot cover {"coin": 1}'
+    assert (by["c1"]["status"], by["c1"]["contest"]["won"]) == ("failed", False)
+    assert by["c1"]["validation"].startswith("lost the contest")
+    assert by["c2"]["status"] == "validated"  # the lost c1 used no capacity
+    assert by["bx"]["contest"]["won"] and by["ay"]["status"] == "validated"
+
+
+def test_validated_choices_never_overdraw_a_pool(ws: Workspace) -> None:
+    a, b, c = dissolving(ws, 2, 2, action("c2", {"coin": 2}), action("c3", {"coin": 2}))
+
+    records = fturn(
+        ws, TURN, {a: chose("ax", "ay", "a1"), b: chose("bx"), c: chose("c1", "c2", "c3")}
+    )
+
+    spent: Counter[str] = Counter()
+    for r in records:
+        if r["status"] == "validated":
+            spent[r["entity"]] += r["debit"].get("coin", 0)
+    assert spent == {a: 3, b: 3, c: 2}
+    assert [r["action"] for r in records if r["entity"] == c and r["status"] == "validated"] == [
+        "c2"
+    ]
+
+
+def test_a_cite_that_is_no_canon_fact_refuses_the_whole_output(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 5, 2, action("bribe", {"coin": 1}))
+    belief = fact(ws, "The Guild is broke.", never_true=True)
+    turn(ws, TURN)
+    before = snapshot(ws.root)
+
+    for cites in (["../../../nope"], ["f-00000000"]):
+        with pytest.raises(index.CanonError, match="not canon fact ids"):
+            world.faction_turn(ws, TURN, {council: [{"action": "bribe", "cites": cites}]})
+    assert snapshot(ws.root) == before
+    # A belief may be cited, held by the faction or not (D25).
+    [record] = world.faction_turn(ws, TURN, {council: [{"action": "bribe", "cites": [belief]}]})
+    assert record["cites"] == [belief]
+
+
+def test_an_empty_faction_turn_records_nothing_and_leaves_its_step_free(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 5, 1, action("bribe", {"coin": 1}))
+
+    assert fturn(ws, TURN, {}) == [] and fturn(ws, TURN, {council: []}) == []
+    assert world.faction_turn(ws, TURN, {council: chose("bribe")})[0]["status"] == "validated"
+
+
+def test_a_hand_edit_to_any_faction_it_read_rolls_an_interrupted_turn_back(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    squeeze = action("squeeze", {"coin": 1}, prerequisites=[{"front": tolls, "clock_gte": 1}])
+    council = gm_faction(ws, "Council", 5, 3, squeeze, action("toll", {"coin": 1}))
+    guild = gm_faction(ws, "Guild", 5, 3, squeeze, action("toll", {"coin": 1}))
+    for who in (council, guild):
+        began = {"of": tolls, "key": "clock", "value": 1}
+        learn(ws, who, fact(ws, f"It began for {who}.", never_true=True, state=began), "believes")
+    turn(ws, TURN)
+    choices = {council: chose("squeeze", "toll"), guild: chose("squeeze", "toll")}
+    second = sorted(choices)[1]  # not the faction whose record commits the journal
+    [pool] = [f for f in index.search_facts(ws, entity=second) if f["state"]["key"] == "pool"]
+
+    def crash(step: str) -> None:
+        if step.startswith("occurrences/"):
+            raise RuntimeError(step)
+
+    monkeypatch.setattr(journal, "_fault", crash)
+    with pytest.raises(RuntimeError):
+        world.faction_turn(ws, TURN, choices)
+    monkeypatch.setattr(journal, "_fault", lambda step: None)
+    path = ws.root / index.FACTS_DIR / f"{pool['id']}.md"
+    path.write_text(path.read_text().replace("value: 5", "value: 0"))
+    with delegation.locked(ws):  # the first acquisition recovers
+        pass
+
+    assert [r for r in world.occurrences(ws) if r["kind"] != "tick"] == []
+    assert "faction turn must run again" in calls.read_calls(ws)[-1]["message"]
+    assert len(world.faction_turn(ws, TURN, choices)) == 4  # run again, it plans afresh
 
 
 def test_failed_choices_are_listed_collapsed_with_their_reason_in_the_report(
