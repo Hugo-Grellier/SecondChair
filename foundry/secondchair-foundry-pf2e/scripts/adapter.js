@@ -26,8 +26,8 @@
  * @property {(token: any) => any[]} sceneTokens  the token documents on the token's scene
  * @property {(from: any, to: any) => number} distance  feet between two tokens, as the canvas measures
  * @property {(token: any) => boolean | null} reactionUsed  what a known reaction tracker says
- * @property {() => boolean} isGM  whether this client is the GM's (hidden tokens are its to see)
  *   (RUL-07), null when none speaks
+ * @property {() => boolean} isGM  whether this client is the GM's (hidden tokens are its to see)
  */
 
 /** The one Foundry and system major pair the adapter targets (RUL-02). */
