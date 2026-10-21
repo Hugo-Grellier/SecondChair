@@ -771,6 +771,20 @@ def tools(ws: Workspace) -> list[Tool]:
             return offline
         return {"entries": entries, "offline": False, "snapshot": compendium.version(ws)}
 
+    def lookup_rule(query: str, type: str | None = None, limit: int = 10) -> dict[str, Any]:
+        """A cited rule lookup, offline: the entries of the metadata snapshot taken at the last
+        Foundry connection whose name or slug contains `query` (or whose UUID it is), whether or
+        not a GM client is connected. Each entry is `{uuid, name, type, pack, publication,
+        system_version, translation}`: cite the UUID and the system version. The snapshot holds
+        no rule text, so never present an entry as the book's wording. `translation` is the
+        translation module active at the snapshot, null when none. `house_rule_notice` is set
+        when the campaign records house rules: tell the GM the installed entry may be overridden.
+        `type` and `limit` as `search_compendium`. No snapshot is an error."""
+        found = compendium.cite(ws, query, type, limit)
+        if found is None:
+            raise ValueError("No compendium snapshot yet: connect a GM client once.")
+        return found
+
     def document_report(key: str) -> dict[str, Any]:
         """How a prepared world document was last realised in Foundry: `realised`, then
         `pending` (the desired state changed since and waits for a GM client), and the GM
@@ -802,6 +816,12 @@ def tools(ws: Workspace) -> list[Tool]:
         Tool(fn=document_report, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=browse_files, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=search_compendium, responsibility="prep", delegated_action=False, reversible=True),
+        Tool(
+            fn=lookup_rule,
+            responsibility="rules_and_combat",
+            delegated_action=False,
+            reversible=True,
+        ),
         Tool(fn=image_size, responsibility="prep", delegated_action=False, reversible=True),
         Tool(
             fn=list_world_documents, responsibility="prep", delegated_action=False, reversible=True

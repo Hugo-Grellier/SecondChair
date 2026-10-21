@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from secondchair.core import rules
 from secondchair.core.workspace import STATE_DIR, Workspace
 
 DIR = f"{STATE_DIR}/compendium"
@@ -95,4 +96,37 @@ def lookup(ws: Workspace, query: str, type: str | None, limit: int) -> dict[str,
         "entries": found,
         "offline": True,
         "snapshot": snapshot["system"]["version"],
+    }
+
+
+def cite(ws: Workspace, query: str, type: str | None, limit: int) -> dict[str, Any] | None:
+    """`lookup` as cited rule entries (RUL-22, #193 D6a): each carries its UUID and the system
+    version and active translation module of the snapshot it came from; the campaign's house
+    rules are named in `house_rule_notice`, since a compendium patch is invisible here (RUL-23).
+    Offline by design: it reads the snapshot only. None when there is no snapshot."""
+    if not query.strip():
+        raise ValueError("`query` must not be empty.")
+    found = lookup(ws, query, type, limit)
+    snapshot = _latest(ws)
+    if found is None or snapshot is None:
+        return None
+    system = snapshot["system"]
+    names = [str(r["name"]) for r in rules.house_rules(ws) if r.get("name")]
+    return {
+        "entries": [
+            {
+                **{k: e[k] for k in ("uuid", "name", "type", "pack", "publication")},
+                "system_version": system["version"],
+                "translation": system["translation"],
+            }
+            for e in found["entries"]
+        ],
+        "system_version": system["version"],
+        "translation": system["translation"],
+        "house_rule_notice": (
+            f"This campaign records house rules ({', '.join(names)}); the installed entry may "
+            "not describe how it is played here. Ask the GM before quoting it as the ruling."
+            if names
+            else None
+        ),
     }
