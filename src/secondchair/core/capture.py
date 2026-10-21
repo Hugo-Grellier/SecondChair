@@ -462,6 +462,7 @@ def wrap(
         }
         _write_time(ws, data)
     summary["settled"] = data["sessions"][session]
+    summary["spotlight"] = spotlight(ws, session)
     summary["job"] = jobs.queue(
         ws,
         playbook=WORLD_TURN,
@@ -471,6 +472,17 @@ def wrap(
         tier="fast",  # the world-turn playbook's tier (ARC-25)
     )
     return summary
+
+
+def spotlight(ws: Workspace, session: int) -> dict[str, int]:
+    """Per player character, how many of the session's admitted played facts cite it (#176, no
+    model): the table's spotlight proxy. Every PC is listed, with zero when none."""
+    admitted = {c["fact"] for c in candidates(ws, session) if c["status"] == "applied"}
+    return {
+        e["id"]: len({f["id"] for f in index.search_facts(ws, entity=e["id"])} & admitted)
+        for e in index.search_entities(ws)
+        if e["kind"] == "pc"
+    }
 
 
 def agent_tools(ws: Workspace) -> list:

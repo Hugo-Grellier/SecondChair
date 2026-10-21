@@ -583,3 +583,33 @@ def test_a_transcript_states_the_interval_in_the_segment_its_locator_names(
             capture.report_interval(ws, job, *dates, said, locator)
     capture.report_interval(ws, job, *dates, '"demain" sera', f"{transcript}:2")
     assert capture.time(ws)["sessions"][1]["end"] == "4726-01-02"
+
+
+def test_spotlight_counts_the_sessions_admitted_facts_citing_each_pc(ws: Workspace) -> None:
+    [make] = [t for t in capture._tools(ws) if t.name == "create_entity"]
+    for name in ("Ada Fen", "Beren Pike"):
+        delegation.act(ws, make, "test", lambda name=name: make.fn(names=[name], kind="pc"))
+    ada, beren = (entity_id(ws, n) for n in ("Ada Fen", "Beren Pike"))
+    assert capture.spotlight(ws, 1) == {ada: 0, beren: 0}  # no played fact: zeros
+
+    job = wrap_job(ws)
+    submit(ws, job, GAUGE, entities=[ada, beren])
+    submit(ws, job, FEE, entities=[ada])
+    capture.consolidate(ws, job)
+
+    assert capture.spotlight(ws, 1) == {ada: 2, beren: 1}
+    assert capture.spotlight(ws, 2) == {ada: 0, beren: 0}  # another session's facts do not count
+    summary = {
+        "questions": [],
+        "candidates": [],
+        "settled": {"start": "4726-01-01", "end": "4726-01-02"},
+        "job": {"id": 7},
+        "spotlight": capture.spotlight(ws, 1),
+    }
+    assert "Spotlight (played facts citing each PC): Ada Fen 2, Beren Pike 1." in (
+        cli._describe_wrap(ws, summary)
+    )
+
+
+def entity_id(ws: Workspace, name: str) -> str:
+    return next(e["id"] for e in index.search_entities(ws) if e["names"] == [name])
