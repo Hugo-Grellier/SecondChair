@@ -468,7 +468,7 @@ def wrap(
         inputs={"until": interval["end"], "since": interval["start"]},
         expected_output="The world advanced to the current date.",
         responsibility="living_world",
-        tier="standard",
+        tier="fast",  # the world-turn playbook's tier (ARC-25)
     )
     return summary
 
