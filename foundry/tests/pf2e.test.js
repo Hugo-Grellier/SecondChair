@@ -41,6 +41,36 @@ test("the PF2e world clock reads as Absalom Reckoning, 2700 years after the Greg
   assert.equal(absalomDate({ year: 2100, month: 2, day: 28 }), "4800-02-28");
 });
 
+/** An invented NPC sheet: one strike with its pf2e-labelled variants, one action, one condition. */
+function gruk() {
+  return {
+    name: "Gruk",
+    getReach: () => 10,
+    system: {
+      actions: [
+        {
+          type: "strike",
+          slug: "club",
+          label: "Club",
+          item: {},
+          variants: [{ label: "Strike +9" }, { label: "MAP -5 (+4)" }, { label: "MAP -10 (-1)" }],
+        },
+        { type: "action", slug: "ignored" },
+      ],
+    },
+    itemTypes: {
+      action: [
+        {
+          slug: "snarl",
+          name: "Snarl",
+          system: { actionType: { value: "action" }, actions: { value: 2 } },
+        },
+      ],
+      condition: [{ slug: "frightened", name: "Frightened", system: { value: { value: 1 } } }],
+    },
+  };
+}
+
 /**
  * A stand-in Foundry around a pf2e world clock on 2025-03-01 at 21:30, with a French install
  * whose bestiary pack holds a goblin warrior, translated by pf2-fr in its vf-vo display mode.
@@ -56,7 +86,22 @@ function foundry() {
       sella.system.attributes.hp.value = changes["system.attributes.hp.value"];
     },
   };
+  /** An invented goblin sheet in pf2e's shape, a hidden PC and a visible one around it. */
+  const tokens = Object.fromEntries(
+    [
+      { id: "g", name: "Gruk", x: 0, reaction: true, actor: gruk() },
+      { id: "p1", name: "Sella", x: 5 },
+      { id: "p2", name: "Ghost", x: 5, hidden: true },
+      { id: "p3", name: "Far", x: 30 },
+      { id: "n1", name: "Unsaid", x: 60, reaction: null, actor: gruk() },
+      { id: "n2", name: "Fresh", x: 90, reaction: false, actor: gruk() },
+    ].map((t) => [
+      `Scene.s.Token.${t.id}`,
+      { documentName: "Token", uuid: `Scene.s.Token.${t.id}`, ...t },
+    ]),
+  );
   const env = {
+    gm: true,
     /** seconds since 2025-03-01T00:00Z */
     worldTime: 21.5 * 3600,
     clock() {
@@ -102,7 +147,14 @@ function foundry() {
     /** @param {string} name */
     slugify: (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
     /** @param {string} uuid */
-    resolve: async (uuid) => (uuid === sella.uuid ? sella : null),
+    resolve: async (uuid) =>
+      /** @type {any} */ (uuid === sella.uuid ? sella : (tokens[uuid] ?? null)),
+    sceneTokens: () => Object.values(tokens),
+    /** @param {any} a @param {any} b */
+    distance: (a, b) => Math.abs(a.x - b.x),
+    /** @param {any} token */
+    reactionUsed: (token) => token.reaction ?? null,
+    isGM: () => env.gm,
   };
   return { env, day, adapter: createAdapter(env) };
 }
@@ -211,4 +263,67 @@ test("an official name is offered translated with its English key, its pack only
 
 test("the adapter requires pf2-fr for a French campaign", () => {
   assert.equal(foundry().adapter.translations?.fr, "pf2-fr");
+});
+
+test("a GM creature's turn card lists what pf2e reports, hides hidden tokens, reads reaction used", async () => {
+  const { env, adapter } = foundry();
+  const card = /** @type {any} */ (
+    await adapter.reads?.turn_card({ token: "Scene.s.Token.g" }, { language: "en" })
+  );
+  assert.deepEqual(card.strikes, [
+    {
+      slug: "club",
+      label: "Club",
+      variants: ["Strike +9", "MAP -5 (+4)", "MAP -10 (-1)"],
+      reach: 10,
+    },
+  ]);
+  assert.deepEqual(card.actions, [{ slug: "snarl", name: "Snarl", type: "action", cost: 2 }]);
+  assert.deepEqual(card.conditions, [{ slug: "frightened", name: "Frightened", value: 1 }]);
+  assert.equal(card.reaction_used, true);
+  // the hidden token is not leaked; the far one is out of reach
+  assert.deepEqual(
+    card.in_reach.map((/** @type {any} */ t) => t.name),
+    ["Sella"],
+  );
+  const gm = /** @type {any} */ (
+    await adapter.reads?.turn_card(
+      { token: "Scene.s.Token.g", include_hidden: true },
+      { language: "en" },
+    )
+  );
+  assert.deepEqual(
+    gm.in_reach.map((/** @type {any} */ t) => [t.name, t.hidden]),
+    [
+      ["Sella", false],
+      ["Ghost", true],
+    ],
+  );
+  for (const [id, said] of [
+    ["n1", null],
+    ["n2", false],
+  ]) {
+    const other = /** @type {any} */ (
+      await adapter.reads?.turn_card({ token: `Scene.s.Token.${id}` }, { language: "en" })
+    );
+    assert.equal(other.reaction_used, said); // null: no tracker speaks (RUL-07)
+  }
+  env.gm = false; // a player client never learns of hidden tokens, whatever the caller asks
+  const player = /** @type {any} */ (
+    await adapter.reads?.turn_card(
+      { token: "Scene.s.Token.g", include_hidden: true },
+      { language: "en" },
+    )
+  );
+  assert.deepEqual(
+    player.in_reach.map((/** @type {any} */ t) => t.name),
+    ["Sella"],
+  );
+  await assert.rejects(
+    /** @type {any} */ (adapter.reads).turn_card(
+      { token: "Scene.s.Token.none" },
+      { language: "en" },
+    ),
+    /No token/,
+  );
 });

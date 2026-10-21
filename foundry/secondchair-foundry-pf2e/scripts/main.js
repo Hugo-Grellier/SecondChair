@@ -57,6 +57,24 @@ function resources(actor) {
 /** The active turn driver's module id, or null (RUL-11). */
 const driver = () => TURN_DRIVERS.find(active) ?? null;
 
+/**
+ * Whether a known reaction tracker says the token's reaction is used; null when none speaks
+ * (RUL-07, RUL-19; as secondchair_pf2e.readers.reaction_used).
+ * @param {Doc} token
+ */
+function reactionSaid(token) {
+  const combatant = game.combat?.combatants?.find(
+    (/** @type {Doc} */ c) => c.token?.uuid === token.uuid,
+  );
+  const said = [];
+  const checker = active("pf2e-reaction") ? combatant?.flags?.["pf2e-reaction"] : null;
+  if (typeof checker?.state === "boolean") said.push(!checker.state);
+  if (active("pf2e-combater"))
+    said.push(combatant?.flags?.["pf2e-combater"]?.reactionUsed === true);
+  if (active("sundry")) said.push(slugs(token, "effect").includes("effect-reaction-used"));
+  return said.length ? said.some(Boolean) : null;
+}
+
 /** @type {import("./outcomes.js").Env} */
 const traced = {
   driver: (actor) => (actor && !actor.hasPlayerOwner ? driver() : null),
@@ -262,15 +280,7 @@ const combat = {
   },
   reactive: (token) => slugs(token, "action").some((slug) => REACTIVE.includes(slug)),
   // As secondchair_pf2e.readers.reaction_used: any known tracker that says so (RUL-07, RUL-19).
-  trackerUsed(token) {
-    const combatant = game.combat?.combatants?.find(
-      (/** @type {Doc} */ c) => c.token?.uuid === token.uuid,
-    );
-    const checker = active("pf2e-reaction") ? combatant?.flags?.["pf2e-reaction"] : null;
-    const combater = active("pf2e-combater") ? combatant?.flags?.["pf2e-combater"] : null;
-    const sundry = active("sundry") && slugs(token, "effect").includes("effect-reaction-used");
-    return checker?.state === false || combater?.reactionUsed === true || sundry;
-  },
+  trackerUsed: (token) => reactionSaid(token) === true,
   async strike(token, slug, target, map) {
     const actor = /** @type {Doc} */ (token).actor;
     const strike = actor.system?.actions?.find(
@@ -366,6 +376,10 @@ const env = {
     return { year, month, day };
   },
   advance: (seconds) => game.time.advance(seconds),
+  sceneTokens: (token) => [.../** @type {Doc} */ (token).parent.tokens],
+  distance: (from, to) => placeable(from).distanceTo(placeable(to)),
+  reactionUsed: reactionSaid,
+  isGM: () => game.user.isGM,
   packs: () => game.packs,
   modules: () =>
     Object.fromEntries(
