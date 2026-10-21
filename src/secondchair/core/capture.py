@@ -248,8 +248,8 @@ def consolidate(ws: Workspace, job: int) -> list[dict]:
 
 def _route(ws: Workspace, c: dict, job: int, act: Any) -> None:
     c["origin"] = {"kind": "observation", "quote": c["quote"], "locator": c["locator"]}
-    if c["inferred"]:  # CAP-05: beyond the quote, an agent proposal
-        c["origin"] = {"kind": "job", "job": str(job), **c["origin"]}
+    if c["inferred"]:  # CAP-05: beyond the quote, an agent proposal; the quote is evidence (#167)
+        c["origin"] = {**c["origin"], "kind": "job", "job": str(job)}
     if c["translation"]:
         c["origin"]["translation"] = c["translation"]
     if c.get("speaker"):  # absent from candidates captured before transcripts
@@ -468,7 +468,7 @@ def wrap(
         inputs={"until": interval["end"], "since": interval["start"]},
         expected_output="The world advanced to the current date.",
         responsibility="living_world",
-        tier="standard",
+        tier="fast",  # the world-turn playbook's tier (ARC-25)
     )
     return summary
 

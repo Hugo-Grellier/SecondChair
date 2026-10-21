@@ -4,3 +4,8 @@ __pycache__/
 .ruff_cache/
 dist/
 node_modules/
+
+# Local agent destinations and worktrees (AGENTS.md)
+AGENTS.local.md
+.claude/worktrees/
+.claude/settings.local.json

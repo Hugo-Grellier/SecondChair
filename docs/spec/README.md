@@ -19,6 +19,7 @@ This specification is the destination of the map [SecondChair v4 spec (#1)](http
 | [09-packaging.md](09-packaging.md) | Install, process model, Foundry link, workspace, export, distribution |
 | [10-success-bench.md](10-success-bench.md) | Measurable success criteria and the test bench |
 | [11-out-of-scope.md](11-out-of-scope.md) | Out of scope for v4, and open questions handed to planning |
+| [12-campaign-creation-and-library.md](12-campaign-creation-and-library.md) | Campaign workshop skill and reference library |
 
 ## Conventions
 
@@ -28,9 +29,10 @@ This specification is the destination of the map [SecondChair v4 spec (#1)](http
 
 ## Precedence
 
-1. The ADRs in [`docs/adr/`](../adr/) are binding. This spec restates them and never contradicts them. If this spec and an ADR disagree, the ADR wins and the spec is a bug.
+1. Accepted ADRs in [`docs/adr/`](../adr/) are binding; an ADR whose status is proposed binds nothing until the GM accepts it. This spec restates them and never contradicts them. If this spec and an ADR disagree, the ADR wins and the spec is a bug.
 2. [`GLOSSARY.md`](../../GLOSSARY.md) fixes the vocabulary.
 3. The resolutions of the map's child tickets fill in what the ADRs leave open. Where a later resolution refines an earlier one, the later one holds (for example [#19](https://github.com/Hugo-Grellier/SecondChair/issues/19) replaces the "per-entity overrides deferred" note in [#6](https://github.com/Hugo-Grellier/SecondChair/issues/6), and ADR 0012 widens the GM-effort definition of [#9](https://github.com/Hugo-Grellier/SecondChair/issues/9)).
+4. [`docs/design/`](../design/) and ADRs marked *proposed* are proposals awaiting the GM's decision. They bind nothing until accepted.
 
 ### Amendments settled while writing this spec (GM, 2026-10-19)
 
@@ -59,6 +61,9 @@ Two ticket resolutions disagreed with an ADR or with each other. The GM settled 
 | [0012](../adr/0012-behaviour-traces-capture-raw-input-with-consent.md) | Behaviour traces capture raw input, locally and only with consent | [04](04-canon-memory-capture.md), [10](10-success-bench.md) |
 | [0013](../adr/0013-third-party-modules-are-evidence-turn-drivers-take-over.md) | Third-party modules are optional evidence; a turn driver takes over; house rules come from discrepancies | [06](06-pf2e-rules.md) |
 | [0014](../adr/0014-declarative-campaign-calendar-core-follows-paizo.md) | Declarative campaign calendar; the Core follows Paizo over the PF2e clock | [05](05-living-world-calendar.md) |
+| [0015](../adr/0015-evidence-is-resolved-by-the-core-before-it-confers-rank.md) | Evidence is resolved by the Core before it confers a rank | [04](04-canon-memory-capture.md) |
+| [0016](../adr/0016-a-world-turn-occurrence-is-applied-through-a-roll-forward-journal.md) | A world-turn occurrence is applied through a roll-forward journal | [05](05-living-world-calendar.md), [02](02-architecture.md) |
+| [0017](../adr/0017-creative-drafts-live-in-notes-with-a-status.md) | Creative drafts stay in `notes/` with an id, a status and alternative sets; no draft facts | [12](12-campaign-creation-and-library.md) |
 | [0018](../adr/0018-snapshot-boundary-restore-and-upgrade-consent.md) | A snapshot is the workspace plus a paired Foundry world; restore into a fresh directory; a destructive migration needs consent. Amends ADR 0010 (in-place upgrade) and PKG-16 | [09](09-packaging.md) |
 
 ### Ticket resolutions without an ADR

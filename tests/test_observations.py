@@ -194,3 +194,23 @@ def test_a_line_cut_short_by_a_crash_is_skipped(played: Workspace) -> None:
 
     assert observations.find(played, "observations/000001.jsonl#after") is not None
     assert observations.find(played, "observations/000001.jsonl#players") is not None
+
+
+def test_an_observation_waits_for_the_workspace_lock_and_takes_it_reentrantly(
+    played: Workspace,
+) -> None:
+    import threading
+
+    delegation.change_moment(played, "live-session")
+    done = threading.Event()
+    with delegation.locked(played):  # another writer, e.g. a CLI gesture (#211)
+        worker = threading.Thread(
+            target=lambda: (observations.record(played, envelope("late")), done.set())
+        )
+        worker.start()
+        assert not done.wait(0.3)
+        assert observations.record(played, envelope("mine")) is None  # same thread: reentrant
+    worker.join(5)
+    assert done.is_set()
+    for id_ in ("late", "mine"):
+        assert observations.find(played, f"observations/000001.jsonl#{id_}") is not None
