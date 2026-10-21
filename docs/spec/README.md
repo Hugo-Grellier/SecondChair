@@ -69,6 +69,7 @@ Two ticket resolutions disagreed with an ADR or with each other. The GM settled 
 | [0020](../adr/0020-proactive-cues-are-a-call-kind-that-expires.md) | Proactive cues are a call kind, `cue`, with a TTL, safe default expire and a budget held by the Core. Amends ADR 0005 | [03](03-delegation.md) |
 | [0021](../adr/0021-consented-live-speech-feeds-a-gm-only-context-window.md) | Consented live speech feeds an in-memory, GM-only context window; consolidation stays at the wrap. Amends ADR 0008 | [04](04-canon-memory-capture.md), [11](11-out-of-scope.md) |
 | [0022](../adr/0022-factions-choose-from-a-gm-written-catalogue-under-deterministic-validation.md) | Factions choose from a GM-written catalogue; a deterministic step validates, debits and applies. Amends ADR 0009 and LW-02 | [05](05-living-world-calendar.md) |
+| [0023](../adr/0023-core-seams-are-modules-in-one-process-over-markdown-and-sqlite.md) | *Proposed.* The Core keeps one process over Markdown canon and a derived SQLite index, with seven named seams, a dependency direction, adapters only where an implementation varies, and staged refactors on trigger | [02](02-architecture.md) |
 
 ### Ticket resolutions without an ADR
 
