@@ -173,6 +173,27 @@ def test_the_notice_may_wrap_across_lines(ws: Workspace) -> None:  # noqa: F811
     assert not guide(ws, f"Bring a lantern.\n\n_{wrapped}_", []).is_error
 
 
+def test_the_notice_may_be_a_wrapped_blockquote(ws: Workspace) -> None:  # noqa: F811
+    quoted = "> " + UNOFFICIAL.replace(" they are ", "\n> they are\n> ")
+
+    assert not guide(ws, f"Bring a lantern.\n\n{quoted}", []).is_error
+
+
+def test_emphasis_inside_the_notice_is_refused(ws: Workspace) -> None:  # noqa: F811
+    altered = UNOFFICIAL.replace("unofficial", "**unofficial**")
+
+    assert guide(ws, f"Bring a lantern.\n\n{altered}", []).is_error
+
+
+def test_a_notice_the_reader_cannot_see_is_refused(ws: Workspace) -> None:  # noqa: F811
+    hidden = guide(ws, f"Bring a lantern.\n<!-- {UNOFFICIAL} -->", [])
+    note(ws, {"cites": [], "notice": UNOFFICIAL}, "players-guide", "Bring a lantern.")
+    in_block = call(ws, "check_prep_guide", path="adventure-x/players-guide.md")
+
+    for result in (hidden, in_block):
+        assert result.is_error and "must carry the notice" in result.content[0].text
+
+
 def test_only_a_players_guide_needs_the_notice(ws: Workspace) -> None:  # noqa: F811
     assert not guide(ws, "Bring a lantern.", [], name="handout").is_error
 

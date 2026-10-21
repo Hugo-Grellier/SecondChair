@@ -24,6 +24,8 @@ UNOFFICIAL = (
     "Options in this guide written by a model are unofficial: they are not published rules, "
     "and the GM decides whether the table uses them."
 )
+COMMENT = re.compile(r"<!--.*?-->", re.S)
+QUOTE = re.compile(r"^[ \t>]*", re.M)
 
 
 def read_prep(ws: Workspace, path: str) -> str:
@@ -52,6 +54,16 @@ def index_block(text: str) -> dict[str, Any]:
     return block
 
 
+def carries_notice(text: str) -> bool:
+    """Whether the body a reader sees carries `UNOFFICIAL` verbatim: the index block and HTML
+    comments do not count; blockquote markers and line breaks are ignored, emphasis inside the
+    sentence is not."""
+    body = text.rstrip()
+    if (start := body.rfind(FENCE)) >= 0 and body.endswith("```"):
+        body = body[:start]
+    return UNOFFICIAL in " ".join(QUOTE.sub("", COMMENT.sub("", body)).split())
+
+
 def write_prep(path: str, text: str) -> Change:
     """Write one prep note, a Markdown file under the workspace's `prep/` the GM reads to run
     the table: a session's handoff (`session-3/handoff.md`), a handout's text, an improvised
@@ -77,16 +89,16 @@ def tools(ws: Workspace) -> list[Tool]:
         party over the entire file. Refused when the text carries a canary or a name the party
         holds no fact about, or when the `cites` of its index block (the ids of the facts it
         uses; flavour with no truth value cites nothing) name an unknown fact or one the party
-        does not know. A players' guide (a file named `players-guide.md`) is also refused
-        without its fixed notice, verbatim: "Options in this guide written by a model are
-        unofficial: they are not published rules, and the GM decides whether the table uses
-        them." A read: it changes nothing. Returns the mode each cited fact is held in."""
+        does not know. A players' guide (a file named `players-guide.md`) is also refused when
+        its body (outside the index block and HTML comments) lacks the fixed notice of the
+        prepare-an-adventure playbook, verbatim. A read: it changes nothing. Returns the mode
+        each cited fact is held in."""
         text = read_prep(ws, path)
         cites = index_block(text).get("cites") or []
         if not (isinstance(cites, list) and all(isinstance(c, str) for c in cites)):
             raise CanonError("`cites` in the index block must be a list of fact ids.")
         notice = ""
-        if path.rsplit("/", 1)[-1] == GUIDE and UNOFFICIAL not in " ".join(text.split()):
+        if path.rsplit("/", 1)[-1] == GUIDE and not carries_notice(text):
             notice = f"A players' guide must carry the notice, verbatim: {UNOFFICIAL!r}."
         try:
             held = knowledge.guard(ws, PARTY, text, cites, at)
