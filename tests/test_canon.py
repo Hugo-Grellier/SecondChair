@@ -608,11 +608,11 @@ def test_an_older_schema_blocks_serve_until_upgrade_migrates_it_as_a_git_diff(
     git(ws, "-c", "user.name=GM", "-c", "user.email=gm@example.org", "commit", "-qm", "v1")
 
     def rename_prep(root: Path) -> None:  # a synthetic migration from schema 1 to 2
-        table = root / "delegation.yaml"
-        table.write_text(table.read_text().replace("prep:", "preparation:", 1))
+        ignore = root / ".gitignore"
+        ignore.write_text(ignore.read_text() + "# migrated\n")
 
     monkeypatch.setattr(workspace, "SCHEMA_VERSION", 2)
-    monkeypatch.setattr(workspace, "MIGRATIONS", {1: rename_prep})
+    monkeypatch.setattr(workspace, "MIGRATIONS", {1: workspace.Migration(rename_prep, "additive")})
 
     assert main(["serve", str(ws.root)]) == 1
     assert "secondchair upgrade" in capsys.readouterr().err
@@ -620,7 +620,7 @@ def test_an_older_schema_blocks_serve_until_upgrade_migrates_it_as_a_git_diff(
     assert gm(ws, "upgrade") == 0
     diff = git(ws, "diff")
     assert "-schema_version: 1\n+schema_version: 2" in diff
-    assert "+preparation:" in diff
+    assert "+# migrated" in diff
     assert workspace.load(ws.root).schema_version == 2
     assert gm(ws, "upgrade") == 0  # already current
     assert "already" in capsys.readouterr().out.lower()

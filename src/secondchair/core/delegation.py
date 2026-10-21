@@ -1518,16 +1518,24 @@ def locked(ws: Workspace | Path) -> Generator[None]:
         with ThreadPoolExecutor(1) as pool:
             pool.submit(_recovered, ws).result()
     lock = base / STATE_DIR / "delegation.lock"
-    lock.parent.mkdir(exist_ok=True)
-    with lock.open("w") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        held.add(root)
-        try:
-            if isinstance(ws, Workspace) and not on_loop:
-                recover(ws)  # before anything else under the lock, log_hand_edits included
-            yield
-        finally:
-            held.discard(root)
+    while True:
+        lock.parent.mkdir(exist_ok=True)
+        with lock.open("w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:  # an upgrade may have swapped the directory while we waited (ADR 0018)
+                current = os.path.samestat(os.fstat(f.fileno()), os.stat(lock))
+            except FileNotFoundError:
+                current = False
+            if not current:
+                continue
+            held.add(root)
+            try:
+                if isinstance(ws, Workspace) and not on_loop:
+                    recover(ws)  # before anything else under the lock, log_hand_edits included
+                yield
+            finally:
+                held.discard(root)
+            return
 
 
 def _recovered(ws: Workspace) -> None:

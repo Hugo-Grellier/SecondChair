@@ -34,7 +34,7 @@ my-campaign/
 ├── speakers.yaml      # the speaker table (CAP-02); written by the GM
 ├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
-└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/ and documents/: each prepared scene's and world document's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content, compendium/: the Foundry compendium metadata snapshot, one file per game system version, journal/: an interrupted world-turn's roll-forward journal); git-ignored, rebuildable
+└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/ and documents/: each prepared scene's and world document's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content, compendium/: the Foundry compendium metadata snapshot, one file per game system version, journal/: an interrupted world-turn's roll-forward journal, upgrading: marks a running upgrade, upgrade-complete: marks a migrated copy that passed `check`); git-ignored, rebuildable
 ```
 
 Later contracts add decisions, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing, except a pending `journal/` (see `.secondchair/journal/`).
@@ -49,7 +49,7 @@ calendar: absalom
 
 | Key | Type | Rule |
 |---|---|---|
-| `schema_version` | integer | The workspace schema this file follows (PKG-16). A version newer than the running SecondChair supports is refused. An older one blocks `serve` until `secondchair upgrade` (in the workspace, or with `-w <workspace>`) migrates it in place, one version at a time; only the migrated files and the `schema_version` line change, so the GM reviews the diff (in their own repository, `git diff`) and commits it. |
+| `schema_version` | integer | The workspace schema this file follows (PKG-16). A version newer than the running SecondChair supports is refused. An older one blocks `serve` until `secondchair upgrade` (in the workspace, or with `-w <workspace>`) migrates it, one version at a time, on a copy of the directory swapped in once `check` passes (see Upgrade siblings); `upgrade --preview` prints the diff first, and after the swap the GM reviews it in their own repository (`git diff`) and commits it. |
 | `campaign_language` | string, BCP 47 tag | Set at `init` and fixed for v4 (CAN-18). `init` refuses to run on an existing workspace, so it cannot be changed through the tool. |
 | `calendar` | string or mapping | The campaign calendar, required, set at `init` and fixed like the language (CAL-01). One of the three forms below. |
 | `friction_thresholds` | mapping, optional | The campaign's friction detector thresholds (TRC-03), each a positive number overriding its default; see [`frictions/`](#frictions). An unknown name is refused when a report is written. |
@@ -616,6 +616,10 @@ The derived index (CAN-10): entities, facts, events and knowledge with their der
 ## Backup and restore
 
 `secondchair backup <workspace> <archive>` archives every file except `.secondchair/` and the machine configuration, with a manifest of SHA-256 hashes; `secondchair restore <archive> <new-dir>` verifies it into an empty directory and runs `check` (PKG-23, [ADR 0018](../adr/0018-snapshot-boundary-restore-and-upgrade-consent.md)).
+
+## Upgrade siblings
+
+`secondchair upgrade` never edits the workspace directory `<dir>`. Under the workspace lock it writes `<dir>/.secondchair/upgrading`, copies `<dir>` (with `.git`, without `.secondchair/`) to `<dir>.upgrading`, runs the migrations and `check` there, writes `<dir>.upgrading/.secondchair/upgrade-complete`, then renames `<dir>` to `<dir>.pre-upgrade` and `<dir>.upgrading` to `<dir>` (atomically exchanged where Linux `renameat2` allows). The pre-upgrade snapshot is `<dir>.pre-upgrade.tar.gz`. Opening a workspace first settles what an interrupted upgrade left, and refuses while one runs: before the swap the copy is deleted and the marker removed; in the window (no `<dir>`) the swap is finished if the copy is complete, else `<dir>.pre-upgrade` is renamed back; after it `<dir>.pre-upgrade` is kept and reported until the GM deletes it, or renames it back to roll the upgrade back ([ADR 0018](../adr/0018-snapshot-boundary-restore-and-upgrade-consent.md)). Each `MIGRATIONS` entry declares `additive` or `destructive`; a destructive one needs an interactive terminal and the typed workspace name.
 
 ## What is not in the workspace
 
