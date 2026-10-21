@@ -11,6 +11,7 @@ from test_knowledge import learn, ws  # noqa: F401  (ws is a fixture)
 
 from secondchair.cli import main
 from secondchair.core import vtt
+from secondchair.core.prep import UNOFFICIAL
 from secondchair.core.workspace import Workspace
 
 UUID = "Compendium.sys.bestiary.Actor.abc123"
@@ -118,9 +119,9 @@ def test_without_a_client_uuids_are_unchecked_not_failed(ws: Workspace) -> None:
     assert result["encounters"][0]["xp"] == 80  # the maths still runs
 
 
-def guide(camp: Workspace, text: str, cites: list[str]) -> Any:
-    note(camp, {"cites": cites}, "players-guide", text)
-    return call(camp, "check_prep_guide", path="adventure-x/players-guide.md")
+def guide(camp: Workspace, text: str, cites: list[str], name: str = "players-guide") -> Any:
+    note(camp, {"cites": cites}, name, text)
+    return call(camp, "check_prep_guide", path=f"adventure-x/{name}.md")
 
 
 def test_the_guide_guard_refuses_a_planted_secret_and_a_canary(ws: Workspace) -> None:  # noqa: F811
@@ -133,6 +134,7 @@ def test_the_guide_guard_refuses_a_planted_secret_and_a_canary(ws: Workspace) ->
 
     assert leak.is_error
     assert "Mira Pell" in leak.content[0].text and "CANARY-guide-7" in leak.content[0].text
+    assert "must carry the notice" in leak.content[0].text  # every reason, not just the first
 
 
 def test_the_guide_guard_refuses_a_cited_fact_the_party_does_not_know(ws: Workspace) -> None:  # noqa: F811
@@ -148,10 +150,38 @@ def test_a_clean_guide_passes(ws: Workspace) -> None:  # noqa: F811
     known = fact(ws, "Tovan Reed keeps the lighthouse.", entities=[tovan])
     learn(ws, "party", known)
 
-    clean = guide(ws, "Tovan Reed keeps the lighthouse; bring a lantern.", [known])
+    clean = guide(
+        ws, f"Tovan Reed keeps the lighthouse; bring a lantern.\n\n*{UNOFFICIAL}*", [known]
+    )
 
     assert not clean.is_error
     assert clean.structured_content == {known: "knows"}
+
+
+def test_a_players_guide_without_the_unofficial_notice_is_refused(ws: Workspace) -> None:  # noqa: F811
+    refused = guide(ws, "Bring a lantern.", [])
+    reworded = guide(ws, "Bring a lantern. Model-written options are unofficial.", [])
+
+    for result in (refused, reworded):
+        assert result.is_error and "must carry the notice" in result.content[0].text
+        assert "Content for party refused" not in result.content[0].text
+
+
+def test_the_notice_may_wrap_across_lines(ws: Workspace) -> None:  # noqa: F811
+    wrapped = UNOFFICIAL.replace(" they are ", "\nthey are\n")
+
+    assert not guide(ws, f"Bring a lantern.\n\n_{wrapped}_", []).is_error
+
+
+def test_only_a_players_guide_needs_the_notice(ws: Workspace) -> None:  # noqa: F811
+    assert not guide(ws, "Bring a lantern.", [], name="handout").is_error
+
+
+def test_the_skill_states_the_notice_the_guard_requires() -> None:
+    from secondchair.core.playbooks import skills
+
+    [skill] = [s / "SKILL.md" for s in skills() if s.name == "prepare-an-adventure"]
+    assert f"*{UNOFFICIAL}*" in skill.read_text()
 
 
 def test_the_cli(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: F811

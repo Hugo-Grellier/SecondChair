@@ -18,6 +18,12 @@ from secondchair.core.workspace import Workspace
 PREP_DIR = "prep"
 PATH = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*(/[a-z0-9]+(-[a-z0-9]+)*)*\.md$")
 FENCE = "```yaml\n"
+GUIDE = "players-guide.md"
+# The fixed notice of an adventure's players' guide (#178), verbatim from prepare-an-adventure.
+UNOFFICIAL = (
+    "Options in this guide written by a model are unofficial: they are not published rules, "
+    "and the GM decides whether the table uses them."
+)
 
 
 def read_prep(ws: Workspace, path: str) -> str:
@@ -71,12 +77,24 @@ def tools(ws: Workspace) -> list[Tool]:
         party over the entire file. Refused when the text carries a canary or a name the party
         holds no fact about, or when the `cites` of its index block (the ids of the facts it
         uses; flavour with no truth value cites nothing) name an unknown fact or one the party
-        does not know. A read: it changes nothing. Returns the mode each cited fact is held in."""
+        does not know. A players' guide (a file named `players-guide.md`) is also refused
+        without its fixed notice, verbatim: "Options in this guide written by a model are
+        unofficial: they are not published rules, and the GM decides whether the table uses
+        them." A read: it changes nothing. Returns the mode each cited fact is held in."""
         text = read_prep(ws, path)
         cites = index_block(text).get("cites") or []
         if not (isinstance(cites, list) and all(isinstance(c, str) for c in cites)):
             raise CanonError("`cites` in the index block must be a list of fact ids.")
-        return knowledge.guard(ws, PARTY, text, cites, at)
+        notice = ""
+        if path.rsplit("/", 1)[-1] == GUIDE and UNOFFICIAL not in " ".join(text.split()):
+            notice = f"A players' guide must carry the notice, verbatim: {UNOFFICIAL!r}."
+        try:
+            held = knowledge.guard(ws, PARTY, text, cites, at)
+        except knowledge.AudienceRefused as e:
+            raise knowledge.AudienceRefused(f"{e} {notice}".strip()) from e
+        if notice:
+            raise knowledge.AudienceRefused(notice)
+        return held
 
     return [
         Tool(fn=write_prep, responsibility="prep", delegated_action=True, reversible=True),

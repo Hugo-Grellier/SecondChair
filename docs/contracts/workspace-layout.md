@@ -410,7 +410,7 @@ cites: [f-1a2b3c4d]                                    # fact ids a player-facin
 ```
 
 - `check_prep(path)` (a PF2e read; `secondchair prep check <path>`) lints it and fixes nothing. It looks each `uuid` up by its `name` with the connector's compendium search, and reports the ones it cannot check as `unchecked` when no GM client is connected; recomputes each encounter's XP and threat with GM Core and compares any `xp` or `threat` stated; compares `total_gp` with the level's `treasure_budget`; and requires every clue id in a `clues` list under `canon/mysteries/` or the front matter of a `notes/` draft, and every scene key to have `scenes/<key>.yaml`. It returns `{ok, problems, unchecked, encounters, treasure}`.
-- `check_prep_guide(path)` (a Core read; `secondchair prep guard <path>`) runs the audience guard for the party over the whole note and the `cites` of its block, as `check_audience_content` does for a line. It writes and discloses nothing.
+- `check_prep_guide(path)` (a Core read; `secondchair prep guard <path>`) runs the audience guard for the party over the whole note and the `cites` of its block, as `check_audience_content` does for a line. A note named `players-guide.md` is also refused without the fixed notice of the `prepare-an-adventure` playbook, verbatim (line breaks aside): "Options in this guide written by a model are unofficial: they are not published rules, and the GM decides whether the table uses them." Every reason is reported together. It writes and discloses nothing.
 
 ### Production manifest (`prep/production/<scene>.yaml`)
 
