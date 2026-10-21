@@ -39,3 +39,30 @@ Run what the change touches; run all of it before marking an R1 or R2 PR ready. 
 | Workflows | `uv run actionlint`, `uv run zizmor --offline .github/workflows` |
 
 The PR records each command run with its result, and every gate not run with the reason. Only a command actually executed counts; an agent's claim that checks pass is not evidence. Link the CI run for the exact head that was reviewed: a run on an earlier head, a pending or missing check, or a run on another base does not count, and keeps the PR draft.
+
+## Coordinator session: model routing
+
+Guidance for the coordinator session (Claude Code or similar) that drives development of this repository: it plans, dispatches, checks and publishes. Pick the model by the kind of work, not by habit:
+
+| Work | Model |
+| --- | --- |
+| Planning, ambiguous architecture, proposed ADRs | Opus |
+| Clearly scoped implementation and test loops | Sonnet |
+| Read-only exploration, issue triage, log classification | Haiku |
+
+This is guidance for the coordinator only. It does not change Ballast's verified worker routing: workers run on the Codex app-server, their model and effort receipt is checked before task input, and an unverified route blocks with no fallback ([issue workflow](../../../AGENTS.md#issue-workflow)).
+
+A low-trust subagent (such as a read-only exploration or triage agent) gets no write access to canon or privileged connectors.
+
+Configuration: Claude Code [model config](https://code.claude.com/docs/en/model-config) and [sub-agents](https://code.claude.com/docs/en/sub-agents).
+
+### Pilot frictions
+
+Observed in the Phase 2 pilot ([#186](https://github.com/Hugo-Grellier/SecondChair/issues/186#issuecomment-6302569620)); each must hold or be fixed before raising concurrency. Upstream: Ballast [#233](https://github.com/Hugo-Grellier/ballast/issues/233) and [#234](https://github.com/Hugo-Grellier/ballast/issues/234).
+
+1. The full test suite hangs in the worker sandbox (loopback `serve` fixtures). Workers run focused tests; the coordinator runs the [verification matrix](#verification-matrix).
+2. Workers cannot commit in a linked worktree (Git common dir is read-only). The coordinator commits each worker diff and records it.
+3. The `uv` cache is read-only in the sandbox. Workers use a checkout-local cache.
+4. Three attempts per role is too tight for pilots that exercise edge cases. Use `--attempts 4`.
+5. Overlapping Core issues (#167–#171, #163) collide. Keep one active Core issue at a time.
+6. Coordinator time dominates (checks, recovery, publication took over half the pilot). Measure it before adding workers.
