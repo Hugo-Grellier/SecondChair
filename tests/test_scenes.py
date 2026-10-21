@@ -19,8 +19,11 @@ from test_foundry_bridge import SCHEMA, bridge, hello, token, workspace  # noqa:
 from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Origin
 
+from secondchair.core import vtt
+from secondchair.core.vtt import VttError
 from secondchair.core.workspace import Workspace
 from secondchair_foundry.bridge import scene_level
+from secondchair_foundry.tools import check_assets, digest
 
 CAVE = {
     "scene": {"name": "Goblin cave", "width": 2000, "height": 1500},
@@ -289,3 +292,200 @@ def test_a_realisation_above_the_ceiling_is_reported_and_sent_again_when_it_chan
         observation = {"type": "observation", "envelope": envelope | {"payload": change}}
         socket.send(json.dumps(observation))
         assert realise(socket)["scene"] == "cave"  # the GM raised the ceiling: tried again
+
+
+# --- asset_check (#179): what a scene needs exists in the GM's Foundry before it is realised ---
+
+MAP = "modules/cave/map.webp"
+FOUNDRY = {
+    "images": {MAP: (2800, 2100), "tokens/boss.webp": (200, 200)},
+    "sounds": {"sounds": ["sounds/drip.ogg"]},
+    "uuids": {"Actor.grik": ("Grik", "Actor"), "Item.rope": ("Rope", "Item")},
+}
+
+
+@contextmanager
+def foundry(world: dict | None = FOUNDRY) -> Generator[None]:
+    """A fake GM client answering the reads from `world`, or none connected."""
+
+    def read(op: str, params: dict) -> Any:
+        assert world is not None
+        if op == "image_size":
+            if params["path"] not in world["images"]:
+                raise VttError(f"Cannot load {params['path']} in the GM's client.")
+            width, height = world["images"][params["path"]]
+            return {"width": width, "height": height}
+        if op == "browse_files":
+            files = world["sounds"].get(params["path"], []) if params["source"] == "data" else []
+            return {"dirs": [], "files": files}
+        assert op == "resolve_uuid"
+        found = world["uuids"].get(params["uuid"])
+        return found and {"uuid": params["uuid"], "name": found[0], "type": found[1]}
+
+    vtt.connect(None, read if world is not None else None)
+    try:
+        yield
+    finally:
+        vtt.connect(None)
+
+
+def staged(ws: Workspace, scene: dict, docs: dict[str, dict] | None = None) -> None:  # noqa: F811
+    (ws.root / "scenes").mkdir(exist_ok=True)
+    (ws.root / "scenes/cave.yaml").write_text(yaml.safe_dump(scene, sort_keys=False))
+    for key, doc in (docs or {}).items():
+        (ws.root / "documents").mkdir(exist_ok=True)
+        (ws.root / f"documents/{key}.yaml").write_text(yaml.safe_dump(doc, sort_keys=False))
+
+
+def good_scene() -> dict:
+    boss = {"key": "boss", "type": "Token", "actor": "Actor.grik"}
+    boss["data"] = {"x": 1, "y": 1, "texture": {"src": "tokens/boss.webp"}}
+    drip = {
+        "key": "drip",
+        "type": "AmbientSound",
+        "data": {"x": 1, "y": 1, "path": "sounds/drip.ogg"},
+    }
+    note = {"key": "note", "type": "Note", "data": {"x": 1, "y": 1, "entryId": "@prepared:diary"}}
+    scene = {"name": "Cave", "grid": {"size": 70}, "background": {"src": MAP}}
+    return {"scene": scene, "items": [boss, drip, note]}
+
+
+DIARY = {"JournalEntry": {"type": "JournalEntry", "data": {"name": "Diary"}}}
+
+
+def checks(ws: Workspace, world: dict | None = FOUNDRY) -> dict:  # noqa: F811
+    with foundry(world):
+        return check_assets(ws, "cave")
+
+
+def where(report: dict, bucket: str) -> list[str]:
+    return [f"{c['check']}:{c['where'].split(': ')[-1]}" for c in report[bucket]]
+
+
+def test_an_asset_check_with_everything_in_place_passes(ws: Workspace) -> None:  # noqa: F811
+    staged(ws, good_scene(), {"diary": DIARY["JournalEntry"]})
+
+    report = checks(ws)
+
+    assert report["passed"] is True
+    assert (report["missing"], report["mismatched"], report["skipped"]) == ([], [], [])
+    assert {"file:scene.background.src", "grid:scene.grid.size", "actor:items.0.actor"} <= set(
+        where(report, "ok")
+    )
+
+
+def test_an_asset_check_reports_a_missing_file_actor_and_prepared_document(
+    ws: Workspace,  # noqa: F811
+) -> None:
+    scene = good_scene()
+    scene["scene"]["background"]["src"] = "modules/cave/gone.webp"
+    scene["items"][0]["actor"] = "Actor.nobody"
+    scene["items"][1]["data"]["path"] = "sounds/gone.ogg"
+    staged(ws, scene)  # no documents/diary.yaml
+
+    report = checks(ws)
+
+    assert report["passed"] is False
+    assert sorted(where(report, "missing")) == sorted(
+        [
+            "file:scene.background.src",
+            "actor:items.0.actor",
+            "file:items.1.data.path",
+            "prepared:items.2.data.entryId",
+        ]
+    )
+    assert report["mismatched"] == []
+
+
+def test_an_asset_check_reports_a_grid_that_does_not_divide_the_map(ws: Workspace) -> None:  # noqa: F811
+    scene = good_scene()
+    scene["scene"]["grid"]["size"] = 150  # 2800 / 150 is not whole
+    staged(ws, scene, {"diary": DIARY["JournalEntry"]})
+
+    report = checks(ws)
+
+    assert where(report, "mismatched") == ["grid:scene.grid.size"]
+    assert report["passed"] is False
+
+
+def test_an_asset_check_reports_an_actor_that_is_not_an_actor_and_a_wrong_prepared_type(
+    ws: Workspace,  # noqa: F811
+) -> None:
+    scene = good_scene()
+    scene["items"][0]["actor"] = "Item.rope"
+    scene["items"][2]["actor"] = "@prepared:diary"  # a Note takes no actor: refused on write
+    scene["items"][2].pop("actor")
+    scene["items"].append({"key": "twin", "type": "Token", "actor": "@prepared:diary", "data": {}})
+    staged(ws, scene, {"diary": DIARY["JournalEntry"]})
+
+    report = checks(ws)
+
+    assert sorted(where(report, "mismatched")) == ["actor:items.0.actor", "prepared:items.3.actor"]
+
+
+def test_an_asset_check_follows_a_prepared_document_and_its_playlist_sounds(
+    ws: Workspace,  # noqa: F811
+) -> None:
+    scene = good_scene()
+    scene["scene"]["playlistSound"] = "@prepared:ambience/rain"
+    scene["scene"]["playlist"] = "@prepared:ambience"
+    sounds = [{"name": "wind", "path": "sounds/drip.ogg"}, {"name": "x", "path": "sounds/no.ogg"}]
+    ambience = {"type": "Playlist", "data": {"name": "Ambience", "sounds": sounds}}
+    staged(ws, scene, {"diary": DIARY["JournalEntry"], "ambience": ambience})
+
+    report = checks(ws)
+
+    assert sorted(where(report, "missing")) == [
+        "file:data.sounds.1.path",
+        "prepared:scene.playlistSound",
+    ]
+
+
+def test_an_asset_check_with_no_gm_client_says_what_it_could_not_run(ws: Workspace) -> None:  # noqa: F811
+    staged(ws, good_scene(), {"diary": DIARY["JournalEntry"]})
+
+    report = checks(ws, None)
+
+    assert report["passed"] is False
+    assert (report["missing"], report["mismatched"]) == ([], [])
+    assert [c["check"] for c in report["skipped"]] == ["foundry"]
+    assert "No GM client" in report["skipped"][0]["detail"]
+
+
+def test_an_asset_check_of_a_hand_broken_scene_is_a_mismatch_not_a_crash(ws: Workspace) -> None:  # noqa: F811
+    staged(ws, {"scene": {"name": "Cave"}, "items": [{"key": "Bad Key", "type": "Token"}]})
+
+    report = checks(ws)
+
+    assert report["passed"] is False
+    assert where(report, "mismatched") == ["schema:scenes/cave.yaml"]
+
+
+def test_the_scene_report_keeps_realised_valid_and_smoke_tested_apart(ws: Workspace) -> None:  # noqa: F811
+    staged(ws, good_scene(), {"diary": DIARY["JournalEntry"]})
+
+    with foundry():
+        waiting = call(ws, "scene_report", {"key": "cave"}).structured_content
+    assert waiting["production"] == {
+        "structurally_valid": True,
+        "realised": False,
+        "smoke_tested": False,
+    }
+
+    record = {"desired": digest((ws.root / "scenes/cave.yaml").read_text()), "ok": True}
+    record["report"] = {"summary": {"create": 3}, "actions": [], "errors": []}
+    (ws.root / ".secondchair/scenes").mkdir(parents=True)
+    (ws.root / ".secondchair/scenes/cave.json").write_text(json.dumps(record))
+    with foundry(None):  # realised, but its assets cannot be checked now
+        done = call(ws, "scene_report", {"key": "cave"}).structured_content
+    assert done["production"] == {
+        "structurally_valid": False,
+        "realised": True,
+        "smoke_tested": False,
+    }
+
+    record["report"]["actions"] = [{"action": "conflict", "key": "boss"}]
+    (ws.root / ".secondchair/scenes/cave.json").write_text(json.dumps(record))
+    with foundry():
+        conflicted = call(ws, "scene_report", {"key": "cave"}).structured_content
+    assert conflicted["production"]["realised"] is False

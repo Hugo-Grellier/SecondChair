@@ -394,6 +394,7 @@ Hooks.once("ready", () => {
             return { width: texture.width, height: texture.height };
           },
           documents: (type) => (type === "Scene" ? game.scenes : collection(type)),
+          fromUuid: async (uuid) => /** @type {Doc | null} */ (await fromUuid(uuid)),
         }),
       });
       /** The calls due now the Desk already showed. @type {Set<number>} */

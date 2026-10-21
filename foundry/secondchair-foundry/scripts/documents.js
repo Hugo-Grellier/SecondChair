@@ -365,9 +365,11 @@ const matches = (name, query) =>
  * @param {string} [env.origin]  the Foundry page's origin, which a read path stays on
  * @param {(path: string) => Promise<{width: number, height: number}>} env.imageSize
  *   an image's or video's size in pixels, loaded in the GM's client
+ * @param {(uuid: string) => Promise<{name?: string, documentName?: string} | null>} [env.fromUuid]
+ *   the document a UUID names, null when there is none
  * @returns {Record<string, (params: Data) => Promise<unknown>>}
  */
-export function genericReads({ browse, packs, documents, imageSize, origin }) {
+export function genericReads({ browse, packs, documents, imageSize, fromUuid, origin }) {
   /** @param {string[]} list */
   const cut = (list) => list.slice(0, LIMIT);
   return {
@@ -412,6 +414,12 @@ export function genericReads({ browse, packs, documents, imageSize, origin }) {
       if (typeof path !== "string" || !path) throw new Error("image_size needs a `path`.");
       const { width, height } = await imageSize(dataPath(path, origin));
       return { width, height };
+    },
+    async resolve_uuid({ uuid }) {
+      if (typeof uuid !== "string" || !uuid) throw new Error("resolve_uuid needs a `uuid`.");
+      if (!fromUuid) throw new Error("This client cannot resolve a UUID.");
+      const doc = await fromUuid(uuid);
+      return doc ? { uuid, name: doc.name ?? null, type: doc.documentName ?? null } : null;
     },
     async list_world_documents({ type, query = "" }) {
       const collection = documents(String(type));

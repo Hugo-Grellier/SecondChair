@@ -382,6 +382,23 @@ test("generic reads: files, compendium entries and world documents, bounded", as
   await assert.rejects(reads.image_size({}));
 });
 
+test("resolve_uuid names the document a UUID points to, or null", async () => {
+  const reads = genericReads({
+    browse: async () => ({}),
+    packs: () => [],
+    documents: () => null,
+    imageSize: async () => ({ width: 1, height: 1 }),
+    fromUuid: async (uuid) => (uuid === "Actor.x" ? { name: "Grik", documentName: "Actor" } : null),
+  });
+  assert.deepEqual(await reads.resolve_uuid({ uuid: "Actor.x" }), {
+    uuid: "Actor.x",
+    name: "Grik",
+    type: "Actor",
+  });
+  assert.equal(await reads.resolve_uuid({ uuid: "Actor.gone" }), null);
+  await assert.rejects(reads.resolve_uuid({}));
+});
+
 test("prep never sets who sees a document: ownership is forced to the GM's only", async () => {
   const w = world();
   const shared = handout();

@@ -7,6 +7,7 @@ A prepared scene or world document is a desired state in the workspace, realised
 
 import hashlib
 import json
+import posixpath
 import re
 from collections.abc import Iterator
 from typing import Any, Literal, TypedDict
@@ -47,6 +48,9 @@ SCENE_EMBEDDED = (
     *("tokens", "walls"),
 )
 KEY = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+PREPARED = re.compile(r"^@prepared:([^/]+)(?:/(.+))?$")
+FILE_FIELDS = ("src", "path", "img")  # the fields of a desired state that name a file
+IMAGE_TYPES = (".webp", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".avif", ".webm", ".mp4", ".m4v")
 
 type Choice = Literal["keep", "overwrite", "recreate"]
 
@@ -397,6 +401,170 @@ def official_name(key: str, pack: str | None = None) -> OfficialName:
     return {"name": name, "official_reference": reference}
 
 
+def _strings(value: object, where: str = "") -> Iterator[tuple[str, str, str]]:
+    """Every string in `value` as (location, field name, value)."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            yield from _strings(v, f"{where}.{k}" if where else str(k))
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            yield from _strings(v, f"{where}.{i}")
+    elif isinstance(value, str):
+        yield where, where.rsplit(".", 1)[-1], value
+
+
+class _Offline(Exception):
+    """The GM client cannot answer: every read still to do is skipped, none is retried."""
+
+
+def check_assets(ws: Workspace, key: str) -> dict[str, Any]:
+    """Whether a prepared scene, and the prepared documents it refers to, could be realised with
+    what the GM's Foundry holds. Reads only; fixes nothing. `passed` is true when nothing is
+    `missing`, `mismatched` or `skipped`."""
+    path = ws.root / SCENES_DIR / f"{key}.yaml"
+    if not KEY.match(key) or not path.is_file():
+        raise ValueError(f"No prepared scene {key!r}.")
+    report: dict[str, list[dict[str, str]]] = {
+        "missing": [],
+        "mismatched": [],
+        "ok": [],
+        "skipped": [],
+    }
+
+    def add(bucket: str, where: str, check: str, value: str, detail: str = "") -> None:
+        report[bucket].append({"where": where, "check": check, "value": value, "detail": detail})
+
+    try:
+        desired = yaml.safe_load(path.read_text())
+        _check(key, desired)
+    except (ValueError, yaml.YAMLError, KeyError, TypeError, AttributeError) as e:
+        add("mismatched", f"{SCENES_DIR}/{key}.yaml", "schema", key, str(e))
+        return {"scene": key, "passed": False, **report}
+
+    sizes: dict[str, dict[str, Any] | None] = {}  # image path -> size, None when unreadable
+    listings: dict[str, list[str] | None] = {}
+
+    def read(op: str, params: dict[str, Any]) -> Any:
+        try:
+            return vtt.read(op, params)
+        except vtt.Unanswered as e:
+            raise _Offline from e
+        except vtt.VttError as e:
+            if str(e) == vtt.NO_VTT:
+                raise _Offline from e
+            raise
+
+    def size(value: str) -> dict[str, Any] | None:
+        if value not in sizes:
+            try:
+                sizes[value] = read("image_size", {"path": _data_path(value)})
+            except (ValueError, vtt.VttError) as e:
+                sizes[value] = {"error": str(e)}
+        return sizes[value]
+
+    def listing(folder: str) -> list[str] | None:
+        if folder not in listings:
+            listings[folder] = None
+            found: list[str] = []
+            for source in ("data", "public"):
+                try:
+                    r = read("browse_files", {"path": folder, "source": source, "extensions": None})
+                except vtt.VttError as e:
+                    if isinstance(e, vtt.Unanswered) or str(e) == vtt.NO_VTT:
+                        raise _Offline from e
+                    continue
+                if r.get("more"):
+                    return None  # a long folder is cut short: a file may be hiding past the cut
+                found += [unquote(f) for f in r.get("files", [])]
+            listings[folder] = found
+        return listings[folder]
+
+    def check_file(where: str, value: str) -> None:
+        try:
+            _data_path(value)
+        except ValueError as e:
+            return add("mismatched", where, "file", value, str(e))
+        if value.lower().endswith(IMAGE_TYPES):
+            got = size(value)
+            if got is None or "error" in got:
+                detail = str((got or {}).get("error", ""))
+                return add("missing", where, "file", value, detail)
+            return add("ok", where, "file", value, f"{got['width']}x{got['height']}")
+        files = listing(posixpath.dirname(unquote(value)))
+        if files is None:
+            return add("skipped", where, "file", value, "its folder is too long to list")
+        add("ok" if unquote(value) in files else "missing", where, "file", value)
+
+    def check_actor(where: str, value: str) -> None:
+        if value.startswith("@prepared:"):
+            return  # a reference: checked below, whatever the field
+        if not UUID.match(value):
+            return add("mismatched", where, "actor", value, "not an Actor UUID")
+        try:
+            found = read("resolve_uuid", {"uuid": value})
+        except vtt.VttError as e:
+            return add("skipped", where, "actor", value, str(e))
+        if found is None:
+            add("missing", where, "actor", value)
+        elif found.get("type") != "Actor":
+            add("mismatched", where, "actor", value, f"is a {found.get('type')}")
+        else:
+            add("ok", where, "actor", value, found.get("name", ""))
+
+    def check_prepared(where: str, value: str, wanted: str | None) -> dict[str, Any] | None:
+        match = PREPARED.match(value)
+        assert match
+        name, sound = match.groups()
+        doc = ws.root / DOCUMENTS_DIR / f"{name}.yaml"
+        data = yaml.safe_load(doc.read_text()) if KEY.match(name) and doc.is_file() else None
+        if not isinstance(data, dict):
+            add("missing", where, "prepared", value, f"no {DOCUMENTS_DIR}/{name}.yaml")
+        elif wanted and data.get("type") != wanted:
+            add("mismatched", where, "prepared", value, f"is a {data.get('type')}")
+        elif sound and sound not in [s.get("name") for s in data["data"].get("sounds", [])]:
+            add("missing", where, "prepared", value, f"no sound {sound!r}")
+        else:
+            add("ok", where, "prepared", value)
+            return data
+        return None
+
+    scene = desired["scene"]
+    # The scene's own file first, then each prepared document it names, once.
+    todo: list[tuple[str, object]] = [(f"{SCENES_DIR}/{key}.yaml", desired)]
+    seen: set[str] = set()
+    try:
+        while todo:
+            file, content = todo.pop(0)
+            for loc, field, value in _strings(content):
+                where = f"{file}: {loc}"
+                if field in FILE_FIELDS and value and not value.startswith("@prepared:"):
+                    check_file(where, value)
+                elif field == "actor" and file.startswith(SCENES_DIR):
+                    check_actor(where, value)
+                if value.startswith("@prepared:"):
+                    wanted = "Actor" if field == "actor" else None
+                    doc = check_prepared(where, value, wanted)
+                    name = value.removeprefix("@prepared:").split("/")[0]
+                    if doc is not None and name not in seen:
+                        seen.add(name)
+                        todo.append((f"{DOCUMENTS_DIR}/{name}.yaml", doc))
+        background = (scene.get("background") or {}).get("src")
+        grid = (
+            (scene.get("grid") or {}).get("size") if isinstance(scene.get("grid"), dict) else None
+        )
+        if isinstance(background, str) and isinstance(grid, int) and grid > 0:
+            got = size(background)
+            where = f"{SCENES_DIR}/{key}.yaml: scene.grid.size"
+            if got and "error" not in got:
+                w, h = got["width"], got["height"]
+                fits = w % grid == 0 and h % grid == 0
+                add("ok" if fits else "mismatched", where, "grid", str(grid), f"map {w}x{h}")
+    except _Offline:
+        add("skipped", f"{SCENES_DIR}/{key}.yaml", "foundry", key, vtt.NO_VTT)
+    passed = not (report["missing"] or report["mismatched"] or report["skipped"])
+    return {"scene": key, "passed": passed, **report}
+
+
 def tools(ws: Workspace) -> list[Tool]:
     def report(folder: str, reports: str, what: str, key: str) -> dict[str, Any]:
         desired = ws.root / folder / f"{key}.yaml"
@@ -415,8 +583,38 @@ def tools(ws: Workspace) -> list[Tool]:
     def scene_report(key: str) -> dict[str, Any]:
         """How a prepared scene was last realised in Foundry: `realised`, then `pending` (the
         desired state changed since and waits for a GM client), and the GM client's `report`
-        (what each object became, conflicts waiting for the GM's choice, errors) or `error`."""
-        return report(SCENES_DIR, REPORTS_DIR, "scene", key)
+        (what each object became, conflicts waiting for the GM's choice, errors) or `error`.
+        `production` says how far the scene is, in three separate states: `structurally_valid`
+        (the desired state passes `asset_check`), `realised` (the last reconciliation is current
+        and clean: no error, no conflict) and `smoke_tested` (a player-view preview ran in
+        Foundry; false until that exists). Each is false until proven."""
+        result = report(SCENES_DIR, REPORTS_DIR, "scene", key)
+        actions = result.get("report", {}).get("actions", [])
+        clean = (
+            (
+                result.get("ok") is True
+                and not result["pending"]
+                and not result["report"].get("errors")
+                and not any(a.get("action") == "conflict" for a in actions)
+            )
+            if result["realised"] and "report" in result
+            else False
+        )
+        production = {
+            "structurally_valid": check_assets(ws, key)["passed"],
+            "realised": clean,
+            "smoke_tested": False,
+        }
+        return {**result, "production": production}
+
+    def asset_check(key: str) -> dict[str, Any]:
+        """Before realising, whether the files, sizes, grid, actors and `@prepared:` references
+        of a prepared scene (and of the prepared documents it names) exist in the GM's Foundry.
+        Reads only, fixes nothing. `missing`, `mismatched` and `ok` list each check as
+        `{where, check, value, detail}`; `skipped` the checks that could not run, such as every
+        Foundry read when no GM client is connected. `passed` is true when the first, second and
+        last are empty."""
+        return check_assets(ws, key)
 
     def document_report(key: str) -> dict[str, Any]:
         """How a prepared world document was last realised in Foundry: `realised`, then
@@ -439,6 +637,7 @@ def tools(ws: Workspace) -> list[Tool]:
         Tool(fn=prepare_scene, responsibility="prep", delegated_action=True, reversible=True),
         Tool(fn=scene_report, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=prepare_document, responsibility="prep", delegated_action=True, reversible=True),
+        Tool(fn=asset_check, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=document_report, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=browse_files, responsibility="prep", delegated_action=False, reversible=True),
         Tool(fn=search_compendium, responsibility="prep", delegated_action=False, reversible=True),
