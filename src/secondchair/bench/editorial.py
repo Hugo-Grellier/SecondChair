@@ -1,0 +1,84 @@
+"""Deterministic editorial metrics (#182): what a prep artifact shows without a human or a model.
+
+Reported only, never a gate (docs/bench/editorial). Each metric is a named check; a branch adds its
+own by registering a function in `CHECKS`, for example `check_prep` (#178) or the spotlight count
+(#176). Only what is on main is wired: the mystery warnings, the audience guard, the attempts the
+Core logged for a job (ARC-27, no token counts exist yet) and the size of the GM's edit.
+"""
+
+import difflib
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from secondchair.core import jobs, knowledge, mystery
+from secondchair.core.index import CanonError
+from secondchair.core.workspace import Workspace
+
+Check = Callable[[Workspace, dict[str, Any]], Any]
+
+
+def _mystery_warnings(ws: Workspace, a: dict) -> list[str]:
+    [tool] = [t for t in mystery.tools(ws) if t.name == "check_mystery"]
+    return [w["code"] for w in tool.fn(mystery=a["mystery"])["warnings"]]
+
+
+def _guard(ws: Workspace, a: dict) -> list[str]:
+    try:
+        knowledge.guard(ws, a["audience"], a["text"], a.get("cites", []))
+    except knowledge.AudienceRefused as refusal:
+        return [str(refusal)]
+    return []
+
+
+def _cost(ws: Workspace, a: dict) -> dict:
+    attempts = jobs.read(ws, a["job"])["attempts"]
+    return {"attempts": len(attempts), "failed": sum(x["outcome"] == "failed" for x in attempts)}
+
+
+def _diff(_: Workspace, a: dict) -> int:
+    """Lines added or removed between the agent's draft and the version the GM adopted."""
+    lines = difflib.unified_diff(a["draft"].splitlines(), a["adopted"].splitlines(), n=0)
+    return sum(x[0] in "+-" and x[:3] not in ("+++", "---") for x in lines)
+
+
+# check name -> (artifact key it needs, check)
+CHECKS: dict[str, tuple[str, Check]] = {
+    "mystery_warnings": ("mystery", _mystery_warnings),
+    "guard": ("audience", _guard),
+    "cost": ("job", _cost),
+    "diff_lines": ("adopted", _diff),
+}
+
+
+def metrics(ws: Workspace, artifact: dict) -> dict:
+    """Every registered check whose input the artifact carries. A check that cannot run (a
+    missing mystery or job) reports its error instead of hiding the artifact."""
+    out: dict[str, Any] = {}
+    for name, (needs, check) in CHECKS.items():
+        if needs not in artifact:
+            continue
+        try:
+            out[name] = check(ws, artifact)
+        except (CanonError, jobs.DelegationError) as error:
+            out[name] = f"error: {error}"
+    return out
+
+
+def markdown(rows: dict[str, dict]) -> str:
+    """One row per artifact id, one column per metric that any artifact reports."""
+    names = [n for n in CHECKS if any(n in r for r in rows.values())]
+    lines = ["| Artifact | " + " | ".join(names) + " |", "|---|" + "---|" * len(names)]
+    for artifact, row in rows.items():
+        cells = [str(row.get(n, "-")).replace("|", "/") for n in names]
+        lines.append(f"| {artifact} | " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def abandoned_prep(log: Path) -> list[str]:
+    """Scenes and clues prepared and not played, from a filled table-use log."""
+    prep = yaml.safe_load(log.read_text())["prep"]
+    used = set(prep["used"])
+    return [p for p in prep["prepared"] if p not in used]
