@@ -6,6 +6,7 @@ compatibility: Needs the SecondChair MCP server (secondchair serve) with the PF2
 metadata:
   secondchair-responsibility: prep
   secondchair-tier: standard
+  secondchair-writes: "true"
   secondchair-inputs: adventure, party, encounters
   secondchair-expected-output: One prepared scene per encounter listed in the encounters input, under its key, written with prepare_scene, whose creatures and hazards meet the threat the adventure gives it as encounter_xp computes it, and a summary for the GM with each encounter's XP, threat, award and the level's treasure budget.
 ---

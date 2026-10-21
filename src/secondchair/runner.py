@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from secondchair.core import delegation, jobs
+from secondchair.core import jobs
 from secondchair.core.workspace import Workspace
 
 # The Core's playbooks: a Claude Code plugin whose `skills/` is also the Codex skill bundle
@@ -109,6 +109,7 @@ def queue(
         responsibility=meta["responsibility"],
         tier=tier or meta["tier"],
         entities=entities,
+        writes=meta.get("writes") == "true",
     )
 
 
@@ -121,16 +122,11 @@ def prompt(ws: Workspace, job: dict) -> str:
         f"`job: {job['id']}` to every SecondChair delegated action, and call `finish_job` when "
         f"the playbook is complete. The job contract:\n{json.dumps(contract, ensure_ascii=False)}"
     )
-    taken = [
-        f"- {e['id']}: {e['tool']} on {e['target']}, {e['status']}"
-        for e in delegation.read_log(ws)[0]
-        if e.get("kind") == "action" and e.get("job") == job["id"]
-    ]
-    if taken:
+    if taken := jobs.taken(ws, job["id"]):
         text += (
             "\nEarlier attempts failed or stopped before `finish_job`, after taking these actions "
             "(action log id: tool on target, status). Continue from there: do not take them "
-            "again.\n" + "\n".join(taken)
+            "again.\n" + taken
         )
     return text
 
@@ -157,7 +153,12 @@ def run(
     call = jobs.raise_exception(
         ws,
         job_id,
-        f"Every runner configuration for tier {job['tier']} failed; the job stays queued.",
+        f"Every runner configuration for tier {job['tier']} failed; the job stays queued."
+        + (
+            f" Actions it already took stay logged:\n{taken}"
+            if (taken := jobs.taken(ws, job_id))
+            else ""
+        ),
     )
     raise RunnerError(
         f"Job {job_id}: every runner configuration for tier {job['tier']} failed. It stays "

@@ -149,7 +149,7 @@ An agent running a job ([`job.schema.json`](job.schema.json)) passes `job` to ev
 | Tool | Does |
 |---|---|
 | `start_job(job, host, model, effort)` | Starts a queued job from the GM's own session (ARC-29): the host, model and effort the session reports are logged as the effective configuration. Returns the job record; its tier is only a hint. |
-| `finish_job(job)` | Marks a started job done. |
+| `finish_job(job)` | Marks a started job done. For a job whose playbook writes (`writes` in the job contract), it is refused, and the attempt keeps running, until the action log holds at least one applied or pending delegated action under that job; the refusal lists the job's logged actions. Finishing a job that is already done changes nothing. |
 | `settle_unless(occurrence, unless_holds, cites, job)` | The answer of a started `settle-an-unless` job (LW-10): whether a front's `unless` held on the tick's date, citing the ids of canon facts valid then. Held: the tick is suppressed. Not held: the tick applies at the agent-proposal rank. `null` or no citation: a call on the GM at the next break, and the tick stays queued. |
 
 The "wrap a session" job adds three tools, served the same way (CAP-04..13; [workspace layout](workspace-layout.md#capture)):
@@ -161,7 +161,7 @@ The "wrap a session" job adds three tools, served the same way (CAP-04..13; [wor
 | `consolidate_candidates(job)` | Routes the session's captured candidates through the Core's delegated actions, under the job; returns each candidate's outcome. |
 | `run_world_turn(job)` | For a started `world-turn` job, which a wrap queues (LW-07): runs the Core's world-turn up to the job's `until` and returns the occurrences recorded. |
 
-A runner started by `secondchair jobs run` logs its attempt itself and gives the agent the contract in its prompt; the job is done only when the agent calls `finish_job`. An agent that exits cleanly without it is a failed attempt (ARC-27); a retry's prompt lists the actions the job already took, so it continues rather than redoes them.
+A runner started by `secondchair jobs run` logs its attempt itself and gives the agent the contract in its prompt; the job is done only when the agent calls `finish_job`. An agent that exits cleanly without it is a failed attempt (ARC-27); a retry's prompt lists the actions the job already took, so it continues rather than redoes them. When every configuration fails, the exception call lists the actions the job took, which stay logged and undoable.
 
 ## Playbooks
 

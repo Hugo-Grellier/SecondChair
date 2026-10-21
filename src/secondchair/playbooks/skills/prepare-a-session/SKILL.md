@@ -6,6 +6,7 @@ compatibility: Needs the SecondChair MCP server (secondchair serve). The Foundry
 metadata:
   secondchair-responsibility: prep
   secondchair-tier: deep
+  secondchair-writes: "true"
   secondchair-inputs: session, brief?
   secondchair-expected-output: The session's handoff written with write_prep at session-<session>/handoff.md, every scene it plans prepared in the VTT with prepare_scene and its NPCs, journals, handouts, treasure and music with prepare_document when the VTT connector offers it, each realisation report read, and a summary for the GM of what is ready, what needs them and the open questions.
 ---

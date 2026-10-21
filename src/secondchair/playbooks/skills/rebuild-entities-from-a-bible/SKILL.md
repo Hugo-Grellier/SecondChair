@@ -6,6 +6,7 @@ compatibility: Needs the SecondChair MCP server (secondchair serve) and read acc
 metadata:
   secondchair-responsibility: memory
   secondchair-tier: standard
+  secondchair-writes: "true"
   secondchair-inputs: bible
   secondchair-expected-output: One canon entity per named person, place, group or faction, and notable named thing of the bible, created with create_entity, with no duplicate of the campaign vocabulary; then the bible's facts, recorded with record_fact, citing the bible; who knows or believes what at the campaign's start, with record_knowledge; and each mystery's graph, with record_mystery.
 ---

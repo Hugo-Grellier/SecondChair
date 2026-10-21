@@ -16,7 +16,7 @@ from mcp import Client
 
 from secondchair import runner
 from secondchair.cli import main
-from secondchair.core import index, jobs, workspace
+from secondchair.core import delegation, index, jobs, workspace
 from secondchair.core.server import build_server
 from secondchair.core.tools import RESPONSIBILITIES
 from secondchair.core.workspace import Workspace
@@ -273,6 +273,94 @@ def test_a_host_exiting_cleanly_without_finish_job_is_a_failed_attempt(
     ]
 
 
+def start_manual(ws: Workspace, job_id: int = 1) -> None:
+    jobs.start(ws, job_id, {"host": "h", "model": "m", "effort": "e"}, manual=True)
+
+
+def test_a_writing_job_cannot_finish_without_an_applied_action_under_it(ws: Workspace) -> None:
+    """Postcondition of a playbook that writes (#171): the attempt keeps running, the refusal
+    names what is missing, and the same agent can fix it."""
+    queue(ws)
+    assert job(ws)["writes"] is True
+    start_manual(ws)
+
+    refused = call(ws, "finish_job", {"job": 1})
+    assert refused.is_error and "must write" in refused.content[0].text
+    assert job(ws)["status"] == "started"
+
+    call(ws, "create_entity", {"names": ["Ada Fen"], "agent": "a", "job": 1})
+    assert call(ws, "finish_job", {"job": 1}).structured_content["status"] == "done"
+
+
+def test_an_action_of_another_job_or_an_undone_one_does_not_count(ws: Workspace) -> None:
+    queue(ws)
+    assert main(["jobs", "-w", str(ws.root), "queue", PLAYBOOK, "--input", f"bible={BIBLE}"]) == 0
+    start_manual(ws, 2)
+    call(ws, "create_entity", {"names": ["Bo Lin"], "agent": "a", "job": 2})
+    start_manual(ws, 1)
+    call(ws, "create_entity", {"names": ["Ada Fen"], "agent": "a", "job": 1})
+    delegation.undo(ws, 2, "other", "cli", True)
+
+    refused = call(ws, "finish_job", {"job": 1})
+
+    assert refused.is_error and "2: create_entity" in refused.content[0].text  # names the partial
+    assert job(ws)["status"] == "started"
+    assert call(ws, "finish_job", {"job": 2}).structured_content["status"] == "done"
+
+
+def test_a_host_finishing_with_nothing_done_is_a_failed_attempt_naming_partial_outputs(
+    ws: Workspace, config: Path
+) -> None:
+    refused = "from secondchair.core import jobs, workspace as w; import sys, pathlib; "
+    refused += "jobs.finish(w.load(pathlib.Path(sys.argv[1])), int(sys.argv[2]))"
+    configure(config, {"h": [sys.executable, "-c", refused, str(ws.root), "{job}"]}, ("h", "m"))
+    queue(ws)
+
+    assert main(["jobs", "-w", str(ws.root), "run"]) == 1
+
+    record = job(ws)
+    assert record["status"] == "queued" and record["attempts"][0]["outcome"] == "failed"
+    assert "must write" in record["attempts"][0]["error"]
+
+
+def test_the_exception_names_the_actions_an_exhausted_job_already_took(
+    ws: Workspace, config: Path
+) -> None:
+    configure(config, {"ok": OK}, ("ok", "m"))
+    queue(ws)
+    start_manual(ws)
+    call(ws, "create_entity", {"names": ["Ada Fen"], "agent": "a", "job": 1})
+    jobs.end(ws, 1, "stopped")
+
+    assert main(["jobs", "-w", str(ws.root), "run"]) == 1
+
+    [call_file] = (ws.root / "calls").glob("*.yaml")
+    assert "1: create_entity" in yaml.safe_load(call_file.read_text())["message"]
+
+
+def test_finishing_a_done_job_again_changes_nothing(ws: Workspace) -> None:
+    queue(ws)
+    start_manual(ws)
+    call(ws, "create_entity", {"names": ["Ada Fen"], "agent": "a", "job": 1})
+    call(ws, "finish_job", {"job": 1})
+    done = job(ws)
+
+    assert call(ws, "finish_job", {"job": 1}).structured_content == done
+    assert job(ws) == done
+
+
+def test_a_playbook_that_does_not_write_finishes_with_no_action(
+    ws: Workspace, tmp_path: Path
+) -> None:
+    probes = tmp_path / "probes.json"
+    probes.write_text("{}")
+    runner.queue(ws, "answer-probes", {"probes": str(probes)})
+    start_manual(ws)
+
+    assert job(ws)["writes"] is False
+    assert call(ws, "finish_job", {"job": 1}).structured_content["status"] == "done"
+
+
 def test_a_missing_host_binary_is_a_broken_entry(ws: Workspace, config: Path) -> None:
     configure(
         config,
@@ -471,7 +559,17 @@ def test_every_playbook_is_an_agent_skill_with_a_tier_and_a_responsibility() -> 
         assert front["name"] == skill.name and len(front["description"]) <= 1024
         meta = runner.playbook(skill.name)
         assert meta["tier"] in jobs.TIERS and meta["responsibility"] in RESPONSIBILITIES
+        assert meta.get("writes", "false") in ("true", "false")  # one boolean (#171)
         assert "campaign language" in (skill / "SKILL.md").read_text()
+    writing = {s.name for s in skills if runner.playbook(s.name).get("writes") == "true"}
+    assert writing == {
+        "calibrate-encounters",
+        "prepare-a-session",
+        "propose-narrative-direction",
+        "realise-a-scene",
+        PLAYBOOK,
+        "wrap-a-session",
+    }
     names = []
     for playbooks in runner.playbook_dirs():
         plugin = json.loads((playbooks / ".claude-plugin/plugin.json").read_text())

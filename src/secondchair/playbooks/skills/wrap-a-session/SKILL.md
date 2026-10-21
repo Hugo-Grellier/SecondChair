@@ -6,6 +6,7 @@ compatibility: Needs the SecondChair MCP server (secondchair serve) and read acc
 metadata:
   secondchair-responsibility: memory
   secondchair-tier: standard
+  secondchair-writes: "true"
   secondchair-inputs: session, notes?, transcript?
   secondchair-expected-output: Every played statement of the session's Sources captured as a candidate fact quoting its Source verbatim, classified against canon, and consolidated by the Core.
 ---
