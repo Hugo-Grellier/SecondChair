@@ -154,9 +154,14 @@ def tools(ws: Workspace) -> list[Tool]:
         beyond 4."""
         return treasure(party_level, party_size)
 
+    from secondchair_pf2e.prepcheck import check_prep_tool  # it uses the maths above
+
     return [
-        Tool(fn=fn, responsibility="prep", delegated_action=False, reversible=True)
-        for fn in (encounter_xp, treasure_budget)
+        *(
+            Tool(fn=fn, responsibility="prep", delegated_action=False, reversible=True)
+            for fn in (encounter_xp, treasure_budget)
+        ),
+        check_prep_tool(ws),
     ]
 
 

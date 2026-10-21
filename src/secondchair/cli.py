@@ -29,7 +29,7 @@ from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.machine import MachineConfigError
 from secondchair.core.server import GM_PATH, LOOPBACK, MCP_PATH, SERVE_FILE, serve
-from secondchair.core.tools import RESPONSIBILITIES, RegistrationError
+from secondchair.core.tools import RESPONSIBILITIES, RegistrationError, load_tools
 from secondchair.core.workspace import STATE_DIR, WorkspaceError
 
 DEFAULT_PORT = 7240
@@ -491,6 +491,21 @@ def _describe_occurrence(o: dict) -> str:
     return f"{o['date']}  {o['key']}  {o['class']}{status}"
 
 
+def _prep_command(args: argparse.Namespace) -> int:
+    """Lint a prep note's index block, or guard a whole note for the party; 1 on a problem."""
+    ws = workspace.load(args.workspace)
+    tool = {t.name: t for t in load_tools(ws)}[
+        "check_prep" if args.prep_command == "check" else "check_prep_guide"
+    ]
+    try:
+        result = tool.fn(args.path)
+    except CanonError as e:  # the guard's refusal, or a note that is not there
+        print(f"secondchair: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result.get("ok", True) else 1
+
+
 def _world_command(args: argparse.Namespace) -> str:
     """The living world's GM gestures (LW-04, LW-05, LW-09, LW-12, LW-14, LW-16, LW-18)."""
     ws = workspace.load(args.workspace)
@@ -795,6 +810,14 @@ def main(argv: list[str] | None = None) -> int:
     transcribe_cmd.add_argument(
         "--language", help="the language spoken (default: the campaign language)"
     )
+    prep_cmd = commands.add_parser("prep", help="check a prep note; writes nothing")
+    prep_sub = prep_cmd.add_subparsers(dest="prep_command", required=True)
+    for name, help_text in (
+        ("check", "lint the note's index block: UUIDs, encounter XP, treasure, clues, scenes"),
+        ("guard", "guard the whole note for the party, such as an adventure's players' guide"),
+    ):
+        cmd = prep_sub.add_parser(name, parents=[in_workspace], help=help_text)
+        cmd.add_argument("path", help="relative to prep/: adventure-x/players-guide.md")
     world_cmd = commands.add_parser("world", help="advance, forecast and steer the living world")
     world_sub = world_cmd.add_subparsers(dest="world_command", required=True)
     for name, help_text in (
@@ -907,6 +930,8 @@ def main(argv: list[str] | None = None) -> int:
             _transcribe_command(args)
         elif args.command == "bench":
             return _bench_command(args)
+        elif args.command == "prep":
+            return _prep_command(args)
         elif args.command == "world":
             print(_world_command(args))
         else:
