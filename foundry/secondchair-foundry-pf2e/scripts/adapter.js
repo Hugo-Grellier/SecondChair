@@ -23,6 +23,10 @@
  * @property {(name: string) => string} slugify  pf2e's slug of an English name
  * @property {(uuid: string) => Promise<import("../../secondchair-foundry/scripts/actions.js").Doc | null>} resolve
  *   the document a UUID names
+ * @property {(token: any) => any[]} sceneTokens  the token documents on the token's scene
+ * @property {(from: any, to: any) => number} distance  feet between two tokens, as the canvas measures
+ * @property {(token: any) => boolean | null} reactionUsed  what a known reaction tracker says
+ *   (RUL-07), null when none speaks
  */
 
 /** The one Foundry and system major pair the adapter targets (RUL-02). */
@@ -140,6 +144,56 @@ function dayNumber({ year, month, day }) {
 }
 
 /**
+ * What a GM creature has, as pf2e reports it (RUL-15: no odds, no modifier maths of ours). Each
+ * strike's variants are pf2e's own labels, so the multiple attack penalty is whatever they say.
+ * Tokens in reach are those within the longest strike reach; hidden ones are left out unless
+ * `includeHidden`, so a player-facing caller never learns of them.
+ * @param {Env} env
+ * @param {any} token  the creature's token document
+ * @param {boolean} includeHidden
+ */
+export function turnCard(env, token, includeHidden) {
+  const actor = token.actor;
+  const strikes = (actor.system?.actions ?? [])
+    .filter((/** @type {any} */ s) => s.type === "strike")
+    .map((/** @type {any} */ s) => ({
+      slug: s.slug,
+      label: s.label,
+      variants: (s.variants ?? []).map((/** @type {any} */ v) => v.label),
+      reach: actor.getReach({ action: "attack", weapon: s.item }),
+    }));
+  const reach = Math.max(0, ...strikes.map((/** @type {{reach: number}} */ s) => s.reach));
+  const inReach = env
+    .sceneTokens(token)
+    .filter((/** @type {any} */ t) => t.id !== token.id && (includeHidden || !t.hidden))
+    .map((/** @type {any} */ t) => ({
+      uuid: t.uuid,
+      name: t.name,
+      hidden: t.hidden === true,
+      distance: env.distance(token, t),
+    }))
+    .filter((/** @type {{distance: number}} */ t) => t.distance <= reach);
+  return {
+    token: token.uuid,
+    name: actor.name,
+    strikes,
+    actions: (actor.itemTypes?.action ?? []).map((/** @type {any} */ a) => ({
+      slug: a.slug,
+      name: a.name,
+      type: a.system?.actionType?.value ?? null,
+      cost: a.system?.actions?.value ?? null,
+    })),
+    reaction_used: env.reactionUsed(token),
+    conditions: (actor.itemTypes?.condition ?? []).map((/** @type {any} */ c) => ({
+      slug: c.slug,
+      name: c.name,
+      value: c.system?.value?.value ?? null,
+    })),
+    in_reach: inReach,
+  };
+}
+
+/**
  * @param {Env} env
  * @returns {Adapter}
  */
@@ -210,6 +264,14 @@ export function createAdapter(env) {
           settings: env.settings(),
           turn_driver: turnDriver(modules),
         };
+      },
+      /** A GM creature's turn card (#193): what it has, as pf2e reports it. GM client only. */
+      async turn_card(params) {
+        const token = await env.resolve(String(params.token ?? ""));
+        if (token?.documentName !== "Token" || !token.actor) {
+          throw new Error(`No token ${String(params.token)} in this world.`);
+        }
+        return turnCard(env, token, params.include_hidden === true);
       },
       /**
        * An official entry's name in the GM's install (CAN-20), by its stable English key (the
