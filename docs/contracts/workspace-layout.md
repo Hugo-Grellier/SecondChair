@@ -34,7 +34,7 @@ my-campaign/
 ├── speakers.yaml      # the speaker table (CAP-02); written by the GM
 ├── sources/           # one YAML reference per Source: s-1a2b3c4d.yaml; written by `secondchair transcribe`
 ├── foundry.yaml       # the Foundry world this campaign is bound to; written by the bridge (foundry-bridge.md)
-└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/ and documents/: each prepared scene's and world document's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content); git-ignored, rebuildable
+└── .secondchair/      # derived state (index.sqlite, caches, the write lock, serve.json: the port `serve` last listened on, scenes/ and documents/: each prepared scene's and world document's last reconciliation report, cue.json: the active NPC's acting cue, purchased/: metadata indexes of purchased content, compendium/: the Foundry compendium metadata snapshot, one file per game system version); git-ignored, rebuildable
 ```
 
 Later contracts add decisions, each as Markdown + YAML (CAN-10). Nothing in `.secondchair/` is a source of truth: deleting it loses nothing.
@@ -660,6 +660,8 @@ and grants neither permission. Directory entries have individual permissions.
 ```sh
 secondchair sources add ~/references/setting.pdf
 secondchair sources add ~/references/books
+secondchair sources add ~/references/setting.pdf --edition remaster --version "2nd printing" \
+  --language en --product-id PZO0000 --title "Setting Guide"   # all optional; repeat to update
 secondchair sources list
 # Use the returned r-… id; permissions are GM gestures in an interactive terminal:
 secondchair sources permit r-<id> --index allow
@@ -671,6 +673,12 @@ secondchair sources search 'ancient harbor'         # safe for model context
 secondchair sources index r-<id> --replace-changed
 secondchair sources permit r-<id> --model deny
 ```
+
+Each source may carry GM-entered `title`, `edition` (`legacy`, `remaster`, `other`), `version`
+(printing or errata), `language` and `product_id`, kept with its registration in the same machine
+configuration. A PDF's own `Title` (from `pdfinfo`) fills `title` when none is stored. Registering
+again replaces the fields given and `--field ""` clears one. `sources list` shows them as
+`metadata`, and every citation `search` returns for a source carries them.
 
 The per-workspace local paths and permissions are stored in machine configuration,
 `$XDG_CONFIG_HOME/secondchair/library/<workspace-path-hash>.json`. Extracted text,

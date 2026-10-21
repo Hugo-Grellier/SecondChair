@@ -60,7 +60,14 @@ def source(ws, tmp_path, text="Un secret dans le port."):
 def test_registration_permissions_and_revocation_are_independent(ws, tmp_path):
     sid, path = source(ws, tmp_path)
     assert library.listing(ws) == [
-        {"id": sid, "filename": path.name, "status": "unindexed", "index": False, "model": False}
+        {
+            "id": sid,
+            "filename": path.name,
+            "status": "unindexed",
+            "index": False,
+            "model": False,
+            "metadata": {},
+        }
     ]
     with pytest.raises(workspace.WorkspaceError, match="indexing permission"):
         library.build_index(ws, sid)
@@ -153,7 +160,7 @@ def test_raw_registered_source_cannot_be_passed_as_job_input(ws, tmp_path):
             )
 
 
-def make_pdf(path, texts=("Harbor archaeology", "Absalom ancient treasure"), size=12):
+def make_pdf(path, texts=("Harbor archaeology", "Absalom ancient treasure"), size=12, title=None):
     """Two real text pages with an xref table, without a PDF-generation dependency."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -168,6 +175,8 @@ def make_pdf(path, texts=("Harbor archaeology", "Absalom ancient treasure"), siz
         stream = f"BT /F1 {size} Tf 50 700 Td ({text}) Tj ET".encode()
         objects.append(f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream")
     objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    if title:
+        objects.append(f"<< /Title ({title}) >>".encode())
     data = b"%PDF-1.4\n"
     offsets = []
     for number, obj in enumerate(objects, 1):
@@ -176,8 +185,66 @@ def make_pdf(path, texts=("Harbor archaeology", "Absalom ancient treasure"), siz
     xref = len(data)
     data += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
     data += b"".join(f"{offset:010} 00000 n \n".encode() for offset in offsets)
-    data += f"trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    info = " /Info 8 0 R" if title else ""
+    size = len(objects) + 1
+    data += f"trailer\n<< /Size {size} /Root 1 0 R{info} >>\nstartxref\n{xref}\n%%EOF\n".encode()
     path.write_bytes(data)
+
+
+def test_source_metadata_is_set_by_hand_updated_and_carried_in_citations(ws, tmp_path):
+    path = tmp_path / "reference.txt"
+    path.write_text("Un secret dans le port.")
+    [sid] = library.register(ws, path, {"edition": "remaster", "language": "fr", "title": "Livre"})
+    assert library.listing(ws)[0]["metadata"] == {
+        "title": "Livre",
+        "edition": "remaster",
+        "language": "fr",
+    }
+    # Re-registering updates what is given, keeps the rest and clears with an empty value.
+    library.register(ws, path, {"version": "2nd printing", "language": "", "product_id": "X1"})
+    assert library.listing(ws)[0]["metadata"] == {
+        "title": "Livre",
+        "edition": "remaster",
+        "version": "2nd printing",
+        "product_id": "X1",
+    }
+    library.permit(ws, sid, True, True, True)
+    library.build_index(ws, sid)
+    [hit] = library.search(ws, "secret port")["matches"]
+    assert hit["metadata"]["edition"] == "remaster" and hit["metadata"]["version"] == "2nd printing"
+    with pytest.raises(WorkspaceError, match="edition"):
+        library.register(ws, path, {"edition": "third"})
+    with pytest.raises(WorkspaceError, match="one file"):
+        library.register(ws, tmp_path, {"title": "x"})
+
+
+def test_cli_adds_a_source_with_metadata(ws, tmp_path, capsys):
+    path = tmp_path / "reference.txt"
+    path.write_text("x")
+    root = str(ws.root)
+    assert (
+        main(["sources", "add", str(path), "-w", root, "--edition", "legacy", "--product-id", "P9"])
+        == 0
+    )
+    capsys.readouterr()
+    assert main(["sources", "list", "-w", root]) == 0
+    assert '"product_id": "P9"' in capsys.readouterr().out
+
+
+@pytest.mark.skipif(not shutil.which("pdfinfo"), reason="Poppler not installed")
+def test_a_pdfs_own_title_is_the_default_and_the_gm_overrides_it(ws, tmp_path):
+    pdf = tmp_path / "setting.pdf"
+    make_pdf(pdf, title="Harbor Guide")
+    other = tmp_path / "plain.pdf"
+    make_pdf(other)
+    library.register(ws, pdf)
+    library.register(ws, other)
+    titles = {s["filename"]: s["metadata"] for s in library.listing(ws)}
+    assert titles == {"setting.pdf": {"title": "Harbor Guide"}, "plain.pdf": {}}
+    library.register(ws, pdf, {"title": "Mine"})
+    assert {s["filename"]: s["metadata"] for s in library.listing(ws)}["setting.pdf"] == {
+        "title": "Mine"
+    }
 
 
 @pytest.mark.skipif(not shutil.which("pdftotext"), reason="Poppler not installed")

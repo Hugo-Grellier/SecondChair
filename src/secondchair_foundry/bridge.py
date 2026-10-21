@@ -31,7 +31,7 @@ from secondchair.core.index import CanonError
 from secondchair.core.machine import foundry_token
 from secondchair.core.vtt import CeilingRefusal, Unanswered, VttError
 from secondchair.core.workspace import Workspace, WorkspaceError
-from secondchair_foundry import desk
+from secondchair_foundry import compendium, desk
 from secondchair_foundry.tools import (
     DOCUMENT_REPORTS_DIR,
     DOCUMENTS_DIR,
@@ -51,6 +51,7 @@ NO_GM = (
     "No GM client is connected: open the campaign's world as GM in Foundry, with the SecondChair "
     "module enabled."
 )
+SNAPSHOT_TIMEOUT = 120  # seconds the GM client has to list every pack's metadata
 RULES_CONTEXT = "rules_context"  # recorded at the start of each moment and when it changes
 CLOCK_TARGET = "time"  # what `set_date` acts on: the world clock, not a document
 REALISED = (  # what the bridge realises, in this order: (folder, reports, message type, key field)
@@ -190,6 +191,7 @@ class Bridge:
         self.loop = asyncio.get_running_loop()
         watch: asyncio.Task | None = None
         realising: asyncio.Task | None = None
+        snapshotting: asyncio.Task | None = None
         gestures: set[asyncio.Task] = set()  # kept referenced until done
         try:
             await socket.send_json(
@@ -202,6 +204,7 @@ class Bridge:
             )
             watch = asyncio.create_task(self._watch(socket))
             realising = asyncio.create_task(self._realise(socket))
+            snapshotting = asyncio.create_task(self._snapshot(socket))
             while True:
                 try:
                     message = json.loads(await socket.receive_text())
@@ -232,6 +235,8 @@ class Bridge:
             self.turn_driver = None  # the next client's rules context says again
             if realising is not None:
                 realising.cancel()
+            if snapshotting is not None:
+                snapshotting.cancel()
             for waiting in self.waiting.values():
                 if not waiting.done():
                     waiting.set_exception(VttError(NO_GM))
@@ -288,6 +293,24 @@ class Bridge:
         with contextlib.suppress(WebSocketDisconnect, RuntimeError):  # the GM client left
             await socket.send_json(result)
             await self._send_desk(socket)
+
+    async def _snapshot(self, socket: WebSocket) -> None:
+        """Ask the GM client for its compendium metadata, as a follow-up to the handshake so a
+        large payload holds nothing up, keep it, and report a system version change (#190)."""
+        read = {"type": "read", "id": uuid.uuid4().hex, "op": "compendium_snapshot", "params": {}}
+        try:
+            reply = await asyncio.wait_for(self._request(socket, read), SNAPSHOT_TIMEOUT)
+            if reply.get("ok") is not True:
+                raise ValueError(str(reply.get("error")))
+            change = await asyncio.to_thread(compendium.store, self.ws, reply.get("result"))
+        except (TimeoutError, VttError, ValueError, OSError) as e:
+            print(
+                f"SecondChair: compendium snapshot not kept: {e or type(e).__name__}",
+                file=sys.stderr,
+            )
+            return
+        if change:
+            print(f"SecondChair: {change}", file=sys.stderr)
 
     async def _record_rules_context(self, socket: WebSocket) -> None:
         """Read the rules context from the GM client and record it, unless this moment already

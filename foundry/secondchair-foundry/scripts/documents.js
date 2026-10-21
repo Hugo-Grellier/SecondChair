@@ -313,7 +313,31 @@ const INDEXED = [
   "system.level.value",
   "system.traits.rarity",
   "system.traits.value",
+  "system.slug",
+  "system.publication.title",
+  "system.publication.remaster",
 ];
+
+/**
+ * One compendium entry's metadata for the Core's offline snapshot (LIC-12): identifiers, level,
+ * rarity, traits and publication. No description and no text, whatever the index holds.
+ * @param {{collection: string, documentName: string}} pack @param {Data} entry
+ */
+export function snapshotEntry(pack, entry) {
+  const system = entry.system ?? {};
+  return {
+    uuid: entry.uuid ?? `Compendium.${pack.collection}.${pack.documentName}.${entry._id}`,
+    slug: system.slug ?? null,
+    name: entry.name,
+    type: entry.type ?? pack.documentName,
+    pack: pack.collection,
+    level: system.details?.level?.value ?? system.level?.value ?? null,
+    rarity: system.traits?.rarity ?? null,
+    traits: system.traits?.value ?? null,
+    publication: system.publication?.title ?? null,
+    remaster: system.publication?.remaster ?? null,
+  };
+}
 
 /** A path relative to Foundry's data, or why not: no scheme or URL (`https:`, `data:`, `//`),
  * no leading `/`, no `..` segment, so a read never reaches outside the GM's install.
@@ -365,11 +389,13 @@ const matches = (name, query) =>
  * @param {string} [env.origin]  the Foundry page's origin, which a read path stays on
  * @param {(path: string) => Promise<{width: number, height: number}>} env.imageSize
  *   an image's or video's size in pixels, loaded in the GM's client
+ * @param {() => {id: string, version: string, translation: string | null}} [env.system]
+ *   the game system, its version and the translation module's title, for the compendium snapshot
  * @param {(uuid: string) => Promise<{name?: string, documentName?: string} | null>} [env.fromUuid]
  *   the document a UUID names, null when there is none
  * @returns {Record<string, (params: Data) => Promise<unknown>>}
  */
-export function genericReads({ browse, packs, documents, imageSize, fromUuid, origin }) {
+export function genericReads({ browse, packs, documents, imageSize, fromUuid, origin, system }) {
   /** @param {string[]} list */
   const cut = (list) => list.slice(0, LIMIT);
   return {
@@ -409,6 +435,18 @@ export function genericReads({ browse, packs, documents, imageSize, fromUuid, or
         }
       }
       return found;
+    },
+    // Sent by the Core after the handshake, as a read: the payload is metadata only (LIC-12).
+    async compendium_snapshot() {
+      if (!system) throw new Error("This client cannot name its game system.");
+      /** @type {ReturnType<typeof snapshotEntry>[]} */
+      const entries = [];
+      for (const pack of packs()) {
+        for (const entry of await pack.getIndex({ fields: [...INDEXED] })) {
+          entries.push(snapshotEntry(pack, entry));
+        }
+      }
+      return { system: system(), entries };
     },
     async image_size({ path }) {
       if (typeof path !== "string" || !path) throw new Error("image_size needs a `path`.");

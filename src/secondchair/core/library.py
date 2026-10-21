@@ -33,6 +33,8 @@ DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 # Qwen3-Embedding is trained for truncated (Matryoshka) vectors: 256 dimensions keep a
 # whole PF2e library (~800k passages) near 2 s per linear query instead of 9 s at 1024.
 EMBEDDING_DIMENSIONS = 256
+METADATA = ("title", "edition", "version", "language", "product_id")
+EDITIONS = ("legacy", "remaster", "other")
 
 
 def _key(ws: Workspace) -> str:
@@ -78,8 +80,32 @@ def _references(ws: Workspace) -> dict:
     return refs
 
 
-def register(ws: Workspace, path: Path) -> list[str]:
-    """Register a file or snapshot of a directory's supported files; grant no permissions."""
+def _pdf_title(path: Path) -> str | None:
+    """The PDF's own Title, when Poppler is installed and the file has one."""
+    if path.suffix.lower() != ".pdf":
+        return None
+    try:
+        info = subprocess.run(
+            ["pdfinfo", str(path)], capture_output=True, text=True, timeout=30, check=True
+        ).stdout
+    except OSError, subprocess.SubprocessError:
+        return None
+    found = re.search(r"^Title:\s+(\S.*)$", info, re.MULTILINE)
+    return found.group(1).strip() if found else None
+
+
+def register(ws: Workspace, path: Path, metadata: dict[str, str | None] | None = None) -> list[str]:
+    """Register a file or snapshot of a directory's supported files; grant no permissions.
+    `metadata` (title, edition, version, language, product_id) is GM-entered and stored with the
+    registration: a given value replaces the stored one, "" clears it, None leaves it. A PDF's own
+    Title fills `title` when nothing is stored."""
+    metadata = {k: v for k, v in (metadata or {}).items() if v is not None}
+    if unknown := set(metadata) - set(METADATA):
+        raise WorkspaceError(f"Unknown source metadata: {', '.join(sorted(unknown))}.")
+    if metadata.get("edition") not in (None, "", *EDITIONS):
+        raise WorkspaceError(f"Source edition must be one of: {', '.join(EDITIONS)}.")
+    if path.expanduser().is_dir() and {"title", "product_id"} & metadata.keys():
+        raise WorkspaceError("A title or product id names one file: register it on its own.")
     path = path.expanduser().resolve()
     root = ws.root.resolve()
     if path.is_relative_to(root) or root.is_relative_to(path):
@@ -100,7 +126,17 @@ def register(ws: Workspace, path: Path) -> list[str]:
             source_id = "r-" + hashlib.sha256(str(resolved).encode()).hexdigest()[:24]
             name = str(file.relative_to(path)) if path.is_dir() else file.name
             refs.setdefault(source_id, name)
-            settings.setdefault(source_id, {"path": str(resolved), "index": False, "model": False})
+            entry = settings.setdefault(
+                source_id, {"path": str(resolved), "index": False, "model": False}
+            )
+            stored = entry.get("metadata", {})
+            if "title" not in stored and (title := _pdf_title(file)):
+                stored["title"] = title
+            stored.update(metadata)
+            if stored := {k: v for k, v in stored.items() if v}:
+                entry["metadata"] = stored
+            else:
+                entry.pop("metadata", None)
             ids.append(source_id)
         _write(_settings(ws), settings)
         (ws.root / REFERENCE_FILE).write_text(yaml.safe_dump(refs, allow_unicode=True))
@@ -306,6 +342,7 @@ def listing(ws: Workspace) -> list[dict[str, Any]]:
                 "status": status,
                 "index": bool(entry and entry["index"]),
                 "model": bool(entry and entry["model"]),
+                "metadata": (entry or {}).get("metadata", {}),
             }
         )
     return result
@@ -513,7 +550,12 @@ def search(
             done = _indexed(ws, source["id"])
             if done:  # "ready" was just read from it; a concurrent reset drops the source
                 origins.setdefault(done["sha256"], []).append(
-                    {"filename": source["filename"], "kind": "source", "source": source["id"]}
+                    {
+                        "filename": source["filename"],
+                        "kind": "source",
+                        "source": source["id"],
+                        "metadata": source["metadata"],
+                    }
                 )
     if not origins:
         return {"matches": [], "sources": sources, "method": "hybrid"}

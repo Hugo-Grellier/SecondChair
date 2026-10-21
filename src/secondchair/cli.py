@@ -590,7 +590,8 @@ def _sources_command(args: argparse.Namespace) -> None:
     ws = workspace.load(args.workspace)
     action = args.source_command
     if action == "add":
-        print("Registered: " + ", ".join(library.register(ws, args.path)))
+        metadata = {k: getattr(args, k) for k in library.METADATA}
+        print("Registered: " + ", ".join(library.register(ws, args.path, metadata)))
     elif action == "permit":
         if args.index is None and args.model is None:
             raise WorkspaceError("Give --index allow|deny or --model allow|deny.")
@@ -659,7 +660,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     source_cmd = commands.add_parser("sources", help="registered campaign reference library")
     source_sub = source_cmd.add_subparsers(dest="source_command", required=True)
-    source_sub.add_parser("add", parents=[in_workspace]).add_argument("path", type=Path)
+    add_cmd = source_sub.add_parser("add", parents=[in_workspace])
+    add_cmd.add_argument("path", type=Path)
+    add_cmd.add_argument("--title", help="the book's title (default: the PDF's own)")
+    add_cmd.add_argument("--edition", choices=library.EDITIONS)
+    add_cmd.add_argument("--version", help="printing or errata, as the GM names it")
+    add_cmd.add_argument("--language", help="the source's language, e.g. en or fr")
+    add_cmd.add_argument("--product-id", dest="product_id", help="the publisher's product id")
     source_sub.add_parser("list", parents=[in_workspace])
     permit_cmd = source_sub.add_parser("permit", parents=[in_workspace])
     permit_cmd.add_argument("id")

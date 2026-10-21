@@ -17,6 +17,7 @@ interface FoundryModule {
   id: string;
   active: boolean;
   version: string;
+  title?: string;
 }
 
 interface FoundryPack {

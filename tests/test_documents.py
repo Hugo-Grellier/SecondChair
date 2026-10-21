@@ -39,7 +39,10 @@ def next_of(socket: ClientConnection, *kinds: str) -> dict:
     while True:
         message = json.loads(socket.recv(timeout=10))
         jsonschema.validate(message, SCHEMA)
-        if message["type"] in kinds and message.get("op") != "rules_context":
+        if message["type"] in kinds and message.get("op") not in (
+            "rules_context",
+            "compendium_snapshot",
+        ):
             return message
 
 

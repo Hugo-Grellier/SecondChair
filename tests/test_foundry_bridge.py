@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Generator, Iterator
@@ -431,3 +432,115 @@ def test_a_client_leaving_unanswered_cancels_what_it_left(
 
     with pytest.raises(CancelledError):
         unanswered.value.later.result(timeout=5)
+
+
+def snapshot_payload(version: str, extra: tuple[dict, ...] = ()) -> dict:
+    entry = {
+        "uuid": "Compendium.sys.bestiary.Actor.a1",
+        "slug": "grik",
+        "name": "Grik",
+        "type": "npc",
+        "pack": "sys.bestiary",
+        "level": 2,
+        "rarity": "rare",
+        "traits": ["goblin"],
+        "publication": "Monster Core",
+        "remaster": True,
+        "description": "PRIVATE TEXT",  # a faulty module: the Core keeps metadata fields only
+    }
+    return {
+        "system": {"id": "sys", "version": version, "translation": "Traduction"},
+        "entries": [entry, *extra],
+    }
+
+
+def connect_with_snapshot(url: str, token: str, payload: dict, kept: Path) -> None:
+    """A GM client that answers the Core's compendium snapshot read and stays until the Core
+    has kept it."""
+    with connect(url, origin=Origin("https://foundry.example")) as socket:
+        socket.send(json.dumps(hello(token)))
+        assert json.loads(socket.recv(timeout=5))["type"] == "welcome"
+        for raw in socket:
+            message = json.loads(raw)
+            jsonschema.validate(message, SCHEMA)
+            if message["type"] == "read" and message["op"] == "compendium_snapshot":
+                socket.send(
+                    json.dumps(
+                        {"type": "reply", "id": message["id"], "ok": True, "result": payload}
+                    )
+                )
+                wait_for(kept)
+                break
+
+
+def search_offline(url: str, **arguments: Any) -> Any:
+    async def run() -> Any:
+        async with Client(url.replace("ws://", "http://").replace("/foundry", "/mcp")) as c:
+            return await c.call_tool("search_compendium", arguments)
+
+    return asyncio.run(run())
+
+
+def wait_for(path: Path) -> None:
+    for _ in range(50):
+        if path.exists():
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"{path} was not written")
+
+
+def test_the_handshake_snapshot_answers_compendium_lookups_with_no_client(
+    bridge: str, token: str, workspace: Path
+) -> None:
+    connect_with_snapshot(
+        bridge, token, snapshot_payload("7.1.0"), workspace / ".secondchair/compendium/7.1.0.json"
+    )
+    time.sleep(0.3)  # the client left; the Core notices
+
+    by_slug = search_offline(bridge, query="GRIK").structured_content["result"]
+    by_uuid = search_offline(bridge, query="Compendium.sys.bestiary.Actor.a1", type="Actor")
+    nothing = search_offline(bridge, query="ogre").structured_content["result"]
+
+    assert by_slug["offline"] is True
+    assert by_slug["snapshot"]["system"] == {
+        "id": "sys",
+        "version": "7.1.0",
+        "translation": "Traduction",
+    }
+    [entry] = by_slug["entries"]
+    assert (entry["slug"], entry["level"], entry["publication"], entry["remaster"]) == (
+        "grik",
+        2,
+        "Monster Core",
+        True,
+    )
+    assert by_uuid.structured_content["result"]["entries"][0]["uuid"] == entry["uuid"]
+    assert nothing["entries"] == []
+    assert "PRIVATE TEXT" not in (workspace / ".secondchair/compendium/7.1.0.json").read_text()
+
+
+def test_without_a_snapshot_the_compendium_search_still_fails_cleanly(bridge: str) -> None:
+    result = search_offline(bridge, query="grik")
+
+    assert result.is_error and "No GM client" in result.content[0].text
+
+
+def test_a_system_version_change_between_handshakes_is_reported(workspace: Path) -> None:
+    from secondchair_foundry import compendium
+
+    ws = load(workspace)
+    assert compendium.store(ws, snapshot_payload("7.1.0")) is None
+    assert compendium.store(ws, snapshot_payload("7.1.0")) is None  # same version: no change
+    time.sleep(0.01)
+    extra = (
+        {**snapshot_payload("7.2.0")["entries"][0], "uuid": "Compendium.sys.bestiary.Actor.a2"},
+    )
+
+    change = compendium.store(ws, snapshot_payload("7.2.0", extra))
+
+    assert (
+        change
+        == "System sys version changed from 7.1.0 to 7.2.0: 1 entries added, 0 removed, 0 changed."
+    )
+    with pytest.raises(ValueError, match="malformed"):
+        compendium.store(ws, {"system": {"version": "../x"}, "entries": []})
