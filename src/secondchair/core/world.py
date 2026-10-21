@@ -16,16 +16,19 @@ living world's level with the rule's rank; an `unless` and a narrative deadline 
 
 Workspace files (docs/contracts/workspace-layout.md): `living-world.yaml` (the cursor) and one
 YAML file per occurrence in `occurrences/`; every effect's files are action log entries carrying
-the occurrence key, which is what undo walks (LW-12).
+the occurrence key, which is what undo walks (LW-12). An occurrence and its cascade are planned
+in memory, then written through one roll-forward journal (ADR 0016).
 """
 
 import hashlib
 from collections import Counter
+from collections.abc import Sequence
 from typing import Any
 
 from secondchair.core import admission, calls, delegation, index
 from secondchair.core.calendar import Calendar, CalendarError
 from secondchair.core.delegation import (
+    LOG_DIR,
     OCCURRENCES_DIR,
     WORLD_FILE,
     DelegationError,
@@ -121,15 +124,27 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
     return {**state, "value": value}, refs
 
 
-def _current(ws: Workspace, at: str | None = None, head: bool = False) -> dict[str, dict[str, Any]]:
+def _current(
+    ws: Workspace, at: str | None = None, head: bool = False, overlay: Sequence[Change] = ()
+) -> dict[str, dict[str, Any]]:
     """Entity id -> its state facts valid on `at`, by default the cursor (#170): one per key, a
     list of agenda steps. A belief (`never_true`) never is. `head`: the head of each chain, the
     fact no event closes whatever its dates (#205), which an effect transforms (an occurrence
     may be applied after a later one, LW-17) and whose dates `_holds` checks; a `valid_to` the
-    GM scheduled does not close it. Before the first world-turn, the open ones."""
+    GM scheduled does not close it; `overlay`, planned changes not yet written, counts as canon
+    (ADR 0016). Before the first world-turn, the open ones."""
     if head:
-        closed = {c for e in index.search_events(ws) if e["status"] == "canon" for c in e["closes"]}
+        docs = [(c.path, *index.split_doc(c.after)) for c in overlay if c.after is not None]
+        planned = [d for path, d, _ in docs if path.startswith(f"{index.EVENTS_DIR}/")]
+        events = [e for e in index.search_events(ws) if e["status"] == "canon"] + planned
+        closed = {c for e in events for c in e["closes"]}
         facts = [f for f in index.search_facts(ws) if not f["never_true"] and f["id"] not in closed]
+        opened = {o: e["date"] for e in planned for o in e["opens"]}
+        facts += [
+            {**d, "statement": body, "valid_from": opened.get(d["id"]), "never_true": False}
+            for path, d, body in docs
+            if path.startswith(f"{index.FACTS_DIR}/") and d["id"] not in closed
+        ]
     elif at := at or cursor(ws):
         facts = index.search_facts(ws, at=at)
     else:
@@ -361,17 +376,19 @@ def world_turn(ws: Workspace, now: str, since: str | None = None) -> list[dict]:
         level = delegation.effective_level(ws, "living_world", moment, reversible=True)
         if level == "manual":
             raise DelegationError(f"living_world is at manual in {moment}: no world-turn.")
+        _check_recovered(ws)
         before = {r["id"] for r in occurrences(ws)}
         for occ in plan(ws, start, now):
             if occ.get("cause"):  # a threshold step: the tick it crosses at applies it
                 continue
-            record = _register(ws, occ)
-            if record["class"] == "rule":
+            if occ["class"] == "rule":
+                record = _new(occ)  # written by applying it, or by the call holding it
                 if level == "propose":
                     _ask(ws, record, "proposal", "accept, reject or reschedule it")
                 else:
                     _apply(ws, record)
             else:
+                record = _register(ws, occ)
                 narrative = record["class"] == "narrative"
                 record["job"] = jobs.queue(
                     ws,
@@ -396,18 +413,23 @@ def world_turn(ws: Workspace, now: str, since: str | None = None) -> list[dict]:
         return recorded
 
 
+def _new(occ: dict) -> dict:
+    """A queued occurrence record, not yet written."""
+    base = {"status": "queued", "entries": [], "call": None, "job": None, "cites": []}
+    base |= {"cause": None, "rescheduled_from": None, "rescheduled_to": None}
+    return {**base, **occ, "rescheduled_date": None}
+
+
 def _register(ws: Workspace, occ: dict) -> dict:
     """Record an occurrence under its key, which is used once (LW-13)."""
     if any(r["key"] == occ["key"] for r in occurrences(ws)):
         raise DelegationError(f"Occurrence key {occ['key']} is already used.")
-    base = {"status": "queued", "entries": [], "call": None, "job": None, "cites": []}
-    base |= {"cause": None, "rescheduled_from": None, "rescheduled_to": None}
-    return _append(ws, {**base, **occ, "rescheduled_date": None}, OCCURRENCES_DIR)
+    return _append(ws, _new(occ), OCCURRENCES_DIR)
 
 
 def _ask(ws: Workspace, record: dict, kind: str, what: str) -> None:
     """A call on the GM about an occurrence, which stays queued: left unanswered, nothing
-    happens (LW-09, LW-10)."""
+    happens (LW-09, LW-10). A record not yet written is, with it."""
     call = calls.open_call(
         ws,
         kind=kind,
@@ -418,7 +440,12 @@ def _ask(ws: Workspace, record: dict, kind: str, what: str) -> None:
         message=f"Occurrence {record['key']} ({record['date']}): {what}.",
     )
     record["call"] = call["id"]
-    _save(ws, record, OCCURRENCES_DIR)
+    if "id" in record:
+        _save(ws, record, OCCURRENCES_DIR)
+    else:
+        written = _append(ws, record, OCCURRENCES_DIR)
+        record.clear()
+        record.update(written)
 
 
 def _id(prefix: str, key: str, role: str) -> str:
@@ -470,10 +497,12 @@ def _evolution(
     return changes
 
 
-def _effect(ws: Workspace, record: dict, rank: str, origin: dict) -> list[Change]:
-    """The files one occurrence writes; `_Blocked` when it no longer applies or contradicts
-    played canon (LW-09)."""
-    s = _current(ws, head=True).get(record["entity"], {AGENDA: []})
+def _effect(
+    ws: Workspace, record: dict, rank: str, origin: dict, overlay: Sequence[Change] = ()
+) -> list[Change]:
+    """The files one occurrence writes over canon and the `overlay` of changes planned before
+    it; `_Blocked` when it no longer applies or contradicts played canon (LW-09)."""
+    s = _current(ws, head=True, overlay=overlay).get(record["entity"], {AGENDA: []})
     key, date, entity = record["key"], record["date"], record["entity"]
     if FRONT in s and not _holds(ws, s[FRONT], date):
         raise _Blocked(f"{entity} is not a front on {date}")
@@ -534,6 +563,17 @@ def _rule_rank(ws: Workspace, record: dict) -> tuple[str, dict]:
     return rule["rank"], {"kind": "rule", "fact": record["rule"], "key": record["key"]}
 
 
+_Plan = list[tuple[dict, list[Change] | None, str | None]]  # each record, its changes or why not
+
+
+def _changes(
+    ws: Workspace, record: dict, rank: tuple[str, dict] | None, overlay: Sequence[Change]
+) -> list[Change]:
+    if rank is None and record["cites"]:  # an unless settled by a job (LW-10)
+        rank = ("agent_proposal", {"kind": "job", "job": str(record["job"])})
+    return _effect(ws, record, *(rank or _rule_rank(ws, record)), overlay)
+
+
 def _apply(
     ws: Workspace,
     record: dict,
@@ -541,41 +581,50 @@ def _apply(
     approve: tuple[str, bool] | None = None,
     job: int | None = None,
 ) -> bool:
-    """Apply one occurrence through the action log, every file tagged with its key, then cascade
-    a tick into the threshold steps it crosses (T5). `approve` (channel, authenticated) approves
-    at once what the level held for approval: the GM accepted it. False when it stays queued
-    behind a call on the GM."""
-    if rank is None and record["cites"]:  # an unless settled by a job (LW-10)
-        rank = ("agent_proposal", {"kind": "job", "job": str(record["job"])})
-    rank_, origin = rank or _rule_rank(ws, record)
+    """Apply one occurrence, cascading a tick into the threshold steps it crosses (T5), as one
+    plan (ADR 0016): computed in memory, its level checked once, then written through one
+    roll-forward journal, every file an action log entry tagged with its key. `approve`
+    (channel, authenticated) approves at once what the level held for approval: the GM
+    accepted it. False when it stays queued behind a call on the GM; the record is then
+    written, and nothing else."""
+    _check_recovered(ws)
     try:
-        changes = _effect(ws, record, rank_, origin)
+        changes = _changes(ws, record, rank, [])
     except _Blocked as e:
         _ask(ws, record, "exception", f"{e}; reschedule, reject or retcon")
         return False
-    for change in changes:
-        result = delegation.act(
-            ws, _effect_tool(), AGENT, lambda c=change: c, job=job, occurrence=record["key"]
-        )
-        status = result["status"]
-        if status == "pending" and approve is not None:
-            status = delegation.approve(ws, result["entry"], *approve)["status"]
-        if status != "applied":  # the caller checked the level; only an override lowers it
-            raise DelegationError(f"Entry {result['entry']} for {record['key']} is {status}.")
-        record["entries"].append(result["entry"])
-    record["status"] = "applied"
-    _save(ws, record, OCCURRENCES_DIR)
+    planned: _Plan = [(record, changes, None)]
     if record["kind"] == "tick":
-        _cascade(ws, record, approve, job)
+        planned += _cascade(ws, record, changes)
+    applied = [(c, r["key"]) for r, changes, _ in planned for c in changes or []]
+    entries = delegation.plan_actions(ws, _effect_tool(), AGENT, applied, job, approve)
+    if entries is None:  # held at propose whole, nothing journaled
+        _ask(ws, record, "proposal", "accept, reject or reschedule it")
+        return False
+    _journal(ws, record, planned, entries)
+    for step, _, why in planned[1:]:
+        if why is not None:
+            _ask(ws, step, "exception", f"{why}; reschedule, reject or retcon")
     return True
 
 
-def _cascade(ws: Workspace, tick: dict, approve: tuple[str, bool] | None, job: int | None) -> None:
+def _check_recovered(ws: Workspace) -> None:
+    """Refuse while recovery keeps a journal stopped: its canon is half-written (ADR 0016)."""
+    if stopped := [j["key"] for _, j in delegation._journals(ws)]:
+        raise DelegationError(
+            f"Occurrence {stopped[0]} was interrupted and recovery stopped on a changed file: "
+            "answer its exception call, then run `secondchair recover`."
+        )
+
+
+def _cascade(ws: Workspace, tick: dict, overlay: Sequence[Change]) -> _Plan:
     """The threshold steps a tick crosses, dated at the tick, each once (T5): new ones, and
-    those an undo returned to the queue with it."""
-    s = _current(ws, head=True).get(tick["entity"], {AGENDA: []})
+    those an undo returned to the queue with it; each with its changes over the tick's and the
+    earlier steps', or why it is blocked. Writes nothing."""
+    s = _current(ws, head=True, overlay=overlay).get(tick["entity"], {AGENDA: []})
     clock = s[CLOCK]["state"]["value"] if CLOCK in s else 0
     known = {r["key"]: r for r in occurrences(ws)}
+    overlay, steps = list(overlay), []
     for a in s[AGENDA]:
         step = a["state"]["value"]
         key = f"{tick['entity']}/{step['id']}"
@@ -583,10 +632,79 @@ def _cascade(ws: Workspace, tick: dict, approve: tuple[str, bool] | None, job: i
             continue
         if key not in known:
             occ = {"key": key, "kind": "step", "class": "rule", "entity": tick["entity"]}
-            occ |= {"date": tick["date"], "rule": a["id"], "cause": tick["key"]}
-            _apply(ws, _register(ws, occ), approve=approve, job=job)
+            record = _new(occ | {"date": tick["date"], "rule": a["id"], "cause": tick["key"]})
         elif known[key]["status"] == "queued" and known[key]["cause"] == tick["key"]:
-            _apply(ws, known[key], approve=approve, job=job)
+            record = known[key]
+        else:
+            continue
+        try:
+            changes = _changes(ws, record, None, overlay)
+        except _Blocked as e:
+            steps.append((record, None, str(e)))
+            continue
+        overlay += changes
+        steps.append((record, changes, None))
+    return steps
+
+
+def _journal(
+    ws: Workspace,
+    record: dict,
+    planned: _Plan,
+    entries: list[dict],
+) -> None:
+    """Write the plan through its journal (ADR 0016): each target then its log entries, then the
+    step records, then `record`'s, the commit marker. Updates the records in memory."""
+    groups: list[list[dict]] = []  # each action entry, with its approval if any
+    for e in entries:
+        if e["kind"] == "action":
+            groups.append([e])
+        else:
+            groups[-1].append(e)
+    writes, todo = [], iter(groups)
+    for r, changes, _ in planned:
+        if changes is None:
+            continue
+        r["entries"] = []
+        for change in changes:
+            group = next(todo)
+            writes.append(
+                {"path": change.path, "before": group[0]["before"], "after": change.after}
+            )
+            writes += [
+                {
+                    "path": f"{LOG_DIR}/{e['id']:06d}.yaml",
+                    "before": None,
+                    "after": delegation.dump(e),
+                }
+                for e in group
+            ]
+            r["entries"].append(group[0]["id"])
+        r["status"] = "applied"
+    records, next_id = [], delegation._next_id(ws, OCCURRENCES_DIR)
+    for r, changes, _ in planned:
+        if changes is None and "id" in r:
+            continue  # blocked and queued already: its call is all it gets
+        before = None
+        if "id" in r:
+            before = (ws.root / OCCURRENCES_DIR / f"{r['id']:06d}.yaml").read_text()
+        else:
+            written = {"id": next_id, "at": entries[0]["at"], **r}
+            r.clear()
+            r.update(written)
+            next_id += 1
+        path = f"{OCCURRENCES_DIR}/{r['id']:06d}.yaml"
+        records.append({"path": path, "before": before, "after": delegation.dump(r)})
+    entity = record["entity"]
+    read = {f["id"] for f in index.search_facts(ws, entity=entity, include_retconned=True)}
+    read |= {r["rule"] for r, _, _ in planned} | {c for r, _, _ in planned for c in r["cites"]}
+    events = [e["id"] for e in index.search_events(ws) if read & {*e["opens"], *e["closes"]}]
+    reads = [f"{index.ENTITIES_DIR}/{entity}.md", *(f"{index.FACTS_DIR}/{f}.md" for f in read)]
+    reads += [f"{index.EVENTS_DIR}/{e}.md" for e in events]
+    journal = delegation.new_journal(
+        ws, record["key"], entity, reads, writes + records[1:] + records[:1]
+    )
+    delegation.apply_journal(ws, journal)
 
 
 # What agents and the GM do with a queued occurrence

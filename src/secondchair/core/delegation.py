@@ -5,15 +5,19 @@ Workspace files (docs/contracts/workspace-layout.md): `delegation.yaml`, `moment
 YAML file per action log entry in `action-log/` (docs/contracts/action-log-entry.schema.json).
 """
 
+import asyncio
 import fcntl
 import functools
+import hashlib
 import inspect
+import os
 import secrets
 import threading
 from collections.abc import Callable, Generator
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -54,6 +58,7 @@ OBSERVATIONS_DIR = "observations"
 OCCURRENCES_DIR = "occurrences"  # the world-turn's occurrences (world.py)
 WORLD_FILE = "living-world.yaml"  # the world-turn's cursor
 FRICTIONS_DIR = "frictions"
+JOURNAL_DIR = f"{STATE_DIR}/journal"  # a world-turn occurrence's roll-forward journal (ADR 0016)
 
 # The base profiles (DEL-06), in RESPONSIBILITIES order; every cell's deadline mode is auto and
 # its irreversible hold set (DEL-09a).
@@ -546,6 +551,69 @@ def act(
             return {"entry": logged["id"], "status": logged["status"]}
     taken = _take(ws, taking, table_moment, blocking)
     return {"entry": taken["id"], "status": taken["status"]}
+
+
+def plan_actions(
+    ws: Workspace,
+    tool: Tool,
+    agent: str,
+    changes: list[tuple[Change, str]],
+    job: int | None = None,
+    approve: tuple[str, bool] | None = None,
+) -> list[dict] | None:
+    """The log entries `act` would write for `changes`, each with its occurrence key, taken as
+    one plan at one effective level checked once (ADR 0016), with their ids fixed in advance;
+    nothing is written. None when the level holds the plan at propose; `approve` (channel,
+    authenticated) is the GM accepting it at once, each entry then followed by its approval.
+    Living-world changes only: no VTT action, no disclosure. Callers hold the lock."""
+    from secondchair.core import jobs
+
+    moment, seq = current_moment(ws)
+    table_moment, runner_configuration, governing = moment, None, [tool.responsibility]
+    if job is not None:
+        record = jobs.read(ws, job)
+        if record["status"] != "started":
+            raise DelegationError(f"Job {job} is {record['status']}, not started.")
+        table_moment = record["moment"]
+        runner_configuration = record["attempts"][-1]["runner_configuration"]
+        if record["responsibility"] in JOB_GOVERNED:
+            governing.append(record["responsibility"])
+    level, which = min(
+        ((effective_level(ws, r, table_moment, tool.reversible), r) for r in governing),
+        key=lambda found: LEVELS.index(found[0]),
+    )
+    if level == "manual":
+        raise DelegationError(
+            f"{which} is at manual in {table_moment}: agents take no action, "
+            "they only answer when asked."
+        )
+    if level == "propose" and approve is None:
+        return None
+    at, next_id, entries = datetime.now(UTC).isoformat(), _next_id(ws, LOG_DIR), []
+    for change, occurrence in changes:
+        if governing[-1] == "living_world" and discloses(change):
+            raise DelegationError(_NEVER_DISCLOSES)
+        path = _target(ws, change.path)
+        entry: dict[str, Any] = {"id": next_id, "at": at, "kind": "action", "moment": moment}
+        entry["moment_seq"] = seq
+        entry |= {"tool": tool.name, "responsibility": governing[-1], "effective_level": level}
+        entry |= {"override_lowered": False, "entity": None, "reversible": tool.reversible}
+        entry |= {"agent": agent, "source": change.source, "job": job}
+        entry |= {"runner_configuration": runner_configuration, "target": change.path}
+        entry |= {"before": path.read_text() if path.exists() else None, "after": change.after}
+        entry |= {"status": "applied", "approval": None, "occurrence": occurrence}
+        entries.append(entry)
+        next_id += 1
+        if level == "propose" and approve is not None:
+            channel, authenticated = approve
+            approval = {"channel": channel, "authenticated": authenticated, "quote": None}
+            entry["approval"] = approval | {"interaction": next_id}
+            interaction = {"id": next_id, "at": at, "kind": "gm_interaction", "moment": moment}
+            interaction |= {"moment_seq": seq, "interaction": "approve", "entry": entry["id"]}
+            interaction |= {"channel": channel, "authenticated": authenticated}
+            entries.append(interaction | {"quote": None, "reason": None})
+            next_id += 1
+    return entries
 
 
 # GM interactions (DEL-27): each is its own log entry.
@@ -1115,7 +1183,8 @@ def last_writes(entries: list[dict]) -> dict[str, tuple[dict, str | None]]:
             continue  # a VTT action writes no workspace file
         if e.get("kind") == "action" and e.get("status") in ("applied", "undone"):
             when = e["approval"]["interaction"] if e.get("approval") else e["id"]
-            writes.append((when, e.get("target"), e, e.get("after")))
+            recovered = e.get("reason") == "recovery"  # rolled back: never left after (ADR 0016)
+            writes.append((when, e.get("target"), e, e.get("before" if recovered else "after")))
         elif e.get("kind") == "hand_edit" or e.get("interaction") == "confirm":
             writes.append((e["id"], e.get("target"), e, e.get("after")))
         elif e.get("interaction") == "undo" and "op" not in by_id.get(e.get("entry"), {"op": 0}):
@@ -1137,10 +1206,12 @@ def log_hand_edits(ws: Workspace) -> list[dict]:
             for p in sorted((ws.root / CANON_DIR).rglob("*.md"))
             if p.is_file()
         }
+        # A journal stopped by recovery owns its targets until `secondchair recover` (ADR 0016).
+        journaled = {w["path"] for _, j in _journals(ws) for w in j["writes"]}
         changed = [
             target
             for target in sorted(current.keys() | {t for t, c in known.items() if c is not None})
-            if current.get(target) != known.get(target)
+            if current.get(target) != known.get(target) and target not in journaled
         ]
         if not changed:
             return []
@@ -1372,15 +1443,30 @@ def _append(ws: Workspace, entry: dict, directory: str = LOG_DIR) -> dict:
     """Give the record the next id in `directory` (the action log by default) and its real
     time, and write it. Callers hold the lock."""
     (ws.root / directory).mkdir(exist_ok=True)
-    ids = [int(p.stem) for p in (ws.root / directory).glob("*.yaml") if p.stem.isdigit()]
-    entry = {"id": max(ids, default=0) + 1, "at": datetime.now(UTC).isoformat(), **entry}
+    entry = {"id": _next_id(ws, directory), "at": datetime.now(UTC).isoformat(), **entry}
     _save(ws, entry, directory)
     return entry
 
 
+def _next_id(ws: Workspace, directory: str) -> int:
+    """The next record id in `directory`, past the ids a pending journal holds for it."""
+    ids = [int(p.stem) for p in (ws.root / directory).glob("*.yaml") if p.stem.isdigit()]
+    ids += [
+        int(Path(w["path"]).stem)
+        for _, j in _journals(ws)
+        for w in j["writes"]
+        if Path(w["path"]).parent.as_posix() == directory
+    ]
+    return max(ids, default=0) + 1
+
+
+def dump(entry: dict) -> str:
+    """A log entry or record as its file holds it."""
+    return yaml.safe_dump(entry, sort_keys=False, allow_unicode=True)
+
+
 def _save(ws: Workspace, entry: dict, directory: str = LOG_DIR) -> None:
-    path = ws.root / directory / f"{entry['id']:06d}.yaml"
-    _write(path, yaml.safe_dump(entry, sort_keys=False, allow_unicode=True))
+    _write(ws.root / directory / f"{entry['id']:06d}.yaml", dump(entry))
 
 
 def _entry(ws: Workspace, entry_id: int, kind: str) -> dict:
@@ -1422,21 +1508,226 @@ def locked(ws: Workspace | Path) -> Generator[None]:
     if root in held:
         yield
         return
+    try:
+        on_loop = asyncio.get_running_loop() is not None
+    except RuntimeError:
+        on_loop = False
+    if on_loop and isinstance(ws, Workspace) and any((base / JOURNAL_DIR).glob("*.yaml")):
+        # Recovery never runs on an event loop (the bridge's, ADR 0016): a worker thread
+        # takes the lock and recovers first, while the loop waits as it would on the lock.
+        with ThreadPoolExecutor(1) as pool:
+            pool.submit(_recovered, ws).result()
     lock = base / STATE_DIR / "delegation.lock"
     lock.parent.mkdir(exist_ok=True)
     with lock.open("w") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         held.add(root)
         try:
+            if isinstance(ws, Workspace) and not on_loop:
+                recover(ws)  # before anything else under the lock, log_hand_edits included
             yield
         finally:
             held.discard(root)
 
 
+def _recovered(ws: Workspace) -> None:
+    with locked(ws):
+        pass
+
+
 def _write(path: Path, text: str) -> None:
+    """Write `path` whole or not at all, durably: a temporary file synced, renamed over it, and
+    the directory synced (ADR 0016)."""
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text)
+    with tmp.open("w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
     tmp.replace(path)
+    _sync_dir(path.parent)
+
+
+def _sync_dir(directory: Path) -> None:
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+# The roll-forward journal of a world-turn occurrence (ADR 0016)
+
+# A fault-injection hook for tests, called at each step of a journal: "plan" before it is
+# written, "journal" once it is, each path it writes, "commit" before it is deleted.
+_fault: Callable[[str], None] = lambda step: None  # noqa: E731
+
+
+def journal_path(ws: Workspace, key: str) -> Path:
+    return ws.root / JOURNAL_DIR / f"{hashlib.sha256(key.encode()).hexdigest()[:16]}.yaml"
+
+
+def _journals(ws: Workspace) -> list[tuple[Path, dict]]:
+    return [(p, _read_yaml(p)) for p in sorted((ws.root / JOURNAL_DIR).glob("*.yaml"))]
+
+
+def _journaled(ws: Workspace, relative: str) -> Path:
+    """A journal's write target: a canon file, a log entry or an occurrence record, nothing
+    else, whatever the journal file says."""
+    path = (ws.root / relative).resolve()
+    if (
+        Path(relative).is_absolute()
+        or not path.is_relative_to(ws.root.resolve())
+        or path.relative_to(ws.root.resolve()).parts[0] not in (CANON_DIR, LOG_DIR, OCCURRENCES_DIR)
+    ):
+        raise WorkspaceError(f"A journal writes canon, the action log and occurrences: {relative}")
+    return path
+
+
+def _read(path: Path) -> str | None:
+    return path.read_text() if path.exists() else None
+
+
+def _put(path: Path, content: str | None) -> None:
+    if content is None:
+        path.unlink(missing_ok=True)
+        _sync_dir(path.parent)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write(path, content)
+
+
+def inputs_digest(ws: Workspace, journal: dict) -> str:
+    """What the plan read but does not write (ADR 0016): workspace.yaml, delegation.yaml, the
+    canon files it read, its entity's occurrence records that are not its targets, its targets'
+    `before` contents and the action log before its first entry."""
+    digest = hashlib.sha256()
+
+    def feed(relative: str, content: bytes | None) -> None:
+        digest.update(relative.encode() + b"\0")
+        digest.update(b"absent" if content is None else hashlib.sha256(content).digest())
+
+    for relative in ("workspace.yaml", TABLE_FILE, *journal["reads"]):
+        path = ws.root / relative
+        feed(relative, path.read_bytes() if path.is_file() else None)
+    targets = {w["path"] for w in journal["writes"]}
+    for p in sorted((ws.root / OCCURRENCES_DIR).glob("*.yaml")):
+        relative = p.relative_to(ws.root).as_posix()
+        if relative not in targets and _read_yaml(p).get("entity") == journal["entity"]:
+            feed(relative, p.read_bytes())
+    for w in journal["writes"]:
+        feed(w["path"], None if w["before"] is None else w["before"].encode())
+    first = min(
+        (int(Path(w["path"]).stem) for w in journal["writes"] if w["path"].startswith(LOG_DIR)),
+        default=None,
+    )
+    for p in sorted((ws.root / LOG_DIR).glob("*.yaml")):
+        if p.stem.isdigit() and (first is None or int(p.stem) < first):
+            feed(p.relative_to(ws.root).as_posix(), p.read_bytes())
+    return digest.hexdigest()
+
+
+def new_journal(ws: Workspace, key: str, entity: str, reads: list[str], writes: list[dict]) -> dict:
+    """A journal for one occurrence and its cascade: `writes` in order, each {path, before,
+    after}, the occurrence's own record last, its commit marker. Callers hold the lock."""
+    journal: dict[str, Any] = {"key": key, "version": version("secondchair"), "entity": entity}
+    journal |= {"reads": sorted(set(reads)), "writes": writes, "stopped": None}
+    return {**journal, "inputs_digest": inputs_digest(ws, journal)}
+
+
+def apply_journal(ws: Workspace, journal: dict) -> None:
+    """Write the journal durably, then each of its writes in order, then delete it: once its
+    last write, the commit marker, has landed (ADR 0016). Callers hold the lock."""
+    _fault("plan")
+    directory = ws.root / JOURNAL_DIR
+    if not directory.is_dir():
+        directory.mkdir(parents=True)
+        _sync_dir(directory.parent)
+    path = journal_path(ws, journal["key"])
+    _write(path, dump(journal))
+    _fault("journal")
+    _roll_forward(ws, journal)
+    _fault("commit")
+    _put(path, None)
+
+
+def _roll_forward(ws: Workspace, journal: dict) -> None:
+    """Each write in order, skipped once it holds its `after`: idempotent."""
+    for w in journal["writes"]:
+        target = _journaled(ws, w["path"])
+        if _read(target) != w["after"]:
+            _put(target, w["after"])
+            _fault(w["path"])
+
+
+def recover(ws: Workspace, force: bool = False) -> list[str]:
+    """Finish or roll back every journal left by an interrupted world-turn, one message each
+    (ADR 0016). Its inputs unchanged, it rolls forward; changed, it rolls back and calls on the
+    GM, whose next world-turn plans the occurrence afresh. A target holding neither its before
+    nor its after stops it: the journal is kept behind an exception call, and retried only
+    `force`d (`secondchair recover`). Reads no index. Callers hold the lock."""
+    from secondchair.core import calls
+
+    done = []
+
+    def call(message: str) -> int:
+        moment = current_moment(ws)[0]
+        return calls.open_call(
+            ws,
+            kind="exception",
+            responsibility="living_world",
+            table_moment=moment,
+            blocking=False,
+            message=message,
+        )["id"]
+
+    for path, journal in _journals(ws):
+        key = journal["key"]
+        if journal.get("stopped") is not None and not force:
+            continue
+        torn = []
+        for w in journal["writes"]:
+            target = _journaled(ws, w["path"])
+            target.with_name(target.name + ".tmp").unlink(missing_ok=True)  # a torn write
+            if (current := _read(target)) not in (w["before"], w["after"]):
+                torn.append((w, current))
+        if torn:
+            w, current = torn[0]
+            journal["stopped"] = call(
+                f"Occurrence {key} was interrupted and {w['path']} changed since: it holds "
+                f"neither its content before nor after. Make it one of them, then run "
+                f"`secondchair recover`.\nBefore:\n{w['before']}\nAfter:\n{w['after']}\n"
+                f"Now:\n{current}"
+            )
+            _write(path, dump(journal))
+            done.append(f"{key}: stopped, {w['path']} changed (call {journal['stopped']}).")
+            continue
+        if inputs_digest(ws, journal) == journal["inputs_digest"]:
+            _roll_forward(ws, journal)
+            planned, now = journal["version"], version("secondchair")
+            same = planned == now
+            done.append(f"{key}: completed" + ("." if same else f", planned by {planned} ({now})."))
+        else:
+            for w in reversed(journal["writes"]):
+                target = _journaled(ws, w["path"])
+                if _read(target) != w["after"]:
+                    continue
+                if w["path"].startswith(f"{LOG_DIR}/"):
+                    entry = yaml.safe_load(w["after"])
+                    if entry.get("kind") == "action":  # its target is back to before
+                        _put(target, dump({**entry, "status": "undone", "reason": "recovery"}))
+                else:
+                    _put(target, w["before"])
+            message = (
+                f"Occurrence {key} was interrupted and what it read changed since: it was "
+                "rolled back, and the next world-turn plans it afresh."
+            )
+            called = call(message)
+            record = _journaled(ws, journal["writes"][-1]["path"])
+            if record.exists():  # queued again, behind the call
+                _save(ws, {**_read_yaml(record), "call": called}, OCCURRENCES_DIR)
+            done.append(f"{key}: rolled back (call {called}).")
+        _put(path, None)
+    return done
 
 
 def _read_yaml(path: Path) -> dict:
