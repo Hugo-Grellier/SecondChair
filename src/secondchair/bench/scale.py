@@ -1,10 +1,10 @@
 """The scaling bench (#195, no model): what the Core costs at each synthetic campaign size.
 
 Per size S, M, L (`synth.SIZES`): the workspace's files and bytes (the derived `.secondchair/`
-state excluded), a full index rebuild, an unchanged `connect` (the fingerprint of every canon
-and action-log file, then a SQLite open: the cost of every query today, #172), `search_facts`
-and `what_knows` at p50 and p95 over a fixed set of probes, and `world.state`. Wall time on the
-machine it runs on: compare runs of one machine, not machines.
+state excluded), a full index rebuild, an unchanged `connect` (a stat of every canon and
+action-log file against the stat cache, then a SQLite open: the cost of every query, #172),
+`search_facts` and `what_knows` at p50 and p95 over a fixed set of probes, and `world.state`.
+Wall time on the machine it runs on: compare runs of one machine, not machines.
 """
 
 import tempfile
