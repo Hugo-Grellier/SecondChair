@@ -101,12 +101,15 @@ def record_facts(ws: Workspace, job: int) -> None:
         done = delegation.act(ws, found, "fake", lambda: found.fn(**args), job)
         return Path(delegation.read_entry(ws, done["entry"])["target"]).stem
 
+    def cite(page: str) -> dict[str, str]:  # ADR 0015: a job input, not an indexed Source
+        return {"kind": "job", "job": str(job), "source": bible, "page": page}
+
     def record(statement: str, page: str, **fields: object) -> str:
-        origin = {"kind": "source", "source": bible, "page": page}
+        origin = cite(page)
         return act("record_fact", statement=statement, origin=origin, **{"entities": [], **fields})
 
     def learn(knower: str, fact: str, page: str, mode: str = "knows") -> None:
-        origin = {"kind": "source", "source": bible, "page": page}
+        origin = cite(page)
         act("record_knowledge", knower=ids[knower], fact=fact, mode=mode, date=START, origin=origin)
 
     for npc, faction, page in MEMBERS:

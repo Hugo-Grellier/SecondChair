@@ -224,7 +224,7 @@ def test_lose_refuses_found_lost_or_unknown_clues(lose: str, needle: str) -> Non
 
 # Through the Core's MCP tools, as an agent reaches them.
 
-BIBLE = {"kind": "source", "source": "bible.md", "page": "3"}
+BIBLE = {"kind": "job", "job": "rebuild", "source": "bible.md", "page": "3"}  # ADR 0015
 
 
 @pytest.fixture

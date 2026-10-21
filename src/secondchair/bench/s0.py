@@ -3,7 +3,8 @@
 An agent answers each probe in the GM view with a structured answer, using the workspace's own
 entity ids; this module scores the answers against the frozen gold set with no LLM judge. Entity
 ids resolve to the gold labels through exact names (sample-campaign/README.md, step 2), and
-bible facts through their cited paragraph (a `source` origin whose page is the gold label).
+bible facts through their cited paragraph (an origin carrying the bible as `source` and the gold
+label as `page`).
 
 Living-world probes (BEN-07) are read from the workspace after a world-turn case: clocks, agenda
 steps and who knows them, situation stages, what stays queued and why.
@@ -210,7 +211,7 @@ def score_world_turn(ws: Workspace, gold: dict, case: str) -> dict:
     labels = _labels(ws, gold) | {
         f["id"]: f["origin"]["page"]
         for f in index.search_facts(ws, include_retconned=True)
-        if f["origin"].get("kind") == "source"
+        if "page" in f["origin"]
     }
     seen = world_observations(ws, labels)
     return {
@@ -304,7 +305,7 @@ def leaks(ws: Workspace, gold: dict) -> list[str]:
     by_label = {
         f["id"]: f["origin"]["page"]
         for f in index.search_facts(ws)
-        if f["origin"].get("kind") == "source" and f["origin"]["source"].endswith("bible.md")
+        if str(f["origin"].get("source", "")).endswith("bible.md") and "page" in f["origin"]
     }
     found += [
         f"{by_label[f]} known by party at start ({f})"

@@ -11,6 +11,7 @@ import yaml
 
 from secondchair import review, runner, transcribe
 from secondchair.core import (
+    admission,
     calls,
     campaign_skill,
     canon,
@@ -399,6 +400,16 @@ def check(ws: workspace.Workspace) -> int:
                 f"`secondchair promote {entry['id']}` makes it a GM decision."
             )
     return 1 if errors else 0
+
+
+def doctor(ws: workspace.Workspace) -> int:
+    """Re-resolve the evidence of played and cited canon (ADR 0015); 1 if some no longer
+    resolves. Ranks stand: the GM corrects the record or promotes it."""
+    found = admission.unresolved(ws)
+    for problem in found:
+        print(f"secondchair: {problem}", file=sys.stderr)
+    print(f"{len(found)} played or cited records whose evidence no longer resolves.")
+    return 1 if found else 0
 
 
 def _runner_config(value: str) -> dict[str, str]:
@@ -799,6 +810,11 @@ def main(argv: list[str] | None = None) -> int:
         "check", parents=[in_workspace], help="rebuild the derived index and report invalid files"
     )
     commands.add_parser(
+        "doctor",
+        parents=[in_workspace],
+        help="report played or cited facts whose evidence no longer resolves (changes nothing)",
+    )
+    commands.add_parser(
         "promote",
         parents=[in_workspace],
         help="make a logged hand edit a GM decision (interactive only)",
@@ -996,6 +1012,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if problems else 0
         elif args.command == "check":
             return check(workspace.load(args.workspace))
+        elif args.command == "doctor":
+            return doctor(workspace.load(args.workspace))
         elif args.command == "serve":
             ws = workspace.load(args.workspace)
             serve(ws, configured_port(), review.routes(ws))

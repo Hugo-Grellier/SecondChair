@@ -279,6 +279,39 @@ def _indexed(ws: Workspace, source_id: str) -> dict | None:
     return row and {"sha256": row[0], "model": row[1], "stat": json.loads(row[2])}
 
 
+def page_text(ws: Workspace, source: str, page: str) -> str | None:
+    """The indexed text of `page` of a Source (its id or filename) a model may read, as for
+    `search`: indexing and model permission, a ready index, no purchased-content block. None
+    otherwise, whatever the reason, so a refusal tells nothing of the Source (ADR 0015). A PDF
+    page is its page number; a text Source is page 1."""
+    settings, purchased = _read(_settings(ws)), machine.purchased_content()
+    done = [
+        _indexed(ws, s["id"])
+        for s in listing(ws)
+        if source in (s["id"], s["filename"])
+        and s["index"]
+        and s["model"]
+        and s["status"] == "ready"
+        and not _blocked(Path(settings[s["id"]]["path"]), purchased)
+    ]
+    if not (done := [d for d in done if d]):
+        return None
+    with closing(_db()) as db:
+        rows = db.execute(
+            "SELECT location, text FROM passages WHERE digest = ? AND model = ? ORDER BY id",
+            (done[0]["sha256"], done[0]["model"]),
+        ).fetchall()
+    text = [
+        t for where, t in rows if where == f"page {page}" or (page == "1" and where[:5] == "line ")
+    ]
+    return "\n".join(text) if text else None
+
+
+def _blocked(path: Path, purchased: list[tuple[Path, bool]]) -> bool:
+    """Whether purchased content not allowed for models holds `path`."""
+    return any(not allowed and path.is_relative_to(root) for root, allowed in purchased)
+
+
 def _store(digest: str, model: str, extract) -> None:
     """Extract and embed one content version unless any workspace already stored it."""
     with closing(_db()) as db:
@@ -633,9 +666,7 @@ def search(
     for source in sources:
         if source["index"] and (local or source["model"]) and source["status"] == "ready":
             path = Path(settings[source["id"]]["path"])
-            if not local and any(
-                not allowed and path.is_relative_to(root) for root, allowed in purchased
-            ):
+            if not local and _blocked(path, purchased):
                 source["model_blocked_by_purchased_content"] = True
                 continue
             done = _indexed(ws, source["id"])

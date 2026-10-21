@@ -19,14 +19,29 @@ from mcp import Client
 
 from secondchair import cli
 from secondchair.cli import main
-from secondchair.core import index, workspace
+from secondchair.core import index, observations, workspace
 from secondchair.core.server import build_server
 from secondchair.core.workspace import Workspace
 
 SCHEMA = json.loads(
     (Path(__file__).parents[1] / "docs/contracts/action-log-entry.schema.json").read_text()
 )
-SEEN = {"kind": "observation", "quote": "Mira joined the Lock Council.", "locator": "s1.md:3"}
+# A played origin quotes an observation the Core finds (ADR 0015); the `ws` fixture records it.
+SEEN = {
+    "kind": "observation",
+    "quote": "Mira joined the Lock Council.",
+    "locator": "observations/outside-sessions.jsonl#seen",
+}
+SEEN_ENVELOPE = {
+    "id": "seen",
+    "session": None,
+    "at": "2026-10-19T20:15:00+00:00",
+    "scene": None,
+    "actor": None,
+    "kind": "chat",
+    "visibility": "players",
+    "payload": {"author": "Gamemaster", "text": SEEN["quote"]},
+}
 JOB = {"kind": "job", "job": "s0-rebuild"}
 GM_WORDS = {"kind": "gm", "words": "Actually Sella opened it, not the party."}
 
@@ -34,7 +49,9 @@ GM_WORDS = {"kind": "gm", "words": "Actually Sella opened it, not the party."}
 @pytest.fixture
 def ws(tmp_path: Path) -> Workspace:
     main(["init", str(tmp_path / "camp"), "--language", "en", "--calendar", "absalom"])
-    return workspace.load(tmp_path / "camp")
+    ws = workspace.load(tmp_path / "camp")
+    assert observations.record(ws, SEEN_ENVELOPE) is None
+    return ws
 
 
 def call(ws: Workspace, tool: str, **arguments: Any) -> Any:
@@ -115,8 +132,11 @@ def test_a_fact_is_markdown_with_relation_validity_rank_and_provenance(ws: Works
     assert found["rank"] == "played"
 
 
-def test_ranks_come_from_the_origin_and_an_agent_never_reaches_gm_decision(ws: Workspace) -> None:
-    cited = {"kind": "source", "source": "Core Rulebook", "page": "12"}
+def test_ranks_come_from_the_origin_and_an_agent_never_reaches_gm_decision(
+    ws: Workspace, index_source: Any
+) -> None:
+    index_source(ws, "The lock opens at dusk.", name="core-rulebook.txt")
+    cited = {"kind": "source", "source": "core-rulebook.txt", "page": "1"}
     for origin, rank in ((cited, "cited_source"), (JOB, "agent_proposal")):
         fid = fact(ws, f"A {rank} fact.", origin=origin)
         assert read(ws, "search_facts", text=f"A {rank} fact.")[0]["rank"] == rank, fid

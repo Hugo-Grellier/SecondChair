@@ -12,7 +12,7 @@ Decisions: [ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md), [ADR 0008](..
   - record time is real time: the session and the action log entry that admitted it.
 - **CAN-05** **Events** (played or offscreen) open and close facts. An evolution is an event that closes the old fact and opens a new one. A **correction** rewrites a wrongly recorded fact with no event, when nothing played is contradicted. A **retcon** is a GM decision recorded as an event that replaces an earlier one, which stays on record. Nothing is deleted. The v3 test applies: "could a player remember the old version?"
 - **CAN-06** **Authority ranks**, highest first: played, GM decision, cited official source, agent proposal.
-- **CAN-07** Provenance holds the rank, the origin (an observation with a verbatim quote, the GM's words, a Source with page, or a job) and the admitting action log entry.
+- **CAN-07** Provenance holds the rank, the origin (an observation with a verbatim quote, the GM's words, a Source with page, or a job) and the admitting action log entry. The Core admits a rank above agent proposal only on evidence it resolves itself, once, when the record is written, and refuses a forged origin ([ADR 0015](../adr/0015-evidence-is-resolved-by-the-core-before-it-confers-rank.md)).
 - **CAN-08** An approved agent proposal keeps the agent-proposal rank. Only play or a GM decision in the GM's own words ranks higher.
 - **CAN-09** A **decision** records a creative call with the GM's own words. Entering canon at the GM-decision rank requires an authenticated Surface ([03](03-delegation.md), DEL-29).
 

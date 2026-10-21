@@ -33,7 +33,7 @@ from unittest.mock import patch
 
 import yaml
 
-from secondchair.core import canon, delegation, index, jobs, knowledge, workspace, world
+from secondchair.core import admission, canon, delegation, index, jobs, knowledge, workspace, world
 from secondchair.core.workspace import STATE_DIR, Workspace
 
 SIZES = {"S": 10, "M": 100, "L": 400}  # sessions
@@ -180,7 +180,10 @@ class _Campaign:
     def do(self, tool: str, **args: Any) -> str:
         """One delegated action; the id of the document it wrote."""
         found = self.tools[tool]
-        result = delegation.act(self.ws, found, AGENT, lambda: found.fn(**args))
+        # ADR 0015: a synthetic history has no table to quote; composed as the Core would.
+        with admission.under(admission.CORE):
+            change = found.fn(**args)
+        result = delegation.act(self.ws, found, AGENT, lambda: change)
         assert result["status"] == "applied", (tool, result)
         return Path(delegation.read_entry(self.ws, result["entry"])["target"]).stem
 
