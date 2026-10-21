@@ -613,6 +613,10 @@ A hand edit of `canon/` bypasses the Core (CAN-11). When it rebuilds the index, 
 
 The derived index (CAN-10): entities, facts, events and knowledge with their derived validity and status, and full-text tables over names, statements and descriptions (CAN-12). It records a fingerprint of `workspace.yaml`, `canon/`, `action-log/` and `.secondchair/journal/`, and any read rebuilds it when they changed, recovering a pending journal first. `secondchair check` (in the workspace, or with `-w <workspace>`) rebuilds it from the directory alone, with no Foundry and no Source (PKG-15), logs any hand edit, also validates `moment.yaml`, `delegation.yaml`, the action log, job, call and occurrence files, names each invalid file and exits 1 if there is one. It lists the hand edits awaiting promotion. Deleting `.secondchair/` loses nothing but a pending journal.
 
+## Backup and restore
+
+`secondchair backup <workspace> <archive>` archives every file except `.secondchair/` and the machine configuration, with a manifest of SHA-256 hashes; `secondchair restore <archive> <new-dir>` verifies it into an empty directory and runs `check` (PKG-23, [ADR 0018](../adr/0018-snapshot-boundary-restore-and-upgrade-consent.md)).
+
 ## What is not in the workspace
 
 - **The machine configuration** (PKG-13) lives in `$XDG_CONFIG_HOME/secondchair/` (default `~/.config/secondchair/`) and never travels with the workspace. Its `config.yaml` holds, so far, the port `serve` listens on:

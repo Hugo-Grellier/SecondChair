@@ -25,6 +25,7 @@ from secondchair.core import (
     notes,
     rules,
     signals,
+    snapshot,
     workspace,
     world,
 )
@@ -809,6 +810,22 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "check", parents=[in_workspace], help="rebuild the derived index and report invalid files"
     )
+    backup_cmd = commands.add_parser(
+        "backup", help="archive a workspace (not .secondchair/) with a manifest of hashes"
+    )
+    backup_cmd.add_argument("workspace", type=Path)
+    backup_cmd.add_argument("archive", type=Path, help="a new file, outside the workspace")
+    backup_cmd.add_argument(
+        "--foundry-backup-at", help="when you backed up the paired Foundry world, ISO 8601"
+    )
+    backup_cmd.add_argument(
+        "--with-library-cache", action="store_true", help="also copy the machine-wide library index"
+    )
+    restore_cmd = commands.add_parser(
+        "restore", help="restore a backup into an empty or new directory, verify it and check it"
+    )
+    restore_cmd.add_argument("archive", type=Path)
+    restore_cmd.add_argument("directory", type=Path)
     commands.add_parser(
         "recover",
         parents=[in_workspace],
@@ -1008,6 +1025,21 @@ def main(argv: list[str] | None = None) -> int:
                     f"Upgraded {args.workspace} from schema version {before} to {after} in place; "
                     "review the diff (git diff) and commit it."
                 )
+        elif args.command == "backup":
+            manifest = snapshot.backup(
+                workspace.load(args.workspace),
+                args.archive,
+                with_library_cache=args.with_library_cache,
+                foundry_backup_at=args.foundry_backup_at,
+            )
+            print(f"Backed up {len(manifest['files'])} files to {args.archive} (mode 0600).")
+            print("Back up the paired Foundry world too; SecondChair does not encrypt this file.")
+        elif args.command == "restore":
+            manifest, report = snapshot.restore(args.archive, args.directory)
+            code = check(workspace.load(args.directory))
+            print(f"Restored {len(manifest['files'])} files into {args.directory}.")
+            print("\n".join(report))
+            return code
         elif args.command == "status":
             print(status(workspace.load(args.workspace)))
         elif args.command == "notes":
