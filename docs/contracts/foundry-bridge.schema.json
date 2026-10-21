@@ -171,7 +171,7 @@
         "op": {
           "type": "string",
           "minLength": 1,
-          "description": "What to read: browse_files, search_compendium, image_size, list_world_documents, answered by the library; rules_context, official_name, answered by the system adapter."
+          "description": "What to read: browse_files, search_compendium, image_size, resolve_uuid, list_world_documents, answered by the library; rules_context, official_name, answered by the system adapter."
         },
         "params": {
           "type": "object"
