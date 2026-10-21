@@ -65,6 +65,7 @@ Two ticket resolutions disagreed with an ADR or with each other. The GM settled 
 | [0016](../adr/0016-a-world-turn-occurrence-is-applied-through-a-roll-forward-journal.md) | A world-turn occurrence is applied through a roll-forward journal | [05](05-living-world-calendar.md), [02](02-architecture.md) |
 | [0017](../adr/0017-creative-drafts-live-in-notes-with-a-status.md) | Creative drafts stay in `notes/` with an id, a status and alternative sets; no draft facts | [12](12-campaign-creation-and-library.md) |
 | [0018](../adr/0018-snapshot-boundary-restore-and-upgrade-consent.md) | A snapshot is the workspace plus a paired Foundry world; restore into a fresh directory; a destructive migration needs consent. Amends ADR 0010 (in-place upgrade) and PKG-16 | [09](09-packaging.md) |
+| [0019](../adr/0019-post-v4-live-assistance-and-world-horizon.md) | Post-v4 horizon: live help pull-first, live speech, faction intents and an AI GM each amend one decision, in order | [11](11-out-of-scope.md), [03](03-delegation.md), [04](04-canon-memory-capture.md), [05](05-living-world-calendar.md) |
 
 ### Ticket resolutions without an ADR
 
