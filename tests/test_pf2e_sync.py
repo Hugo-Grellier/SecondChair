@@ -87,6 +87,8 @@ class GmClient:
     def read(self, message: dict) -> dict:
         if message["op"] == "rules_context":
             return {"ok": True, "result": self.context}
+        if message["op"] != "official_name":
+            return {"ok": False, "error": f"Unknown read {message['op']!r}."}
         key = message["params"]["key"]
         if key not in self.names:
             return {"ok": False, "error": f"No official entry {key!r} in this world's packs."}

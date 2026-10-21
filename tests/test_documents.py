@@ -39,7 +39,10 @@ def next_of(socket: ClientConnection, *kinds: str) -> dict:
     while True:
         message = json.loads(socket.recv(timeout=10))
         jsonschema.validate(message, SCHEMA)
-        if message["type"] in kinds and message.get("op") != "rules_context":
+        if message["type"] in kinds and message.get("op") not in (
+            "rules_context",
+            "compendium_snapshot",
+        ):
             return message
 
 
@@ -198,7 +201,12 @@ def test_a_generic_read_is_asked_of_the_gm_client(
 
     reply = answered["reply"]
     assert not reply.is_error
-    assert reply.structured_content == ({"result": result} if isinstance(result, list) else result)
+    if tool == "search_compendium":  # one shape live and offline
+        assert reply.structured_content == {"entries": result, "offline": False, "snapshot": None}
+    else:
+        assert reply.structured_content == (
+            {"result": result} if isinstance(result, list) else result
+        )
 
 
 def test_an_image_size_is_asked_of_the_gm_client(bridge: str, token: str) -> None:  # noqa: F811

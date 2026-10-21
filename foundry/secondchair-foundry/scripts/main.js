@@ -387,6 +387,15 @@ Hooks.once("ready", () => {
           },
           packs: () => game.packs,
           origin: location.origin,
+          system: () => {
+            const translations = adapter?.translations ?? {};
+            const id = translations[language] ?? translations[language.split("-")[0].toLowerCase()];
+            return {
+              id: game.system.id,
+              version: game.system.version,
+              translation: id ? (game.modules.get(id)?.title ?? id) : null,
+            };
+          },
           // Foundry's texture loader takes images and videos alike (a .webm map).
           imageSize: async (path) => {
             const texture = await foundry.canvas.loadTexture(path);

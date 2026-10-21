@@ -18,6 +18,7 @@ import yaml
 from secondchair.core import index, vtt
 from secondchair.core.tools import Block, Change, Tool, VttAction
 from secondchair.core.workspace import STATE_DIR, Workspace
+from secondchair_foundry import compendium
 
 DOOR_STATES = {"closed": 0, "open": 1, "locked": 2}  # Foundry's wall door states (`ds`)
 SCENES_DIR = "scenes"  # the desired scenes, one YAML file per scene key
@@ -358,16 +359,6 @@ def image_size(path: str) -> dict[str, Any]:
     return vtt.read("image_size", {"path": _data_path(path)})
 
 
-def search_compendium(query: str, type: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-    """The compendium entries of the GM's install whose name contains `query` (any case), each
-    `{uuid, name, type, pack, img, level, rarity, traits}`: the UUID to make a prepared document or
-    a token from, and pf2e's level, rarity and traits (null elsewhere) to calibrate encounters.
-    `type` keeps one document type (Actor, Item, JournalEntry, Scene, Playlist, RollTable…) or
-    one system type (pf2e: npc, hazard, loot, weapon, equipment…). At most `limit` entries (up
-    to 100)."""
-    return vtt.read("search_compendium", {"query": query, "type": type, "limit": limit})
-
-
 def list_world_documents(
     type: Literal["Actor", "JournalEntry", "Item", "Playlist", "RollTable", "Scene"],
     query: str = "",
@@ -615,6 +606,28 @@ def tools(ws: Workspace) -> list[Tool]:
         Foundry read when no GM client is connected. `passed` is true when the first, second and
         last are empty."""
         return check_assets(ws, key)
+
+    def search_compendium(query: str, type: str | None = None, limit: int = 20) -> dict[str, Any]:
+        """The compendium entries of the GM's install whose name contains `query` (any case), as
+        `{entries, offline, snapshot}`. Each entry is `{uuid, name, type, pack, img, level, rarity,
+        traits}`: the UUID to make a prepared document or a token from, and pf2e's level, rarity
+        and traits (null elsewhere) to calibrate encounters. `type` keeps one document type
+        (Actor, Item, JournalEntry, Scene, Playlist, RollTable…) or one system type (pf2e: npc,
+        hazard, loot, weapon, equipment…). At most `limit` entries (up to 100). `offline` is true
+        when no GM client is connected and the metadata snapshot taken at the last connection
+        answered: entries then also carry `slug`, `publication` and `remaster`, match on slug or
+        exact UUID as well, and may be out of date; no snapshot, no answer. `snapshot` is the
+        game system version of the snapshot (null if none was taken)."""
+        try:
+            entries = vtt.read("search_compendium", {"query": query, "type": type, "limit": limit})
+        except vtt.VttError as e:
+            # Both "no GM client" messages (the bridge's and the Core's) start alike.
+            if not str(e).startswith("No GM client") or not (
+                offline := compendium.lookup(ws, query, type, limit)
+            ):
+                raise
+            return offline
+        return {"entries": entries, "offline": False, "snapshot": compendium.version(ws)}
 
     def document_report(key: str) -> dict[str, Any]:
         """How a prepared world document was last realised in Foundry: `realised`, then
