@@ -147,7 +147,9 @@ def show_cue(
 def active_cue(ws: Workspace) -> dict[str, Any] | None:
     """The acting cue last shown, if any; none when its derived file is unreadable. A cue is
     withdrawn once play has moved on from its `as_of` (moment, session, scene, round or turn,
-    ADR 0020 item 3), so a stale cue is never shown as current; one with no `as_of` is too."""
+    ADR 0020 item 3), so a stale cue is never shown as current; one with no `as_of` is too.
+    Deleting observation lines by hand is outside the contract: it may bring a withdrawn cue
+    back."""
     try:
         cue = json.loads((ws.root / CUE_FILE).read_text())
     except OSError, ValueError:
