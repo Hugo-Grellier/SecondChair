@@ -22,13 +22,14 @@ in memory, then written through one roll-forward journal (ADR 0016).
 """
 
 import hashlib
+import json
 from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
 import yaml
 
-from secondchair.core import admission, calls, delegation, index, journal
+from secondchair.core import admission, calls, delegation, index, journal, knowledge
 from secondchair.core.calendar import Calendar, CalendarError
 from secondchair.core.delegation import (
     LOG_DIR,
@@ -48,6 +49,7 @@ from secondchair.core.workspace import CONFIG_FILE, Workspace, WorkspaceError
 FRONT, CLOCK, AGENDA, SITUATION = "front", "clock", "agenda", "situation"
 INTENT, POOL, CAPACITY, CATALOGUE = "intent", "pool", "capacity", "catalogue"  # ADR 0022
 FACTION_KEYS = (INTENT, POOL, CAPACITY, CATALOGUE)
+ACTION, FAILURE = "action", "failure"  # a faction's validated choice, and one that failed
 EFFECT_CLASSES = ("derived", "narrative")  # a catalogue effect's class, the GM's call (ADR 0009)
 STEP = "1w"  # the campaign-wide faction step unless workspace.yaml sets faction_step (ADR 0022)
 STAGES = ("available", "active", "resolved", "expired")  # `active`: the party engaged it
@@ -175,6 +177,8 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
         ]
         for a in value:
             words(a["id"], "An action's id")
+            if {"/", "@"} & set(a["id"]):  # it names the occurrence <faction>/<action>@<date>
+                raise CanonError(f"An action's id has no '/' or '@': {a['id']!r}.")
             if not isinstance(a["cost"], dict):
                 raise CanonError(f"{a['id']}'s cost maps pool names to integers.")
             for name, n in a["cost"].items():
@@ -194,8 +198,15 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
                 elif isinstance(p, dict) and set(p) == {"front", "clock_gte"}:
                     count(p["clock_gte"], "A prerequisite's clock_gte", 1)
                     refs += ids([p["front"]], "A prerequisite's front")
+                elif isinstance(p, dict) and set(p) == {"situation", "stage"}:
+                    if p["stage"] not in STAGES:
+                        raise CanonError(f"A prerequisite's stage is one of {', '.join(STAGES)}.")
+                    refs += ids([p["situation"]], "A prerequisite's situation")
                 else:
-                    raise CanonError("A prerequisite is {holds: fact id} or {front, clock_gte}.")
+                    raise CanonError(
+                        "A prerequisite is {holds: fact id}, {front, clock_gte} or "
+                        "{situation, stage}."
+                    )
             for goal in items(a["serves"], "An action's serves (goal ids)", 0):
                 words(goal, "A served goal's id")
             if a["target"] is not None:
@@ -427,12 +438,19 @@ def plan(ws: Workspace, since: str, until: str, known: list[dict] | None = None)
 
 def present(planned: list[dict]) -> list[dict]:
     """Occurrences as shown to the GM: more than six ticks of one front are one group, each tick
-    keeping its key (LW-15)."""
+    keeping its key (LW-15); a faction's failed choices are one group, collapsed, each with its
+    reason (ADR 0022, GM answer 3)."""
     ticks = Counter(o["entity"] for o in planned if o["kind"] == "tick")
     shown: list[dict] = []
     groups: dict[str, dict] = {}
+    failures: dict[str, dict] = {}
     for o in planned:
-        if o["kind"] == "tick" and ticks[o["entity"]] > GROUP_ABOVE:
+        if o["kind"] == FAILURE:
+            if o["entity"] not in failures:
+                failures[o["entity"]] = {"kind": "failures", "entity": o["entity"], "failed": {}}
+                shown.append(failures[o["entity"]])
+            failures[o["entity"]]["failed"][o["key"]] = o["validation"]
+        elif o["kind"] == "tick" and ticks[o["entity"]] > GROUP_ABOVE:
             if o["entity"] not in groups:
                 groups[o["entity"]] = {
                     "kind": "ticks",
@@ -672,6 +690,8 @@ _Plan = list[tuple[dict, list[Change] | None, str | None]]  # each record, its c
 def _changes(
     ws: Workspace, record: dict, rank: tuple[str, dict] | None, overlay: Sequence[Change]
 ) -> list[Change]:
+    if record["kind"] == FAILURE:
+        return _failure(ws, record)
     if rank is None and record["cites"]:  # an unless settled by a job (LW-10)
         rank = ("agent_proposal", {"kind": "job", "job": str(record["job"])})
     return _effect(ws, record, *(rank or _rule_rank(ws, record)), overlay)
@@ -808,6 +828,179 @@ def _journal(
     journal.apply_journal(ws, plan)
 
 
+# Faction turns (ADR 0022 items 4 and 5)
+
+
+def _decided(f: dict) -> bool:
+    """A faction state fact the validator reads: the GM's decision, or a rule effect on one."""
+    return f["rank"] == "gm_decision" or f["origin"].get("kind") == "rule"
+
+
+def _meets(p: dict, f: dict) -> bool:
+    """Whether fact `f` satisfies catalogue prerequisite `p`, whatever its dates."""
+    if "holds" in p:
+        return f["id"] == p["holds"]
+    s = f.get("state") or {}
+    if "front" in p:
+        return s.get("of") == p["front"] and s["key"] == CLOCK and s["value"] >= p["clock_gte"]
+    return (
+        s.get("of") == p["situation"]
+        and s["key"] == SITUATION
+        and s["value"]["stage"] == p["stage"]
+    )
+
+
+def roll(key: str) -> int:
+    """A d20 seeded from an occurrence key, `<faction>/<action>@<date>`: the campaign date, the
+    faction and the action id, so a replay rolls the same (ADR 0022 item 5)."""
+    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % 20 + 1
+
+
+def validate(ws: Workspace, date: str, choices: dict[str, list[dict]]) -> list[dict]:
+    """Each faction's ranked choices `[{action, cites}]` checked against truth on `date`, not
+    belief: its pools name every pool the action costs or contests, it has capacity left, every
+    prerequisite holds, its pools cover the cost (in rank order, after its choices already
+    validated on that date). Two accepted choices contesting one target resolve by the
+    committed pool (the action's cost in its contest pool), then `roll`, then the key. A failed
+    prerequisite some fact the faction knows or believes would meet is a false belief. Only
+    `_decided` faction facts count. One verdict per choice, `reason` None when accepted; writes
+    nothing. `CanonError`, the whole output refused, when a choice names no action of its
+    faction's catalogue or a used key."""
+    truth, current = index.search_facts(ws, at=date), _current(ws, at=date)
+    records = occurrences(ws)
+    used = {r["key"] for r in records}
+    verdicts: list[dict] = []
+    for faction, ranked in sorted(choices.items()):
+        s = {k: f for k, f in current.get(faction, {}).items() if k != AGENDA and _decided(f)}
+        catalogue = {a["id"]: a for a in s[CATALOGUE]["state"]["value"]} if CATALOGUE in s else {}
+        pools = s[POOL]["state"]["value"] if POOL in s else {}
+        mine = [
+            r
+            for r in records
+            if r["entity"] == faction and r["kind"] == ACTION and r["date"] == date
+        ]
+        left = (s[CAPACITY]["state"]["value"] if CAPACITY in s else 0) - len(mine)
+        spent: Counter[str] = Counter()
+        for r in mine:
+            spent.update(r["debit"])
+        believed: list[dict] | None = None
+        for choice in ranked:
+            a, key = catalogue.get(choice["action"]), f"{faction}/{choice['action']}@{date}"
+            if a is None:
+                raise CanonError(
+                    f"{faction} has no action {choice['action']!r} in its catalogue: the whole "
+                    "output is refused."
+                )
+            if key in used:
+                raise CanonError(f"Occurrence key {key} is already used.")
+            used.add(key)
+            v = {"key": key, "faction": faction, "action": a, "rule": s[CATALOGUE]["id"]}
+            v |= {"cites": list(choice.get("cites", [])), "reason": None, "belief": None}
+            verdicts.append(v)
+            contested = [a["contest"]["pool"]] if a["contest"] else []
+            failed = [p for p in a["prerequisites"] if not any(_meets(p, f) for f in truth)]
+            short = {
+                n: c
+                for n, c in a["cost"].items()
+                if spent[n] + c > pools.get(n, {}).get("value", 0)
+            }
+            if unknown := sorted({*a["cost"], *contested} - set(pools)):
+                v["reason"] = f"no pool {', '.join(unknown)}"
+            elif left < 1:
+                v["reason"] = "no capacity left this step"
+            elif failed:
+                v["reason"] = f"prerequisite {json.dumps(failed[0])} does not hold on {date}"
+                if believed is None:
+                    held = knowledge.known(ws, faction, at=date)
+                    believed = [
+                        f
+                        for f in index.search_facts(ws)
+                        if f["id"] in held and held[f["id"]]["mode"] != "suspects"
+                    ]
+                v["belief"] = next((f["id"] for f in believed if _meets(failed[0], f)), None)
+            elif short:
+                v["reason"] = f"pools cannot cover {json.dumps(short)}"
+            else:
+                left -= 1
+                spent.update(a["cost"])
+    # ponytail: a contest loser's cost stays counted for its faction's later choices, and a
+    # choice validated by an earlier call on the date is not contested; one call per step.
+    contests: dict[str, list[dict]] = {}
+    for v in verdicts:
+        if v["reason"] is None and v["action"]["contest"]:
+            contests.setdefault(v["action"]["target"], []).append(v)
+    for target, rivals in contests.items():
+        if len(rivals) < 2:
+            continue
+        for v in rivals:
+            committed = v["action"]["cost"].get(v["action"]["contest"]["pool"], 0)
+            v["contest"] = {"target": target, "committed": committed, "roll": roll(v["key"])}
+        won = max(rivals, key=lambda v: (v["contest"]["committed"], v["contest"]["roll"], v["key"]))
+        for v in rivals:
+            v["contest"]["won"] = v is won
+            if v is not won:
+                v["reason"] = f"lost the contest for {target} to {won['key']}"
+    return verdicts
+
+
+def faction_turn(
+    ws: Workspace, date: str, choices: dict[str, list[dict]], job: int | None = None
+) -> list[dict]:
+    """Validate the factions' ranked choices for the step on `date` (`validate`) and record
+    each one under its key `<faction>/<action>@<date>`, used once (LW-13). An accepted one is
+    an `action` occurrence, `validated`, carrying its `debit`; applying its debit and effect
+    in one journal is F3's. A failed one is a `failure`, `failed`, with its reason
+    (`validation`), listed in the world-turn report (`present`). One failed on a false belief
+    is an offscreen event only its faction learns, a derived consequence applied at the living
+    world's level (ADR 0022 decision c). `job`: the faction-intent job that chose. Never during
+    a live session (LW-05). Returns the records."""
+    with locked(ws):
+        if delegation.current_moment(ws)[0] == "live-session":
+            raise DelegationError("Factions never act during a live session (LW-05).")
+        _check_recovered(ws)
+        date, recorded = ws.calendar.canonical(date), []
+        for v in validate(ws, date, choices):
+            a = v["action"]
+            occ = {"key": v["key"], "kind": ACTION if v["reason"] is None else FAILURE}
+            occ |= {"class": "derived" if occ["kind"] == FAILURE else a["effect"]["class"]}
+            occ |= {"entity": v["faction"], "date": date, "rule": v["rule"], "job": job}
+            occ |= {"cites": v["cites"], "action": a["id"], "target": a["target"]}
+            occ |= {"validation": v["reason"] or "ok", "belief": v["belief"]}
+            occ |= {"debit": a["cost"] if v["reason"] is None else {}}
+            occ |= {"contest": v.get("contest")}
+            if v["belief"] is None:
+                status = "validated" if v["reason"] is None else "failed"
+                recorded.append(_register(ws, occ | {"status": status}))
+            else:
+                record = _new(occ)
+                _apply(ws, record, job=job)
+                recorded.append(record)
+        return recorded
+
+
+def _failure(ws: Workspace, record: dict) -> list[Change]:
+    """A choice failed on a false belief: an offscreen event on its date opening a fact that
+    says so, which its faction alone learns (ADR 0022 decision c), at the agent-proposal rank
+    of a derived consequence. File ids derive from the key, used once."""
+    key, faction, date = record["key"], record["entity"], record["date"]
+    origin = {"kind": "rule", "fact": record["rule"], "key": key}
+    admission.admit(ws, origin, admission.CORE)  # the Core composes it
+    rank, names = "agent_proposal", {e["id"]: e["names"][0] for e in index.search_entities(ws)}
+    fact_id, event_id, k_id = _id("f", key, "fact"), _id("v", key, "event"), _id("k", key, faction)
+    fact: dict[str, Any] = {"id": fact_id, "entities": [faction], "relation": None}
+    fact |= {"valid_from": None, "valid_to": None, "rank": rank, "origin": origin}
+    event: dict[str, Any] = {"id": event_id, "date": date, "kind": "offscreen"}
+    event |= {"opens": [fact_id], "closes": [], "replaces": None, "rank": rank, "origin": origin}
+    learnt: dict[str, Any] = {"id": k_id, "knower": faction, "fact": fact_id, "mode": "knows"}
+    learnt |= {"date": date, "event": event_id, "rank": rank, "origin": origin}
+    statement = f"{names[faction]}: {record['action']} failed: {record['validation']}"
+    return [
+        Change(f"{index.FACTS_DIR}/{fact_id}.md", index.join_doc(fact, statement), key),
+        Change(f"{index.EVENTS_DIR}/{event_id}.md", index.join_doc(event, key), key),
+        Change(f"{index.KNOWLEDGE_DIR}/{k_id}.md", index.join_doc(learnt, ""), key),
+    ]
+
+
 # What agents and the GM do with a queued occurrence
 
 
@@ -872,6 +1065,8 @@ def decide(
                 "or reschedule it."
             )
         if answer == "reschedule":
+            if record["kind"] == FAILURE:  # its faction learns it on the date it failed
+                raise DelegationError(f"{key} is a failed faction choice: accept or reject it.")
             if date is None:
                 raise DelegationError("Rescheduling needs the new date.")
             date = ws.calendar.canonical(date)
