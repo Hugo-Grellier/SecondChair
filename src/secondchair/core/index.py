@@ -8,9 +8,12 @@ import hashlib
 import json
 import os
 import sqlite3
+import stat
 import threading
+import time
 from contextlib import closing
 from importlib.metadata import entry_points
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -25,6 +28,15 @@ EVENTS_DIR = "canon/events"
 KNOWLEDGE_DIR = "canon/knowledge"
 LOG_DIR = "action-log"
 INDEX_FILE = "index.sqlite"
+# The fingerprinted folders besides workspace.yaml. A pending journal (ADR 0016) changes it:
+# a read then rebuilds, which recovers first.
+FINGERPRINTED = ("canon", LOG_DIR, delegation.JOURNAL_DIR)
+# Per file (size, mtime_ns, sha256), so an unchanged read hashes nothing (#172).
+STAT_CACHE = "fingerprint.json"
+STAT_CACHE_VERSION = 1
+# Assumed filesystem timestamp granularity: a file whose mtime is within it of the cache's
+# write is re-hashed, since an edit in the same tick keeps its mtime. FAT's 2 s; finer elsewhere.
+MTIME_GRANULARITY_NS = 2_000_000_000
 
 RANKS = ("played", "gm_decision", "cited_source", "agent_proposal")  # CAN-06, highest first
 # CAN-03: the Core's closed relation list; System extensions add to it through this group.
@@ -149,7 +161,7 @@ def join_doc(front: dict, body: str) -> str:
 def connect(ws: Workspace) -> sqlite3.Connection:
     """A connection to an up-to-date index, rebuilt first if the workspace changed."""
     path = ws.root / STATE_DIR / INDEX_FILE
-    stamp = _fingerprint(ws)
+    stamp, cache, unusable = _fingerprint(ws)
     if path.exists():
         conn = sqlite3.connect(path)
         try:
@@ -157,6 +169,10 @@ def connect(ws: Workspace) -> sqlite3.Connection:
         except sqlite3.DatabaseError:
             row = None
         if row and row[0] == stamp:
+            # Only a missing or broken cache: a read leaves the workspace as it found it.
+            if cache and unusable:
+                with delegation.locked(ws):
+                    _save_stat_cache(ws, cache)
             return conn
         conn.close()
     rebuild(ws)
@@ -172,7 +188,9 @@ def rebuild(ws: Workspace) -> list[str]:
             errors = []
         except WorkspaceError as e:  # a broken moment.yaml; check names it
             errors = [str(e)]
-        stamp = _fingerprint(ws)
+        stamp, cache, _ = _fingerprint(ws)
+        if cache:
+            _save_stat_cache(ws, cache)
         docs, load_errors = _load(ws)
     path = ws.root / STATE_DIR / INDEX_FILE
     path.parent.mkdir(exist_ok=True)
@@ -187,17 +205,69 @@ def rebuild(ws: Workspace) -> list[str]:
     return errors + load_errors + notes.check(ws)
 
 
-def _fingerprint(ws: Workspace) -> str:
-    # ponytail: hashes every canon and log file on each query; mtimes if campaigns grow large.
+def _fingerprint(ws: Workspace) -> tuple[str, dict | None, bool]:
+    """The SHA-256 of workspace.yaml, the schema and every fingerprinted file's path and hash;
+    the stat cache to save, or None when every hash came from it; whether the cache file was
+    unusable. A file whose size and
+    mtime match the cache, and whose mtime is not within the granularity of the cache's write,
+    keeps its cached hash; any other is read. A cache that is missing, malformed, of another
+    version, written in the future or facing a future mtime is ignored (full hashing)."""
+    now = time.time_ns()
+    written, cached = _read_stat_cache(ws, now)
+    files = []
+    for top in FINGERPRINTED:
+        # Strings, not Paths: pathlib dominated an unchanged read. Sorted as Paths sort, by part.
+        found = [f"{d}/{n}" for d, _, names in os.walk(ws.root / top) for n in names]
+        for p in sorted(found, key=lambda f: f.split("/")):
+            try:
+                st = os.stat(p)
+            except FileNotFoundError:  # a Core write's temporary file, renamed since: the
+                continue  # stamp differs then, and the rebuild under the lock sees it whole
+            if stat.S_ISREG(st.st_mode):
+                files.append((p, p[len(str(ws.root)) + 1 :], st))
+    if any(st.st_mtime_ns > now for *_, st in files):  # the clock went backwards
+        cached = {}
     digest = hashlib.sha256((ws.root / "workspace.yaml").read_bytes())
     digest.update(_SCHEMA.encode())  # a newer Core with new columns rebuilds the index
-    # A pending journal (ADR 0016) changes it: a read then rebuilds, which recovers first.
-    for top in ("canon", LOG_DIR, delegation.JOURNAL_DIR):
-        for p in sorted((ws.root / top).rglob("*")):
-            if p.is_file():
-                digest.update(p.relative_to(ws.root).as_posix().encode() + b"\0")
-                digest.update(hashlib.sha256(p.read_bytes()).digest())
-    return digest.hexdigest()
+    entries, hashed = {}, False
+    for p, relative, st in files:
+        hit = cached.get(relative)
+        key = (st.st_size, st.st_mtime_ns)
+        if hit and hit[:2] == key and st.st_mtime_ns < written - MTIME_GRANULARITY_NS:
+            sha = hit[2]
+        else:
+            try:
+                sha, hashed = hashlib.sha256(Path(p).read_bytes()).digest(), True
+            except FileNotFoundError:
+                continue
+        entries[relative] = [*key, sha.hex()]
+        digest.update(relative.encode() + b"\0")
+        digest.update(sha)
+    cache = {"version": STAT_CACHE_VERSION, "written_ns": now, "files": entries}
+    changed = hashed or len(entries) != len(cached)
+    return digest.hexdigest(), cache if changed else None, not written
+
+
+def _read_stat_cache(ws: Workspace, now: int) -> tuple[int, dict[str, tuple[int, int, bytes]]]:
+    try:
+        doc = json.loads((ws.root / STATE_DIR / STAT_CACHE).read_text())
+        if doc["version"] == STAT_CACHE_VERSION and doc["written_ns"] <= now:
+            return doc["written_ns"], {
+                path: (size, mtime, bytes.fromhex(sha))
+                for path, (size, mtime, sha) in doc["files"].items()
+            }
+    except OSError, ValueError, KeyError, TypeError, AttributeError:
+        pass
+    return 0, {}
+
+
+def _save_stat_cache(ws: Workspace, cache: dict) -> None:
+    """Under the lock; temp and rename, so a reader never sees half of it."""
+    path = ws.root / STATE_DIR / STAT_CACHE
+    path.parent.mkdir(exist_ok=True)
+    tmp = path.with_name(f"{STAT_CACHE}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(cache))
+    tmp.replace(path)
 
 
 # Loading and validating documents
