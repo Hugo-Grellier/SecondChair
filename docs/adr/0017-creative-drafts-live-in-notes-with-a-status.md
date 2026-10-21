@@ -1,6 +1,6 @@
 # Creative drafts stay in `notes/`, with an id, a status and alternative sets
 
-Status: proposed — awaiting the GM's decision ([#174](https://github.com/Hugo-Grellier/SecondChair/issues/174), epic [#173](https://github.com/Hugo-Grellier/SecondChair/issues/173))
+Status: accepted 2026-10-21 ([#174](https://github.com/Hugo-Grellier/SecondChair/issues/174), epic [#173](https://github.com/Hugo-Grellier/SecondChair/issues/173))
 
 Spec 12 §3 already keeps working ideas out of canon: the campaign workshop writes them to `notes/workshop/<theme>.md`, no importer promotes them, and `search_facts`, `what_knows`, the mystery checker and the guard read canon only. What `notes/` lacks for a campaign-creation studio is narrow: a stable id to link a draft from prep and from other drafts, a status the GM sets (is this pitch still open, tried, chosen, dropped?), a lineage when one draft forks another, and a way to hold **mutually exclusive futures** side by side without one silently winning. We propose to add exactly that to `notes/`, as optional YAML front matter checked by a pure validator, and nothing else: no new top-level directory, no draft facts, no second source of truth.
 

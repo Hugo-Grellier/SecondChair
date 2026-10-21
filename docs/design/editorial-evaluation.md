@@ -8,7 +8,7 @@ S0–S4 ([spec 10](../spec/10-success-bench.md)) measure effort, interruptions, 
 
 - **MET-03** (no LLM judge in reference metrics): kept. Scores come from human reviewers. An LLM critique may be shown to the *author* as an editorial aid, labelled as such, and is never a score.
 - **MET-02 / MET-04** (gold set written once, then scored with no human; a metric must come from a real session's action log): human rubric scores fail both by construction. **Conflict with #182 as worded**: its rubric cannot be a v4 metric. Resolution proposed here: editorial scores are a separate, reported-only track. They never gate BEN-13, never set floors, and never replace an invariant. If the GM wants them to gate a release, that needs an ADR amending spec 10.
-- The deterministic parts below (checker warnings, leaks, frictions, cost, edit size) *are* computable from workspace files, the action log and behaviour traces, so they can join the bench report as tracked metrics without a human.
+- The deterministic parts below (checker warnings, leaks, frictions, cost, edit size) *are* computable from workspace files, the action log and behaviour traces, so they can be computed without a human. They still do not all come from the action log, observations and traces as MET-01 and MET-04 require (a note's diff size and checker warnings read workspace files), so they join the same reported-only track as the rubric, next to MET-02/MET-04 above, unless a MET-01 amendment admits workspace-file metrics.
 
 ## Rubric
 
