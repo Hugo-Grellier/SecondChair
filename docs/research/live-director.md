@@ -46,6 +46,14 @@ Research for [#187](https://github.com/Hugo-Grellier/SecondChair/issues/187), co
 
 **Off switch.** One Desk toggle sets the director off for the session: no cards, no jobs, no cue calls. It is a Surface preference relayed to the Core, logged, and changes nothing in Foundry or canon.
 
+## Proposed amendment: Desk cards under ARC-14 (#196)
+
+The pull-path cards (situation D1, NPC turn D3, readiness D7, wrap state) need no ADR: [ADR 0019](../adr/0019-post-v4-live-assistance-and-world-horizon.md) maps them to ARC-14 at spec level, since a card is a read like the acting cue, with no delegated action and no call. ADR 0005 is not changed: the cards add no call and no interruption, and it already leaves the Desk's contents to the spec. The amendment is to [02-architecture.md](../spec/02-architecture.md) ARC-14, to land with D1 once the GM agrees; until then ARC-14 holds as written.
+
+> **ARC-14** The **Director's Desk** is a minimal panel: the calls due now, approve or reject with a rejection reason, the active NPC's acting cue with "I voice this one" / "Hand back", and the pile held for the break. It may also show **read-only cards** the GM pulls (situation, NPC turn, readiness at connect, wrap state after End session): each is assembled by the Core, carries `as_of` and is withdrawn when it goes stale, holds no delegated action and raises no call. Cards stack, collapsed by default. No tabs: the action log, staging and the living world stay in conversation and the CLI ([ADR 0005](../adr/0005-core-schedules-calls-on-the-gm.md), [#19](https://github.com/Hugo-Grellier/SecondChair/issues/19)).
+
+Spec 11's row "A Director's Desk with tabs" stays as written. Unasked cards are not part of this amendment: they are cues, [ADR 0020](../adr/0020-proactive-cues-are-a-call-kind-that-expires.md) (proposed). The GM accepted this text on PR #220 (2026-10-21), to be applied to ARC-14 with D1, and answered its two questions: the wrap-state card stays after End session until the grouped round in the CLI is done, then is withdrawn as stale; the readiness card shows at connect only when a check fails, and otherwise can be pulled, with a one-line ready status.
+
 ## Budgets (proposed; numbers set by MET-05a after the first S4 run)
 
 | Item | Budget |
