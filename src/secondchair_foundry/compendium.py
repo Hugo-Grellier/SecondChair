@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from secondchair.core import rules
 from secondchair.core.workspace import STATE_DIR, Workspace
 
 DIR = f"{STATE_DIR}/compendium"
@@ -103,14 +104,14 @@ def cite(ws: Workspace, query: str, type: str | None, limit: int) -> dict[str, A
     version and active translation module of the snapshot it came from; the campaign's house
     rules are named in `house_rule_notice`, since a compendium patch is invisible here (RUL-23).
     Offline by design: it reads the snapshot only. None when there is no snapshot."""
-    from secondchair.core import rules
-
+    if not query.strip():
+        raise ValueError("`query` must not be empty.")
     found = lookup(ws, query, type, limit)
     snapshot = _latest(ws)
     if found is None or snapshot is None:
         return None
     system = snapshot["system"]
-    names = [str(r["name"]) for r in rules.house_rules(ws)]
+    names = [str(r["name"]) for r in rules.house_rules(ws) if r.get("name")]
     return {
         "entries": [
             {
