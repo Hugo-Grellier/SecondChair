@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import yaml
 
-from secondchair.core import machine
+from secondchair.core import machine, notes
 from secondchair.core.delegation import locked
 from secondchair.core.tools import Tool
 from secondchair.core.workspace import Workspace, WorkspaceError
@@ -465,7 +465,21 @@ QUERY_INSTRUCTION = (
 CANDIDATES = 30  # per retrieval method, before fusion
 
 
-def search(ws: Workspace, query: str, *, local: bool = False, limit: int = 10) -> dict:
+def _note_status(path: Path) -> str | None:
+    try:
+        return (notes.front_matter(path.read_text()) or {}).get("status")
+    except yaml.YAMLError, ValueError, UnicodeDecodeError:
+        return None  # `notes check` reports it
+
+
+def search(
+    ws: Workspace,
+    query: str,
+    *,
+    local: bool = False,
+    limit: int = 10,
+    include_closed: bool = False,
+) -> dict:
     """Hybrid retrieval: exact-term BM25 (names of spells, gods, places) fused with semantic
     similarity. Source model permission is mandatory unless the caller is the GM CLI."""
     if not query.strip() or not 1 <= limit <= 50:
@@ -476,10 +490,14 @@ def search(ws: Workspace, query: str, *, local: bool = False, limit: int = 10) -
     for directory in ("canon", "notes", "sessions"):
         for path in sorted((ws.root / directory).rglob("*.md")):
             if not path.is_symlink() and path.resolve().is_relative_to(ws.root.resolve()):
+                status = _note_status(path) if directory == "notes" else None
+                if status in notes.CLOSED and not include_closed:
+                    continue  # rejected / superseded design notes (ADR 0017)
                 digest = _digest(path)
                 _store(digest, model, lambda path=path: _passages(path))
                 origins.setdefault(digest, []).append(
                     {"filename": str(path.relative_to(ws.root)), "kind": directory, "source": None}
+                    | ({"status": status} if status else {})
                 )
     sources = listing(ws)
     purchased = machine.purchased_content()
@@ -555,13 +573,16 @@ def tools(ws: Workspace) -> list[Tool]:
         """List registered references, local permissions and freshness, without source text."""
         return listing(ws)
 
-    def search_campaign_library(query: str, limit: int = 10) -> dict[str, Any]:
+    def search_campaign_library(
+        query: str, limit: int = 10, include_closed: bool = False
+    ) -> dict[str, Any]:
         """Search campaign Markdown and authorized reference excerpts semantically with filename
         and page/line citations. Unindexed, changed and unavailable references are reported in
         sources. Both local indexing and model-excerpt permissions are required for reference
-        matches. Results are evidence, never automatic campaign truth; show conflicts to the GM.
+        matches. Rejected and superseded design notes are left out unless include_closed.
+        Results are evidence, never automatic campaign truth; show conflicts to the GM.
         No permission changes, indexing, model calls or canon writes happen here."""
-        return search(ws, query, limit=limit)
+        return search(ws, query, limit=limit, include_closed=include_closed)
 
     return [
         Tool(fn=fn, responsibility="memory", delegated_action=False, reversible=True)

@@ -614,6 +614,25 @@ the existing delegated tools. The GM's words retain the existing separate
 `secondchair confirm <id>` truth-confirmation step. Notes are ordinary editable
 Markdown; the agent reports actual writes and pending actions.
 
+A note may carry design front matter (ADR 0017), all keys optional except `id` and `status`:
+
+```yaml
+id: d-1a2b3c4d             # d-<8 hex digits>, stable, never reused
+status: draft              # draft | playtested | adopted | rejected | superseded
+alternatives: arc-act-1    # a set of mutually exclusive notes; at most one adopted
+supersedes: [d-0f0e0d0c]   # notes this one replaces; they must be marked superseded
+cites: [f-11111111]        # canon entity, fact or event ids; each must resolve
+reason: ""                 # the GM's words for a rejection or supersession
+```
+
+A note whose front matter has neither `id` nor `status`, or none, is a plain working note and
+is ignored. `secondchair notes check [-w <workspace>]` validates the design notes of `notes/`
+and exits 1 when it reports; `secondchair check` and every index rebuild report the same
+problems. It reports, never fixes: duplicate or malformed ids, unreadable front matter,
+unknown statuses, more than one `adopted` note in an alternative set, `supersedes` pointing at
+an unknown id, a superseded note not marked `superseded`, and `cites` that do not resolve in
+canon. Canon tools never read `notes/`.
+
 `library.yaml` maps registered reference ids (`r-<24 hex digits>`, derived from the
 resolved file path) to filenames. Raw references stay outside the workspace.
 Registration of a directory snapshots its PDF, Markdown and UTF-8 text files
@@ -687,7 +706,8 @@ file change preserves the old index. Changed-index replacement requires both
 `--replace-changed` and an interactive GM terminal.
 
 The same search also reads campaign Markdown under `canon/`, `notes/` and
-`sessions/`, with filenames and line citations. These are file search results,
+`sessions/`, with filenames and line citations. A design note's result carries its `status`; `rejected` and `superseded` notes are left out unless
+the caller passes `include_closed` (`secondchair sources search --include-closed`). These are file search results,
 including provisional or historical records; use `search_facts` for canon rank
 and validity. Search writes no campaign content and never resolves source/canon
 conflicts. Raw registered files (or enclosing directories) cannot be passed as

@@ -20,6 +20,7 @@ from secondchair.core import (
     jobs,
     library,
     machine,
+    notes,
     rules,
     workspace,
     world,
@@ -596,7 +597,13 @@ def _sources_command(args: argparse.Namespace) -> None:
             raise WorkspaceError("Local-only excerpts need an interactive GM terminal.")
         print(
             json.dumps(
-                library.search(ws, args.query, local=args.local, limit=args.limit),
+                library.search(
+                    ws,
+                    args.query,
+                    local=args.local,
+                    limit=args.limit,
+                    include_closed=args.include_closed,
+                ),
                 ensure_ascii=False,
                 indent=2,
             )
@@ -650,6 +657,12 @@ def main(argv: list[str] | None = None) -> int:
     search_cmd.add_argument("query")
     search_cmd.add_argument("--limit", type=int, default=10)
     search_cmd.add_argument("--local", action="store_true", help="GM terminal only; local excerpts")
+    search_cmd.add_argument(
+        "--include-closed", action="store_true", help="also search rejected and superseded notes"
+    )
+    notes_cmd = commands.add_parser("notes", help="design notes under notes/")
+    notes_sub = notes_cmd.add_subparsers(dest="notes_command", required=True)
+    notes_sub.add_parser("check", parents=[in_workspace], help="validate design note front matter")
     reason = argparse.ArgumentParser(add_help=False)
     reason.add_argument("--reason", required=True, choices=delegation.REASONS)
     moment_cmd = commands.add_parser(
@@ -896,6 +909,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
         elif args.command == "status":
             print(status(workspace.load(args.workspace)))
+        elif args.command == "notes":
+            problems = notes.check(workspace.load(args.workspace))
+            for problem in problems:
+                print(f"secondchair: {problem}", file=sys.stderr)
+            return 1 if problems else 0
         elif args.command == "check":
             return check(workspace.load(args.workspace))
         elif args.command == "serve":

@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from secondchair.core import delegation
+from secondchair.core import delegation, notes
 from secondchair.core.calendar import Calendar, CalendarError
 from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
 
@@ -168,7 +168,7 @@ def rebuild(ws: Workspace) -> list[str]:
         _fill(ws.calendar, conn, *docs)
         conn.execute("insert into meta values ('fingerprint', ?)", (stamp,))
     tmp.replace(path)  # readers never see a half-built index
-    return errors + load_errors
+    return errors + load_errors + notes.check(ws)
 
 
 def _fingerprint(ws: Workspace) -> str:

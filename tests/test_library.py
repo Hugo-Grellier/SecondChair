@@ -382,3 +382,23 @@ def test_an_ollama_url_with_credentials_is_refused(monkeypatch: pytest.MonkeyPat
     )
     with pytest.raises(WorkspaceError, match="ollama_url"):
         library._ollama_url()
+
+
+def write_note(ws, name, front, body):
+    lines = "".join(f"{k}: {v}\n" for k, v in front.items())
+    (ws.root / "notes").mkdir(exist_ok=True)
+    (ws.root / "notes" / name).write_text(f"---\n{lines}---\n{body}\n" if front else body)
+
+
+def test_search_leaves_out_closed_notes_unless_asked(ws):
+    for name, status in (("a", "draft"), ("b", "rejected"), ("c", "superseded")):
+        write_note(
+            ws, f"{name}.md", {"id": f"d-0000000{ord(name) - 96}", "status": status}, "harbor"
+        )
+    write_note(ws, "plain.md", {}, "harbor")
+    hits = library.search(ws, "harbor")["matches"]
+    assert {h["filename"]: h.get("status") for h in hits} == {
+        "notes/a.md": "draft",
+        "notes/plain.md": None,
+    }
+    assert len(library.search(ws, "harbor", include_closed=True)["matches"]) == 4
