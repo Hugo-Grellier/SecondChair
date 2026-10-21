@@ -86,6 +86,13 @@ def load(root: Path) -> Workspace:
 def upgrade(root: Path) -> tuple[int, int]:
     """Migrate the workspace in `root` in place to the current schema (PKG-16), one version at a
     time, leaving the change as a diff for the GM to review; the versions before and after."""
+    from secondchair.core import delegation  # it builds on this module
+
+    with delegation.locked(root):  # it rewrites files a running Core reads (#211)
+        return _upgrade(root)
+
+
+def _upgrade(root: Path) -> tuple[int, int]:
     config, _, version = _versioned(root)
     start = version
     while version < SCHEMA_VERSION:
