@@ -302,16 +302,77 @@ def test_the_core_paths_name_what_their_owners_write() -> None:
         assert owned in delegation.CORE_PATHS, owned
 
 
-def test_next_id_stays_monotonic_unique_across_holds_writes_and_recovery(ws: Workspace) -> None:
+def _key(ws: Workspace, directory: str) -> str:
+    return str((ws.root / directory).resolve())
+
+
+def test_next_id_stays_monotonic_unique_across_holds_and_recovery(ws: Workspace) -> None:
     with delegation.locked(ws):
         ids = [delegation._append(ws, {"kind": "t"})["id"] for _ in range(30)]
         assert ids == list(range(1, 31))
         delegation._save(ws, {"id": 99, "kind": "t"})  # a write the cache did not make
         assert delegation._append(ws, {"kind": "t"})["id"] == 100
-        delegation._log_path(ws, 100).unlink()
-        delegation._forget(delegation._log_path(ws, 100).parent)  # what _apply and _put do
-        assert delegation._append(ws, {"kind": "t"})["id"] == 100
+        delegation._save(ws, {"id": 7, "kind": "t"})  # a lower id cannot rewind the cache
+        assert delegation._append(ws, {"kind": "t"})["id"] == 101
     delegation._log_path(ws, 150).write_text("id: 150\n")  # another process, between holds
     with delegation.locked(ws):  # the first acquisition recovers
         assert delegation._append(ws, {"kind": "t"})["id"] == 151
-    assert len(list((ws.root / delegation.LOG_DIR).glob("*.yaml"))) == 34
+
+
+def test_next_id_outside_a_hold_is_never_cached(ws: Workspace) -> None:
+    assert delegation._next_id(ws, delegation.LOG_DIR) == 1
+    delegation._log_path(ws, 5).parent.mkdir(exist_ok=True)
+    delegation._log_path(ws, 5).write_text("id: 5\n")  # another writer
+    with delegation.locked(ws):
+        assert delegation._next_id(ws, delegation.LOG_DIR) == 6
+
+
+def test_a_record_made_by_hand_during_a_hold_is_never_overwritten(ws: Workspace) -> None:
+    with delegation.locked(ws):
+        assert delegation._append(ws, {"kind": "t"})["id"] == 1
+        delegation._log_path(ws, 2).write_text("id: 2\nhand: true\n")
+        with pytest.raises(delegation.DelegationError):
+            delegation._append(ws, {"kind": "t"})
+    assert "hand" in delegation._log_path(ws, 2).read_text()
+
+
+def test_the_cache_does_not_survive_an_exception_in_a_hold(ws: Workspace) -> None:
+    with pytest.raises(RuntimeError), delegation.locked(ws):
+        delegation._append(ws, {"kind": "t"})
+        raise RuntimeError
+    assert delegation._FILE_IDS == {}
+    delegation._log_path(ws, 9).write_text("id: 9\n")
+    with delegation.locked(ws):
+        assert delegation._next_id(ws, delegation.LOG_DIR) == 10
+
+
+def test_another_directory_has_its_own_ids(ws: Workspace) -> None:
+    with delegation.locked(ws):
+        assert [delegation._append(ws, {"k": 1}, delegation.JOBS_DIR)["id"] for _ in range(3)] == [
+            1,
+            2,
+            3,
+        ]
+        assert delegation._append(ws, {"kind": "t"})["id"] == 1
+        assert delegation._next_id(ws, delegation.JOBS_DIR) == 4
+
+
+def test_undo_through_apply_drops_the_cached_directory(ws: Workspace) -> None:
+    create_entity(ws)
+    [path] = entities(ws)
+    with delegation.locked(ws):
+        delegation._next_id(ws, str(path.parent.relative_to(ws.root)))  # primes the cache
+        assert _key(ws, str(path.parent.relative_to(ws.root))) in delegation._FILE_IDS
+        delegation.undo(ws, 1, "tone", "cli", True)  # _apply unlinks the entity file
+        assert _key(ws, str(path.parent.relative_to(ws.root))) not in delegation._FILE_IDS
+
+
+def test_a_journal_removal_drops_the_cached_directory(ws: Workspace) -> None:
+    from secondchair.core import journal
+
+    with delegation.locked(ws):
+        delegation._append(ws, {"kind": "t"})
+        assert _key(ws, delegation.LOG_DIR) in delegation._FILE_IDS
+        journal._put(delegation._log_path(ws, 1), None)
+        assert _key(ws, delegation.LOG_DIR) not in delegation._FILE_IDS
+        assert delegation._append(ws, {"kind": "t"})["id"] == 1

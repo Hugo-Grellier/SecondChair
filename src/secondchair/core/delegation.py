@@ -1445,15 +1445,23 @@ def _append(ws: Workspace, entry: dict, directory: str = LOG_DIR) -> dict:
     time, and write it. Callers hold the lock."""
     (ws.root / directory).mkdir(exist_ok=True)
     entry = {"id": _next_id(ws, directory), "at": datetime.now(UTC).isoformat(), **entry}
+    target = ws.root / directory / f"{entry['id']:06d}.yaml"
+    if target.exists():  # a file made by hand behind the cache: never overwrite a record
+        raise DelegationError(f"{target.name} already exists in {directory}; nothing was written.")
     _save(ws, entry, directory)
-    if ws.root.resolve() in _held.__dict__.get("roots", ()):  # _save dropped it: only ours is new
-        _FILE_IDS[str((ws.root / directory).resolve())] = entry["id"]
+    if _is_held(ws):  # _save dropped it: only ours is new
+        key = str((ws.root / directory).resolve())
+        _FILE_IDS[key] = max(_FILE_IDS.get(key, 0), entry["id"])
     return entry
 
 
+def _is_held(ws: Workspace) -> bool:
+    return ws.root.resolve() in _held.__dict__.get("roots", ())
+
+
 # Highest file id per directory, kept for one lock hold only (nobody else writes meanwhile) and
-# dropped by every write or removal in that directory (`_write`, `_put`, `_revert`), so the glob
-# runs once per directory per hold instead of once per append.
+# dropped by every write or removal in that directory (`_write`, `_apply`, the journal's
+# `_put`), so the glob runs once per directory per hold instead of once per append.
 _FILE_IDS: dict[str, int] = {}
 
 
@@ -1466,13 +1474,15 @@ def _next_id(ws: Workspace, directory: str) -> int:
     from secondchair.core import journal  # layer 5, applied through this module (ADR 0023)
 
     key = str((ws.root / directory).resolve())
-    top = _FILE_IDS.get(key) if ws.root.resolve() in _held.__dict__.get("roots", ()) else None
+    held = _is_held(ws)
+    top = _FILE_IDS.get(key) if held else None
     if top is None:
         top = max(
             (int(p.stem) for p in (ws.root / directory).glob("*.yaml") if p.stem.isdigit()),
             default=0,
         )
-        _FILE_IDS[key] = top
+        if held:
+            _FILE_IDS[key] = top
     ids = [top]
     ids += [
         int(Path(w["path"]).stem)
@@ -1554,6 +1564,7 @@ def locked(ws: Workspace | Path) -> Generator[None]:
             if not current:
                 continue
             held.add(root)
+            _FILE_IDS.clear()  # before recovery: nothing cached outside a hold survives into one
             try:
                 if isinstance(ws, Workspace) and not on_loop:
                     journal.recover(
