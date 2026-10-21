@@ -1087,6 +1087,20 @@ def test_a_faction_holds_one_fact_per_key_on_any_date(ws: Workspace) -> None:
     world.state(ws)  # the world still reads
     assert world._current(ws, at="4725-03-01")[council]["pool"]["state"] == poorer
 
+    # The other documented first step: an event that closes the current one, then the new one.
+    current = world._current(ws, at="4725-03-01")[council]["pool"]["id"]
+    act(
+        ws,
+        "record_event",
+        description="The Council's coffers are emptied.",
+        date="4725-04-01",
+        origin=GM,
+        closes=[current],
+    )
+    broke = {**poorer, "value": {"coin": {"value": 0, "income": 1, "cap": 5}}}
+    fact(ws, "The Council is broke.", state=broke, valid_from="4725-04-01")
+    assert world._current(ws, at="4725-04-01")[council]["pool"]["state"] == broke
+
 
 def test_a_catalogue_action_serves_the_faction_goals(ws: Workspace) -> None:
     council, _, _ = faction(ws)

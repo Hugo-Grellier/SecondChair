@@ -117,7 +117,9 @@ def tools(ws: Workspace) -> list[Tool]:
             if start < hi and lo < end:
                 raise CanonError(
                     f"{state['of']} already holds a {state['key']} fact ({f['id']}) on "
-                    "those dates: end it, or correct it, first."
+                    "those dates. To change it on a date D: first end it on D (correct_fact "
+                    "with valid_to D, or an event on D that closes it), then record the new "
+                    "one with valid_from D."
                 )
 
     def fact_doc(
@@ -205,7 +207,10 @@ def tools(ws: Workspace) -> list[Tool]:
         derived|narrative, does}, prerequisites: [{holds: fact id} or {front, clock_gte}],
         target (entity id or null), contest ({pool} or null), serves: [goal ids]}], which
         only the GM writes in prep: draft them into notes/ instead (a job origin is refused).
-        The statement says the same in words.
+        A faction holds one fact per key on any date, so change one in two steps: end the
+        current fact on date D (correct_fact with valid_to D, or an event on D that closes it),
+        then record the new one with valid_from D; an undated new fact is refused while the
+        current one holds. The statement says the same in words.
         The Core looks the origin's evidence up and refuses it when it cannot find it: record
         what it cannot find with a job origin, which may carry the same quote or page."""
         fact_id = f"f-{secrets.token_hex(4)}"
