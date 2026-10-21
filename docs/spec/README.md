@@ -66,6 +66,9 @@ Two ticket resolutions disagreed with an ADR or with each other. The GM settled 
 | [0017](../adr/0017-creative-drafts-live-in-notes-with-a-status.md) | Creative drafts stay in `notes/` with an id, a status and alternative sets; no draft facts | [12](12-campaign-creation-and-library.md) |
 | [0018](../adr/0018-snapshot-boundary-restore-and-upgrade-consent.md) | A snapshot is the workspace plus a paired Foundry world; restore into a fresh directory; a destructive migration needs consent. Amends ADR 0010 (in-place upgrade) and PKG-16 | [09](09-packaging.md) |
 | [0019](../adr/0019-post-v4-live-assistance-and-world-horizon.md) | Post-v4 horizon: live help pull-first, live speech, faction intents and an AI GM each amend one decision, in order | [11](11-out-of-scope.md), [03](03-delegation.md), [04](04-canon-memory-capture.md), [05](05-living-world-calendar.md) |
+| [0020](../adr/0020-proactive-cues-are-a-call-kind-that-expires.md) | Proposed: proactive cues are a call kind, `cue`, with a TTL, safe default expire and a budget held by the Core. Amends ADR 0005 | [03](03-delegation.md) |
+| [0021](../adr/0021-consented-live-speech-feeds-a-gm-only-context-window.md) | Proposed: consented live speech feeds an in-memory, GM-only context window; consolidation stays at the wrap. Amends ADR 0008 | [04](04-canon-memory-capture.md), [11](11-out-of-scope.md) |
+| [0022](../adr/0022-factions-choose-from-a-gm-written-catalogue-under-deterministic-validation.md) | Proposed: factions choose from a GM-written catalogue; a deterministic step validates, debits and applies. Amends ADR 0009 and LW-02 | [05](05-living-world-calendar.md) |
 
 ### Ticket resolutions without an ADR
 
