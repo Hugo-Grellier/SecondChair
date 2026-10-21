@@ -623,3 +623,70 @@ def test_no_runner_template_lets_a_job_relay_the_gms_approval() -> None:
     claude, codex = runner.HOSTS["claude"], runner.HOSTS["codex"]
     assert claude[claude.index("--disallowedTools") + 1] == "mcp__secondchair__approve_proposal"
     assert 'mcp_servers.secondchair.disabled_tools=["approve_proposal"]' in codex
+
+
+TIER_OF = {
+    "answer-probes": "standard",
+    "calibrate-encounters": "standard",
+    "diagnose-frictions": "standard",
+    "prepare-a-session": "deep",
+    "propose-consequences": "standard",
+    "propose-narrative-direction": "deep",
+    "quick-help": "fast",
+    "realise-a-scene": "standard",
+    "rebuild-entities-from-a-bible": "standard",
+    "settle-an-unless": "standard",
+    "world-turn": "fast",
+    "wrap-a-session": "standard",
+}
+
+
+def test_each_playbook_declares_its_intended_tier() -> None:
+    assert {s.name: runner.playbook(s.name)["tier"] for s in runner.skills()} == TIER_OF
+
+
+RUNNERS = {t: [{"host": "ok", "model": f"m-{t}", "effort": "high"}] for t in jobs.TIERS}
+
+
+def escalating(ws: Workspace, tier: str, moment: str = "between-sessions") -> int:
+    """A job at `tier`; its host (OK) exits without finish_job on every tier's only runner."""
+    delegation.change_moment(ws, moment)
+    return jobs.queue(
+        ws,
+        playbook="answer-probes",
+        inputs={"probes": str(BIBLE)},
+        expected_output="x",
+        responsibility="memory",
+        tier=tier,
+    )["id"]
+
+
+def run_failing(ws: Workspace, job_id: int) -> dict:
+    with pytest.raises(runner.RunnerError):
+        runner.run(ws, job_id, RUNNERS, {"ok": OK})
+    return job(ws, job_id)
+
+
+def test_a_failed_fast_job_is_retried_once_at_standard_and_no_further(ws: Workspace) -> None:
+    record = run_failing(ws, escalating(ws, "fast"))
+
+    assert [a["runner_configuration"]["model"] for a in record["attempts"]] == [
+        "m-fast",
+        "m-standard",
+    ]
+    assert [a.get("escalated_from") for a in record["attempts"]] == [None, "fast"]
+    assert (record["tier"], record["escalated_from"], record["status"]) == (
+        "standard",
+        "fast",
+        "queued",
+    )
+
+
+@pytest.mark.parametrize(
+    ("tier", "moment"), [("deep", "between-sessions"), ("fast", "live-session")]
+)
+def test_a_deep_or_live_job_is_not_escalated(ws: Workspace, tier: str, moment: str) -> None:
+    record = run_failing(ws, escalating(ws, tier, moment))
+
+    assert len(record["attempts"]) == 1
+    assert "escalated_from" not in record and record["tier"] == tier

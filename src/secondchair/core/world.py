@@ -381,7 +381,6 @@ def world_turn(ws: Workspace, now: str, since: str | None = None) -> list[dict]:
                     if narrative
                     else "The unless settled with settle_unless, citing fact ids.",
                     responsibility="narrative_direction" if narrative else "living_world",
-                    tier="standard",
                 )["id"]
                 _save(ws, record, OCCURRENCES_DIR)
         _write(ws.root / WORLD_FILE, f"cursor: '{now}'\n")
@@ -393,7 +392,6 @@ def world_turn(ws: Workspace, now: str, since: str | None = None) -> list[dict]:
                 inputs={"occurrences": " ".join(r["key"] for r in recorded)},
                 expected_output="Derived consequences proposed, each citing the facts it uses.",
                 responsibility="living_world",
-                tier="standard",
             )
         return recorded
 

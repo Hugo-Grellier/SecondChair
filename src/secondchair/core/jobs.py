@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 from mcp.server.mcpserver import Context
 
-from secondchair.core import canon, library, machine
+from secondchair.core import canon, library, machine, playbooks
 from secondchair.core.delegation import (
     JOBS_DIR,
     DelegationError,
@@ -47,7 +47,7 @@ def queue(
     inputs: dict[str, str],
     expected_output: str,
     responsibility: str,
-    tier: str,
+    tier: str | None = None,
     blocking: bool = False,
     entities: list[str] | None = None,
     entity: str | None = None,
@@ -57,10 +57,11 @@ def queue(
     gets the deadline of the call it prepares as its latency cap (ARC-28); a blocking one forced
     to break misses it at once (DEL-31). Its vocabulary is that of the entity ids it is about, or
     the whole campaign vocabulary (CAN-22). `entity` is the acting entity the job works for,
-    whose override withdraws it while queued (DEL-16). `writes` is the playbook's declaration that
+    whose override withdraws it while queued (DEL-16). No `tier` means the playbook's (ARC-25). `writes` is the playbook's declaration that
     it must log a delegated action (`finish_job` refuses otherwise, #171)."""
     from secondchair.core import calls  # it builds on this module
 
+    tier = tier or playbooks.playbook(playbook)["tier"]
     if tier not in TIERS:
         raise DelegationError(f"Tier {tier!r}: expected one of {', '.join(TIERS)}.")
     if responsibility not in RESPONSIBILITIES:
@@ -176,8 +177,25 @@ def start(ws: Workspace, job_id: int, config: dict[str, str], manual: bool) -> d
                 "manual": manual,
                 "outcome": "started",
                 "error": None,
+                **({"escalated_from": job["escalated_from"]} if "escalated_from" in job else {}),
             }
         )
+        _save(ws, job, JOBS_DIR)
+        return job
+
+
+def escalate(ws: Workspace, job_id: int) -> dict | None:
+    """Requeue a failed job one tier up, once (GM decision 17, #180): the job carries
+    `escalated_from` and its attempts from then on. None for a deep job, a live one (latency) or
+    one already escalated."""
+    with locked(ws):
+        job = read(ws, job_id)
+        up = TIERS.index(job["tier"]) + 1
+        if job["status"] != "queued" or job["moment"] == "live-session" or "escalated_from" in job:
+            return None
+        if up == len(TIERS):
+            return None
+        job.update(escalated_from=job["tier"], tier=TIERS[up])
         _save(ws, job, JOBS_DIR)
         return job
 

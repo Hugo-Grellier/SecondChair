@@ -86,7 +86,6 @@ def queue_wrap(ws: Workspace, inputs: dict[str, str]) -> dict:
         inputs=inputs,
         expected_output="The session's candidate facts consolidated into canon.",
         responsibility="memory",
-        tier="standard",
     )
 
 
@@ -469,7 +468,6 @@ def wrap(
         inputs={"until": interval["end"], "since": interval["start"]},
         expected_output="The world advanced to the current date.",
         responsibility="living_world",
-        tier="fast",  # the world-turn playbook's tier (ARC-25)
     )
     return summary
 

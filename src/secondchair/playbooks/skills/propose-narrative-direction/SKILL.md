@@ -5,7 +5,7 @@ license: Apache-2.0
 compatibility: Needs the SecondChair MCP server (secondchair serve).
 metadata:
   secondchair-responsibility: narrative_direction
-  secondchair-tier: standard
+  secondchair-tier: deep
   secondchair-writes: "true"
   secondchair-inputs: observation?, occurrence?
   secondchair-expected-output: A narrative-direction proposal for the deadline.

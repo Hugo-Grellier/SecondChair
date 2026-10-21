@@ -36,14 +36,14 @@ def entity(ws: Workspace, name: str) -> str:
     return found["id"]
 
 
-def wrap_job(ws: Workspace, session: int = 1) -> int:
+def wrap_job(ws: Workspace, session: int = 1, tier: str = "standard") -> int:
     job = jobs.queue(
         ws,
         playbook="wrap-a-session",
         inputs={"session": str(session), "notes": str(SESSION_1)},
         expected_output="",
         responsibility="memory",
-        tier="standard",
+        tier=tier,
     )
     jobs.start(ws, job["id"], {"host": "h", "model": "m", "effort": "e"}, manual=True)
     return job["id"]
@@ -613,3 +613,28 @@ def test_spotlight_counts_the_sessions_admitted_facts_citing_each_pc(ws: Workspa
 
 def entity_id(ws: Workspace, name: str) -> str:
     return next(e["id"] for e in index.search_entities(ws) if e["names"] == [name])
+
+
+def test_core_queued_jobs_use_the_playbook_tier(ws: Workspace) -> None:
+    queued = [capture.queue_wrap(ws, {"session": "1", "notes": str(SESSION_1)})]
+    jobs.start(ws, queued[0]["id"], {"host": "h", "model": "m", "effort": "e"}, manual=True)
+    jobs.end(ws, queued[0]["id"])
+    capture.wrap(ws, 1, authenticated=True, end="4725-03-03")
+    queued += [j for j in jobs.pending(ws) if j["playbook"] == capture.WORLD_TURN]
+
+    assert {j["playbook"] for j in queued} == {capture.PLAYBOOK, capture.WORLD_TURN}
+    assert all(j["tier"] == runner.playbook(j["playbook"])["tier"] for j in queued)
+
+
+def test_tier_does_not_change_admission(tmp_path: Path) -> None:
+    results = []
+    for tier in ("fast", "deep"):
+        ws = workspace.init(tmp_path / tier, "en", "absalom")
+        delegation.change_moment(ws, "between-sessions")
+        job = wrap_job(ws, tier=tier)
+        submit(ws, job, GAUGE, known_by=["party"])
+        [done] = capture.consolidate(ws, job)
+        [fact] = index.search_facts(ws)
+        results.append((done["status"], done.get("checks"), fact["rank"]))
+
+    assert results[0] == results[1]
