@@ -557,6 +557,7 @@ def test_every_playbook_is_an_agent_skill_with_a_tier_and_a_responsibility() -> 
         "settle-an-unless",
         "world-turn",
         "wrap-a-session",
+        "write-an-npc-dossier",
     ]
     for skill in skills:
         front = yaml.safe_load((skill / "SKILL.md").read_text().split("---", 2)[1])
@@ -642,6 +643,7 @@ TIER_OF = {
     "settle-an-unless": "standard",
     "world-turn": "fast",
     "wrap-a-session": "standard",
+    "write-an-npc-dossier": "deep",
 }
 
 
