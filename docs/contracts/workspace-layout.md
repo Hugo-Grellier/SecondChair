@@ -241,6 +241,8 @@ rescheduled_date: null
 
 Keys: `<front>/tick@<date>`, `<front>/<step id>`, `<situation>/deadline@<date>`, `<front>/pause@<date>`, `<front>/resume@<date>`, and `<key>~<date>` for a rescheduled one. A rule effect is applied through the action log under living world, every entry carrying the key (`occurrence`); an `unless` tick queues a `settle-an-unless` job (input `occurrence`) and an engaged situation's deadline a `propose-narrative-direction` job, whose every action carries the deadline's key: approving one applies the occurrence (its `entries`), rejecting it leaves the occurrence queued, and undoing the last approved one returns it to the queue (LW-19); a world-turn that applied anything queues one `propose-consequences` job (input `occurrences`, the keys). On the CLI, in the workspace: `secondchair world turn <date> [--since <date>]` (refused in a live session; `--since` on the first one), `secondchair world forecast <date>` (writes nothing), `secondchair world decide <key> accept|reject|reschedule [--date <date>]`, `secondchair world undo <key> --reason <reason>` (with its cascade; the keys return to the queue) and `secondchair world pause|resume <front> <date>`.
 
+An effect is an offscreen event on the occurrence's date, closing the entity's current state fact of that key and opening the new one. When a later occurrence of the same entity applied first (an `unless` settled late, a late accept), the current state fact starts after the occurrence's date: the event on the occurrence's date then changes nothing, and a second event, on that fact's start, closes it and opens the new one. The new value takes hold there, so no fact ends before it starts and one state fact per key holds on each date. A retcon of either event replaces both.
+
 ### `.secondchair/journal/`
 
 An occurrence and the threshold steps its tick crosses are applied as one (ADR 0016): planned in memory, the level checked once (held at propose, nothing is written but the record and its call), then written through one journal, `.secondchair/journal/<16 hex digits of the SHA-256 of the key>.yaml`, before any of its files:
@@ -458,6 +460,18 @@ Mira Pell sits on the Lock Council.
 | `state` | Optional (LW-03): makes it a **state fact** of a front or a situation, `{of, key, value}`, `of` one of its `entities`. `key` and `value`: `front` `{carrier, participants: [], capacity, every (a duration ≥ 1d), ticks: 1, anchor (a date), unless: null (a condition in words), active: true}`; `clock` (an integer ≥ 0); `agenda` `{id, when: {date} or {clock_gte}, status: pending, done or averted}`, one fact per step; `situation` `{stage: available, active (the party engaged it), resolved or expired, deadline: null, participants: []}`. An entity holds at most one current fact per key (one per agenda step). Every change is an offscreen event closing the old state fact and opening the new one. |
 | `never_true` | Optional, `true` for a **belief** (CAN-15): a statement that is never true, which knowers can only believe or suspect. It has no validity, no event opens or closes it, and searches at a date leave it out. Absent means false. |
 
+### Validity as of a date
+
+One rule decides whether a fact holds on a campaign date (#170). Canon searches at a date (`search_facts` with `at`), the living world's state, the world-turn and its forecast, settling an `unless` and a mystery's lost clues all apply it.
+
+- Validity is start-inclusive and end-exclusive. A fact holds on a date when its start (`valid_from`, or the date of the event that opens it) is on or before that date and its end (`valid_to`, or the date of the event that closes it) is after it. An open start or end does not limit it.
+- A partial date is the start of its period. `valid_from: "4725-03"` holds from 4725-03-01; `valid_to: "4725-04"` ends before 4725-04-01; a search at `"4725-03"` is a search on 4725-03-01.
+- A fact opened and closed on the same day never holds. On a same-day transition, the new fact holds from that day and the old one ends that day.
+- A belief (`never_true`) never holds.
+- Supersession is by events, never by date order: the new fact holds once its opening event's date is reached, the old one ends on its closing event's date. An entity holds at most one state fact per key on a date; two that hold together are refused as invalid canon, never picked between.
+- A retconned fact, or a fact only a pending retcon opened, is not canon and holds on no date.
+- "Now" is the world-turn cursor for the living world. Before the first world-turn it is the current date of `time.yaml`. Canon reads without a date, such as a mystery's lost clues, use that current date too. With no date at all, an open fact holds.
+
 The record time is not in the file: the index takes it from the action log entry whose `after` is the file's current content (`admitted_by`), which carries the real time and the moment. A file changed by hand is admitted by its `hand_edit` entry (below).
 
 ## `canon/events/`
@@ -480,7 +494,7 @@ The party opened the bypass.
 
 - An **evolution** is one event that closes the old fact and opens the new one. Closing a fact that ranks above the event, has already ended, or starts after the event is refused as a contradiction.
 - A **correction** rewrites a fact file in place, with no event. It is refused when the fact is played or ranks above the correction; the previous version stays in the action log entry's `before`.
-- A **retcon** is an event whose `replaces` names an earlier event, with the GM's words as origin. The earlier event stays on record. The retcon takes effect only at the `gm_decision` rank, once the GM confirms it; until then it is `pending_retcon` and the earlier event stays `canon`. Once in effect, the earlier event is `replaced` and the facts only it opened are `retconned`: kept, but left out of searches by default.
+- A **retcon** is an event whose `replaces` names an earlier event, with the GM's words as origin. The earlier event stays on record. The retcon takes effect only at the `gm_decision` rank, once the GM confirms it; until then it is `pending_retcon` and the earlier event stays `canon`. Once in effect, the earlier event is `replaced` and the facts only it opened are `retconned`: kept, but left out of searches by default. When the earlier event is a world-turn effect, every event its occurrence key wrote is `replaced` with it (the key of the action log entry that wrote the event).
 - Nothing is deleted.
 
 ## `canon/mysteries/`
@@ -503,7 +517,7 @@ clues:
 - Local ids (`id`) are the author's, unique within the mystery across conclusions, nodes and clues.
 - A node has an `entity` (a place, a person, a faction). It is an entry with `entry: true`, or with a `proactive` fact, such as a front's agenda step, that brings the party in while it holds.
 - A clue is discoverable evidence: a fact `on` a node, pointing to node and conclusion ids.
-- The file holds no state. A clue is **lost** when its fact no longer holds (closed by an event, or retconned), **found** when the party knows its fact. A conclusion is **solved** when the party knows its fact.
+- The file holds no state. A clue is **lost** when its fact no longer holds on the current date of `time.yaml` (closed by an event, or retconned; any date when none is set), **found** when the party knows its fact. A conclusion is **solved** when the party knows its fact.
 - `check_mystery` reports, while a conclusion is unsolved, the v3 warnings: `mystery-entry` (no entry), `mystery-unreachable` (a node not reachable from the entries through live clues), `mystery-node-clues` (fewer than 3 clues point to a node that is not an entry, the inverted three-clue rule), `mystery-conclusion` (no live clue on a reachable node), `mystery-three-clues` (fewer than 3 live clues, or on reachable nodes), `mystery-single-node` (all of a conclusion's clues on one node).
 
 ## `canon/knowledge/`
