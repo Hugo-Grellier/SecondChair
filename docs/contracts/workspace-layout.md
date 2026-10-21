@@ -540,11 +540,11 @@ items:
 choices: {torch: overwrite}   # the GM's calls on conflicts, optional
 ```
 
-The GM may edit it by hand: the next GM client connection, or the running one within a second, realises the new version.
+A hand edit of it is not logged (CAN-11 scans `canon/` only), so the new version is realised at *autonomous*, the next GM client connection or the running one within a second: a lower ceiling refuses it until the GM raises the ceiling or prepares the file again through `prepare_scene` (DEL-19a, #163).
 
 ## `documents/`
 
-One YAML file per prepared world document (an NPC actor, a handoff or handout journal, a treasure item, a playlist, a roll table), named by its key: its **desired state**, realised in the VTT by reconciliation before the scenes, which may refer to it as `@prepared:<key>` ([foundry-bridge.md](foundry-bridge.md#prepared-world-documents-arc-07-arc-10)). It is not canon. `prepare_document` writes it (prep, reversible); its format is `desired_document` in [`foundry-bridge.schema.json`](foundry-bridge.schema.json). The GM may edit it by hand, as a scene's.
+One YAML file per prepared world document (an NPC actor, a handoff or handout journal, a treasure item, a playlist, a roll table), named by its key: its **desired state**, realised in the VTT by reconciliation before the scenes, which may refer to it as `@prepared:<key>` ([foundry-bridge.md](foundry-bridge.md#prepared-world-documents-arc-07-arc-10)). It is not canon. `prepare_document` writes it (prep, reversible); its format is `desired_document` in [`foundry-bridge.schema.json`](foundry-bridge.schema.json). A hand edit of it, as of a scene, is not logged and is realised at *autonomous*: a lower ceiling refuses it until the GM raises the ceiling or prepares the file again through `prepare_document` (DEL-19a, #163).
 
 ```yaml
 # documents/grik.yaml
