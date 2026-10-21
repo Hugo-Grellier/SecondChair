@@ -106,6 +106,9 @@ ids; every id must resolve). Write one only when the GM asks for it. Sections:
 - **Change triggers**: each a possible future ("if the party spares her brother,
   she softens"), never applied by itself. A trigger is not a fact and does not
   fire; only play, through the wrap, changes canon.
+  Also list each in the front matter as `triggers: [{if: "...", facts: [f-...]}]`,
+  `facts` being the canon fact ids that would make it true; `session_signals`
+  reports a trigger as fulfilled when all of them hold, and still applies nothing.
 
 What is true now, such as a secret motive, stays a canon fact the party does not
 know; the dossier points to it by id and never restates it. Check any line a

@@ -23,6 +23,7 @@ from secondchair.core import (
     mystery,
     notes,
     rules,
+    signals,
     workspace,
     world,
 )
@@ -872,6 +873,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     draft_cmd.add_argument("slug")
     draft_cmd.add_argument("--lose", action="append", default=[], help="simulate losing a clue id")
+    signals_cmd = commands.add_parser(
+        "signals", parents=[in_workspace], help="a session's deterministic signals; writes nothing"
+    )
+    signals_cmd.add_argument("session", type=int)
     world_cmd = commands.add_parser("world", help="advance, forecast and steer the living world")
     world_sub = world_cmd.add_subparsers(dest="world_command", required=True)
     for name, help_text in (
@@ -1004,6 +1009,9 @@ def main(argv: list[str] | None = None) -> int:
             return _prep_command(args)
         elif args.command == "mystery":
             print(_mystery_command(args))
+        elif args.command == "signals":
+            [tool] = signals.tools(workspace.load(args.workspace))
+            print(json.dumps(tool.fn(args.session), ensure_ascii=False, indent=2))
         elif args.command == "world":
             print(_world_command(args))
         else:
