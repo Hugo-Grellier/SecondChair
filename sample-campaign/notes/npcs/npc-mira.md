@@ -1,13 +1,12 @@
 ---
 id: d-4a1c7e02
 status: draft
-cites: [B04, B13, B15]
 ---
 
 # Mira Pell, Council clerk (dossier)
 
-Worked example of the NPC dossier convention. `cites` uses the bible's paragraph
-labels; in a rebuilt workspace they are the fact ids. The truth about her stays
+Worked example of the NPC dossier convention. Facts are referenced by the bible's
+paragraph labels in the body; a rebuilt workspace has no fixed fact ids to put in `cites`. The truth about her stays
 in canon: what she did is B13, what the Council does offscreen is B15. This note
 holds direction only and never restates them.
 

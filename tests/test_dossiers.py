@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from test_s0_probes import GOLD, SAMPLE, rebuild
 
-from secondchair.core import index, knowledge
+from secondchair.core import index, knowledge, notes
 
 DOSSIERS = sorted((SAMPLE / "notes/npcs").glob("*.md"))
 SECTIONS = (
@@ -28,7 +28,7 @@ def test_three_dossiers_have_the_front_matter_and_sections() -> None:
         front, body = index.split_doc(path.read_text())
         assert re.fullmatch(r"d-[0-9a-f]{8}", front["id"])
         assert front["status"] == "draft"
-        assert front["cites"] and set(front["cites"]) <= labels
+        assert set(re.findall(r"\bB\d\d\b", body)) & labels  # facts pointed at by label
         assert all(f"## {s}" in body for s in SECTIONS)
 
 
@@ -47,3 +47,12 @@ def test_no_secret_is_restated_and_every_spoken_line_passes_the_party_guard(
     # The guard is live: the secret name in a line is refused.
     with pytest.raises(knowledge.AudienceRefused):
         knowledge.guard(ws, knowledge.PARTY, "Ilex Venn keeps it.", common)
+
+
+def test_the_notes_validator_accepts_the_dossiers_in_a_rebuilt_workspace(tmp_path: Path) -> None:
+    ws, _, _ = rebuild(tmp_path)
+    (ws.root / "notes/npcs").mkdir(parents=True)
+    for path in DOSSIERS:
+        (ws.root / "notes/npcs" / path.name).write_text(path.read_text())
+
+    assert notes.check(ws) == []

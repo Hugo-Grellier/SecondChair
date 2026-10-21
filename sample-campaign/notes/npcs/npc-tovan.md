@@ -1,13 +1,12 @@
 ---
 id: d-9b3d5f17
 status: draft
-cites: [B05, B14, B16]
 ---
 
 # Tovan Reed, boat captain (dossier)
 
-Worked example of the NPC dossier convention. `cites` uses the bible's paragraph
-labels. What Tovan believes about the Circle is B14, a belief that is never true:
+Worked example of the NPC dossier convention. Facts are referenced by the bible's
+paragraph labels in the body; a rebuilt workspace has no fixed fact ids to put in `cites`. What Tovan believes about the Circle is B14, a belief that is never true:
 this note directs how he acts on it and never states it as fact. The Union's
 offscreen step is B16.
 

@@ -1,13 +1,12 @@
 ---
 id: d-c27e8a40
 status: draft
-cites: [B06, B07, B10, B18]
 ---
 
 # Edda Vale, bell keeper (dossier)
 
-Worked example of the NPC dossier convention. `cites` uses the bible's paragraph
-labels. She knows a name and a membership that the party does not (B10): the
+Worked example of the NPC dossier convention. Facts are referenced by the bible's
+paragraph labels in the body; a rebuilt workspace has no fixed fact ids to put in `cites`. She knows a name and a membership that the party does not (B10): the
 dossier points at that fact and never writes it. The fee she holds is B18.
 
 ## Desire, need, fear, contradiction
