@@ -19,11 +19,18 @@ PREP_DIR = "prep"
 PATH = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*(/[a-z0-9]+(-[a-z0-9]+)*)*\.md$")
 FENCE = "```yaml\n"
 GUIDE = "players-guide.md"
-# The fixed notice of an adventure's players' guide (#178), verbatim from prepare-an-adventure.
-UNOFFICIAL = (
-    "Options in this guide written by a model are unofficial: they are not published rules, "
-    "and the GM decides whether the table uses them."
-)
+# The fixed notice of an adventure's players' guide (#178) by campaign language (VIS-05),
+# verbatim from prepare-an-adventure. A language not listed gets the English one.
+UNOFFICIAL = {
+    "en": (
+        "Options in this guide written by a model are unofficial: they are not published rules, "
+        "and the GM decides whether the table uses them."
+    ),
+    "fr": (
+        "Les options de ce guide rédigées par un modèle sont non officielles : ce ne sont pas "
+        "des règles publiées, et le MJ décide si la table les utilise."
+    ),
+}
 COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 QUOTE = re.compile(r"^[ \t>]*", re.M)
 
@@ -54,14 +61,19 @@ def index_block(text: str) -> dict[str, Any]:
     return block
 
 
-def carries_notice(text: str) -> bool:
-    """Whether the body a reader sees carries `UNOFFICIAL` verbatim: the index block and HTML
+def notice_for(language: str) -> str:
+    """The notice for a BCP 47 campaign language (its primary subtag), English by default."""
+    return UNOFFICIAL.get(language.lower().split("-")[0], UNOFFICIAL["en"])
+
+
+def carries_notice(text: str, notice: str) -> bool:
+    """Whether the body a reader sees carries `notice` verbatim: the index block and HTML
     comments do not count; blockquote markers and line breaks are ignored, emphasis inside the
     sentence is not."""
     body = text.rstrip()
     if (start := body.rfind(FENCE)) >= 0 and body.endswith("```"):
         body = body[:start]
-    return UNOFFICIAL in " ".join(QUOTE.sub("", COMMENT.sub("", body)).split())
+    return notice in " ".join(QUOTE.sub("", COMMENT.sub("", body)).split())
 
 
 def write_prep(path: str, text: str) -> Change:
@@ -91,15 +103,17 @@ def tools(ws: Workspace) -> list[Tool]:
         uses; flavour with no truth value cites nothing) name an unknown fact or one the party
         does not know. A players' guide (a file named `players-guide.md`) is also refused when
         its body (outside the index block and HTML comments) lacks the fixed notice of the
-        prepare-an-adventure playbook, verbatim. A read: it changes nothing. Returns the mode
-        each cited fact is held in."""
+        prepare-an-adventure playbook for the campaign language, verbatim. A read: it
+        changes nothing. Returns the mode each cited fact is held in."""
         text = read_prep(ws, path)
         cites = index_block(text).get("cites") or []
         if not (isinstance(cites, list) and all(isinstance(c, str) for c in cites)):
             raise CanonError("`cites` in the index block must be a list of fact ids.")
         notice = ""
-        if path.rsplit("/", 1)[-1] == GUIDE and not carries_notice(text):
-            notice = f"A players' guide must carry the notice, verbatim: {UNOFFICIAL!r}."
+        if path.rsplit("/", 1)[-1] == GUIDE and not carries_notice(
+            text, wanted := notice_for(ws.campaign_language)
+        ):
+            notice = f"A players' guide must carry the notice, verbatim: {wanted!r}."
         try:
             held = knowledge.guard(ws, PARTY, text, cites, at)
         except knowledge.AudienceRefused as e:

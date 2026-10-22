@@ -2,6 +2,7 @@
 
 import copy
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,10 +11,11 @@ from test_canon import call, entity, fact
 from test_knowledge import learn, ws  # noqa: F401  (ws is a fixture)
 
 from secondchair.cli import main
-from secondchair.core import vtt
+from secondchair.core import vtt, workspace
 from secondchair.core.prep import UNOFFICIAL
 from secondchair.core.workspace import Workspace
 
+EN = UNOFFICIAL["en"]
 UUID = "Compendium.sys.bestiary.Actor.abc123"
 GOB = {"uuid": UUID, "name": "Gob", "level": 1}
 GOOD: dict[str, Any] = {
@@ -150,9 +152,7 @@ def test_a_clean_guide_passes(ws: Workspace) -> None:  # noqa: F811
     known = fact(ws, "Tovan Reed keeps the lighthouse.", entities=[tovan])
     learn(ws, "party", known)
 
-    clean = guide(
-        ws, f"Tovan Reed keeps the lighthouse; bring a lantern.\n\n*{UNOFFICIAL}*", [known]
-    )
+    clean = guide(ws, f"Tovan Reed keeps the lighthouse; bring a lantern.\n\n*{EN}*", [known])
 
     assert not clean.is_error
     assert clean.structured_content == {known: "knows"}
@@ -168,27 +168,27 @@ def test_a_players_guide_without_the_unofficial_notice_is_refused(ws: Workspace)
 
 
 def test_the_notice_may_wrap_across_lines(ws: Workspace) -> None:  # noqa: F811
-    wrapped = UNOFFICIAL.replace(" they are ", "\nthey are\n")
+    wrapped = EN.replace(" they are ", "\nthey are\n")
 
     assert not guide(ws, f"Bring a lantern.\n\n_{wrapped}_", []).is_error
 
 
 def test_the_notice_may_be_a_wrapped_blockquote(ws: Workspace) -> None:  # noqa: F811
-    quoted = "> " + UNOFFICIAL.replace(" they are ", "\n> they are\n> ")
+    quoted = "> " + EN.replace(" they are ", "\n> they are\n> ")
 
     assert not guide(ws, f"Bring a lantern.\n\n{quoted}", []).is_error
 
 
 def test_emphasis_inside_the_notice_is_refused(ws: Workspace) -> None:  # noqa: F811
-    altered = UNOFFICIAL.replace("unofficial", "**unofficial**")
+    altered = EN.replace("unofficial", "**unofficial**")
 
     assert guide(ws, f"Bring a lantern.\n\n{altered}", []).is_error
 
 
 def test_a_notice_the_reader_cannot_see_is_refused(ws: Workspace) -> None:  # noqa: F811
-    hidden = guide(ws, f"Bring a lantern.\n<!-- {UNOFFICIAL} -->", [])
-    unclosed = guide(ws, f"Bring a lantern.\n<!-- {UNOFFICIAL}", [])
-    note(ws, {"cites": [], "notice": UNOFFICIAL}, "players-guide", "Bring a lantern.")
+    hidden = guide(ws, f"Bring a lantern.\n<!-- {EN} -->", [])
+    unclosed = guide(ws, f"Bring a lantern.\n<!-- {EN}", [])
+    note(ws, {"cites": [], "notice": EN}, "players-guide", "Bring a lantern.")
     in_block = call(ws, "check_prep_guide", path="adventure-x/players-guide.md")
 
     for result in (hidden, unclosed, in_block):
@@ -199,11 +199,32 @@ def test_only_a_players_guide_needs_the_notice(ws: Workspace) -> None:  # noqa: 
     assert not guide(ws, "Bring a lantern.", [], name="handout").is_error
 
 
-def test_the_skill_states_the_notice_the_guard_requires() -> None:
+def test_the_skill_states_each_notice_the_guard_requires() -> None:
     from secondchair.core.playbooks import skills
 
     [skill] = [s / "SKILL.md" for s in skills() if s.name == "prepare-an-adventure"]
-    assert f"*{UNOFFICIAL}*" in skill.read_text()
+    for sentence in UNOFFICIAL.values():
+        assert f"*{sentence}*" in skill.read_text()
+
+
+def campaign(tmp_path: Path, language: str) -> Workspace:
+    main(["init", str(tmp_path / language), "--language", language, "--calendar", "absalom"])
+    return workspace.load(tmp_path / language)
+
+
+def test_a_french_guide_needs_the_french_notice(tmp_path: Path) -> None:
+    fr = campaign(tmp_path, "fr")
+
+    assert not guide(fr, f"Apportez une lanterne.\n\n*{UNOFFICIAL['fr']}*", []).is_error
+    english = guide(fr, f"Apportez une lanterne.\n\n*{EN}*", [])
+    assert english.is_error and UNOFFICIAL["fr"] in english.content[0].text
+
+
+def test_an_unlisted_language_falls_back_to_the_english_notice(tmp_path: Path) -> None:
+    de = campaign(tmp_path, "de-AT")
+
+    assert not guide(de, f"Bring a lantern.\n\n*{EN}*", []).is_error
+    assert guide(de, f"Bring a lantern.\n\n*{UNOFFICIAL['fr']}*", []).is_error
 
 
 def test_the_cli(ws: Workspace, capsys: pytest.CaptureFixture[str]) -> None:  # noqa: F811

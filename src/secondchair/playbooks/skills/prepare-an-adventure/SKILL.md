@@ -51,7 +51,9 @@ Write `adventure-<slug>/players-guide.md` for the players, with no GM-only fact:
 - **Tie-ins**: how a character can be connected to the starting place or its people.
 - **Backgrounds and skills** that fit, and options the table may use.
 - **Expectations**: the table's lines and veils from the brief, the party's size, level and how the group should hang together.
-- **Notice**, verbatim: *Options in this guide written by a model are unofficial: they are not published rules, and the GM decides whether the table uses them.*
+- **Notice**, verbatim, the one for the campaign language (English for any language not listed):
+  - `en`: *Options in this guide written by a model are unofficial: they are not published rules, and the GM decides whether the table uses them.*
+  - `fr`: *Les options de ce guide rédigées par un modèle sont non officielles : ce ne sont pas des règles publiées, et le MJ décide si la table les utilise.*
 
 Mention only what the party already knows or may be told. Cite in the index block's `cites` the ids of the canon facts the guide uses; flavour with no truth value cites nothing. The GM shares the guide outside SecondChair; you never publish it.
 
