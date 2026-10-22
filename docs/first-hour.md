@@ -13,6 +13,8 @@ uv tool install "secondchair @ git+https://github.com/Hugo-Grellier/SecondChair@
 secondchair --help
 ```
 
+`@main` is the head of the repository, not a pinned release; there are no release tags yet, so a later install may differ from this page.
+
 You should see a usage line and the list of commands (`init`, `serve`, `token`, `host`, `status`, and so on). If `secondchair` is not found, add uv's tool directory to your `PATH` (`uv tool update-shell`) and open a new terminal.
 
 ## 2. Create the campaign workspace
@@ -51,7 +53,7 @@ In a second terminal:
 secondchair host setup claude        # or: secondchair host setup codex
 ```
 
-It prints, and never applies, two things: the command or config that adds the Core's MCP server (`http://127.0.0.1:7240/mcp`) to your agent, and the commands that install the SecondChair playbooks. For Claude Code that is `claude mcp add --scope user --transport http secondchair http://127.0.0.1:7240/mcp` plus `claude plugin marketplace add …` and `claude plugin install …` lines. Copy them into your shell, one block at a time.
+It prints, and never applies, two things: the command or config that adds the Core's MCP server (`http://127.0.0.1:7240/mcp`) to your agent, and the commands that install the SecondChair playbooks. For Claude Code that is `claude mcp add --scope user --transport http secondchair http://127.0.0.1:7240/mcp` plus `claude plugin marketplace add …` and `claude plugin install …` lines. Copy the lines exactly as printed, one block at a time: the paths in them are specific to your machine.
 
 Check it: open your agent in the workspace (`cd ~/campaigns/my-campaign && claude`) and ask "what do you know about this campaign?". It should call SecondChair and tell you the campaign is empty, in English. If it cannot see SecondChair, `serve` is not running or the MCP command was not applied; restart the agent after applying it.
 
@@ -135,7 +137,9 @@ secondchair jobs run                                             # or ask your a
 secondchair wrap 1                                               # your round of grouped questions
 ```
 
-`wrap` asks you to settle each question and the session's dates. It is interactive on purpose. When done, what was played is canon, ranked above any plan. Then let the world move on:
+`wrap` asks you to settle each question and the session's dates. It is interactive on purpose. When it finishes, what was played is canon, ranked above any plan, the campaign date is the session's end date, and a world-turn job is queued (`wrap` prints `World-turn job N queued`). Run it with `secondchair jobs run` (or ask your agent to start it) and the world moves on to that date.
+
+To move the world on to a later date, for example before the next session, run:
 
 ```sh
 secondchair world turn 4726-03-21
