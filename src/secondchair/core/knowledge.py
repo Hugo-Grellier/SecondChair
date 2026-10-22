@@ -154,7 +154,11 @@ def active_cue(ws: Workspace) -> dict[str, Any] | None:
         cue = json.loads((ws.root / CUE_FILE).read_text())
     except OSError, ValueError:
         return None
-    if not isinstance(cue, dict) or not observations.still(ws, cue.get("as_of")):
+    if (
+        not isinstance(cue, dict)
+        or not isinstance(cue.get("npc"), str)  # a damaged file fails closed
+        or not observations.still(ws, cue.get("as_of"))
+    ):
         return None
     return cue
 

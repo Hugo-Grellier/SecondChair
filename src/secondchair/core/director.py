@@ -46,7 +46,7 @@ def situation(ws: Workspace) -> dict[str, Any]:
         # ponytail: a kind-less entity counts as an NPC, since nothing else tells it from a PC;
         # a PC whose kind the GM has not set to pc shows until it is.
         if e["kind"] in ("npc", None)
-        and (names & {*e["names"], *e["aliases"]} or (cue and cue["npc"] == e["id"]))
+        and (names & {*e["names"], *e["aliases"]} or (cue or {}).get("npc") == e["id"])
     ]
     return {
         "as_of": as_of,

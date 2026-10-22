@@ -14,7 +14,15 @@ from test_canon import entity, fact
 from test_knowledge import learn
 
 from secondchair.cli import main
-from secondchair.core import delegation, director, index, knowledge, observations, workspace
+from secondchair.core import (
+    capture,
+    delegation,
+    director,
+    index,
+    knowledge,
+    observations,
+    workspace,
+)
 from secondchair.core.server import build_server
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
@@ -491,6 +499,29 @@ def test_outside_a_session_the_card_reads_the_next_sessions_handoff_and_the_cued
     card = state(ws)["situation"]
     assert [n["name"] for n in card["npcs"]] == ["Tovan Reed"]
     assert card["handoff"] == ["Tovan Reed rings the bell at dusk."]  # session 1's, the next
+
+
+def test_the_card_reads_knowledge_as_of_the_campaigns_current_date(ws: Workspace) -> None:
+    tovan, bell, _ = npc_who_knows(ws)  # Tovan learned it in 4725
+    learn(ws, "party", bell, date="4726-03-01")  # the party, only later
+    cue(ws, tovan, "It only rings when the nights are dry.", [bell])
+    capture.set_current_date(ws, "4726-01-09")
+    gesture(ws, "situation")
+    [npc] = state(ws)["situation"]["npcs"]
+    assert ([f["id"] for f in npc["shared"]], [f["id"] for f in npc["secret"]]) == ([], [bell])
+    capture.set_current_date(ws, "4726-04-01")
+    gesture(ws, "situation")
+    [npc] = state(ws)["situation"]["npcs"]
+    assert ([f["id"] for f in npc["shared"]], npc["secret"]) == ([bell], [])
+
+
+def test_a_cue_file_with_no_npc_adds_nobody_to_the_card(ws: Workspace) -> None:
+    entity(ws, "Tovan Reed")
+    as_of = observations.position(ws) | {"at": "2026-10-21T20:00:00+00:00"}
+    (ws.root / knowledge.CUE_FILE).write_text(json.dumps({"goal": "x", "as_of": as_of}))
+    assert gesture(ws, "situation")["ok"] is True
+    found = state(ws)  # the Desk still renders: no cue, and nobody on the card
+    assert (found["cue"], found["situation"]["npcs"]) == (None, [])
 
 
 def test_a_situation_card_file_with_no_as_of_or_garbled_is_never_shown(ws: Workspace) -> None:

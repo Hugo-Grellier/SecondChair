@@ -329,6 +329,13 @@ test("the situation card is collapsed by default and stays as the GM left it acr
   d.receive({ ...STATE, situation: null });
   d.receive(state);
   assert.equal(d.cardOpen, false);
+  // A new card pulled within one refresh, never withdrawn in between: collapsed again too.
+  d.setCardOpen(true);
+  d.receive({ ...state });
+  assert.equal(d.cardOpen, true);
+  const newer = { ...CARD, as_of: { ...CARD.as_of, at: "2026-10-21T20:21:00+00:00" } };
+  d.receive({ ...STATE, situation: newer });
+  assert.equal(d.cardOpen, false);
 });
 
 test("a player never sees the situation card nor pulls one", async () => {

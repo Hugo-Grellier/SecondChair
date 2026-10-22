@@ -103,8 +103,10 @@ export function createDesk({ send, isGM, onChange }) {
      */
     receive(message) {
       if (message.type === "desk") {
+        const shown = state?.situation?.as_of.at;
         state = /** @type {DeskState} */ (message);
-        if (!state.situation) cardOpen = false;
+        // A withdrawn card, or a new one pulled since: collapsed again.
+        if (state.situation?.as_of.at !== shown) cardOpen = false;
         onChange();
         return true;
       }
