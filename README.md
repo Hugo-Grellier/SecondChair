@@ -1,12 +1,16 @@
 # SecondChair
 Human-directed, AI-operated campaign director for tabletop GMs (PF2e + Foundry first)
 
-## Install
+**New here? Follow [Your first hour](docs/first-hour.md)**: install to a wrapped session, with every command and what you should see. Not sure what to ask your agent? See [What to ask](docs/what-to-ask.md).
+
+## Install and reference
+
+The quickest path is [Your first hour](docs/first-hour.md); this section is the full reference.
 
 Python 3.14 or later, with [uv](https://docs.astral.sh/uv/):
 
 ```sh
-uv tool install "secondchair @ git+https://github.com/Hugo-Grellier/SecondChair@<tag>"
+uv tool install "secondchair @ git+https://github.com/Hugo-Grellier/SecondChair@main"
 secondchair init ~/campaigns/my-campaign --language en --calendar absalom
 secondchair serve -w ~/campaigns/my-campaign
 ```
@@ -58,7 +62,7 @@ The playbooks ship as a Claude Code plugin and a Codex skill bundle; `secondchai
 
 ## The GM loop: create, prepare, play, wrap
 
-The [GM guide](docs/gm-guide.md) walks through one campaign. In short, with your agent open in the workspace:
+The [GM guide](docs/gm-guide.md) walks through one campaign, and [What to ask](docs/what-to-ask.md) maps what you want to the playbook that does it. In short, with your agent open in the workspace:
 
 - **Create**: talk ideas through with the `campaign-workshop` skill; confirmed decisions become canon (`secondchair confirm <id>…`), the rest stays in `notes/workshop/`.
 - **Prepare**: "prepare session 3" runs `prepare-a-session`: a table-ready handoff in `prep/session-3/handoff.md` and the session's Foundry material (scenes, NPC actors, journals and hidden handouts, treasure, playlists).
@@ -71,7 +75,9 @@ The [GM guide](docs/gm-guide.md) walks through one campaign. In short, with your
 
 `serve` also shows a read-only page at `http://127.0.0.1:7240/`, for a second screen or a tablet next to Foundry: the pending proposals and open calls with their diff, the recent action log, the Markdown under `prep/` and `notes/` (rendered, with a table of contents, printable), the desired scenes and their last reconciliation, canon search and jobs. It refreshes itself every few seconds. It approves nothing: each entry shows the `secondchair approve`, `reject` or `log undo` command to run in your terminal, since only the CLI and the Director's Desk are authenticated Surfaces. It answers on loopback only, to `127.0.0.1` or `localhost` Host headers, and never serves a file outside `prep/` and `notes/`.
 
-## Development
+## Development and bench
+
+For contributors and benchmark runners; GMs can stop above.
 
 ```sh
 uv sync
