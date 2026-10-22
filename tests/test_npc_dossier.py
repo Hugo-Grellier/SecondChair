@@ -11,9 +11,9 @@ from secondchair.core import notes
 from secondchair.core.workspace import Workspace
 
 
-def dossier(ws: Workspace, cites: list[str]) -> None:
+def dossier(workspace: Workspace, cites: list[str]) -> None:
     front = {"id": "d-4a1c7e02", "status": "draft", "cites": cites}
-    path = ws.root / "notes/npcs/npc-dossier.md"
+    path = workspace.root / "notes/npcs/npc-dossier.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"---\n{yaml.safe_dump(front)}---\n# Dossier\n\n- Secret: {cites[-1]}.\n")
 
