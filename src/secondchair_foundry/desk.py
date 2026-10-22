@@ -8,6 +8,8 @@ to the GM whose client holds the bridge, which the token authenticates. It holds
 import json
 from datetime import UTC, datetime
 
+import yaml
+
 from secondchair.core import (
     calls,
     canon,
@@ -17,11 +19,15 @@ from secondchair.core import (
     index,
     knowledge,
     observations,
+    setup_check,
+    snapshot,
     vtt,
 )
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
-from secondchair.core.workspace import Workspace, WorkspaceError
+from secondchair.core.server import SERVE_FILE
+from secondchair.core.workspace import STATE_DIR, Workspace, WorkspaceError
+from secondchair_foundry import compendium
 
 CHANNEL = "desk"
 DETAIL = 400  # characters of a proposal's content shown on the Desk
@@ -48,10 +54,11 @@ def decisions(ws: Workspace) -> list[dict]:
     ]
 
 
-def state(ws: Workspace, turn_driver: str | None = None) -> dict:
+def state(ws: Workspace, turn_driver: str | None = None, ready: dict | None = None) -> dict:
     """What the Desk shows, sent by the Core whenever it changes. While a turn driver is active
     (the last rules context names one), agents stay silent: the cue shows no agent's line
-    (RUL-12, ADR 0013). The situation card the GM last pulled shows until play moves on."""
+    (RUL-12, ADR 0013). The situation card the GM last pulled shows until play moves on.
+    `ready` is this connection's readiness card, None until its checks ran."""
     moment, _seq = delegation.current_moment(ws)
     shown = cue(ws)
     if shown and turn_driver:
@@ -65,6 +72,7 @@ def state(ws: Workspace, turn_driver: str | None = None) -> dict:
         "cue": shown,
         "situation": director.current(ws),
         "wrap": wrap(ws),
+        "readiness": ready,
         "turn_driver": turn_driver,
     }
 
@@ -95,6 +103,105 @@ def wrap(ws: Workspace) -> dict | None:
         "running" if "started" in job_states else "queued" if "queued" in job_states else "waiting"
     )
     return {"session": session, "status": status, "as_of": as_of}
+
+
+LIBRARY, ADAPTER = "secondchair-foundry", "secondchair-foundry-pf2e"
+HOST_FIX = "Run `secondchair host setup claude` (or `codex`) and follow it, then reload the world."
+SHOWN = 64  # characters of a value from the GM client a check shows
+UNREADABLE = (*setup_check.UNREADABLE, yaml.YAMLError, CanonError, WorkspaceError)
+
+
+def _shown(value: object, none: str) -> str:
+    """A value the GM client sent, as a check says it: text only, cut short."""
+    return value[:SHOWN] if isinstance(value, str) and value else none
+
+
+def readiness(ws: Workspace, world: str, context: object) -> dict | None:
+    """The readiness card (#196 S3, D7, ARC-14): checks of this connection, run once after the
+    welcome from the world it said hello with and the rules context it answered (None when no
+    adapter answered). Each check fails closed: a damaged or unreadable file fails it, never
+    passes it. Only `agent_host` may be unverified (ok None, check-setup's WARN), which leaves
+    the card ready. None, as `wrap`, when where play stands cannot be read. A read: it writes
+    nothing and calls no model. Its words are fixed or come from the GM client as text cut
+    short; it names no file outside the workspace and holds no token or host content."""
+    modules = context.get("modules") if isinstance(context, dict) else None
+    modules = modules if isinstance(modules, dict) else {}
+    version, library = modules.get(ADAPTER), modules.get(LIBRARY)
+    system = context.get("system") if isinstance(context, dict) else None
+    try:
+        bound = yaml.safe_load((ws.root / snapshot.BINDING).read_text())["world"] == world
+    except UNREADABLE:
+        bound = False
+    try:
+        kept = compendium.version(ws) is not None
+    except UNREADABLE:
+        kept = False
+    host: bool | None = False
+    try:
+        port = json.loads((ws.root / STATE_DIR / SERVE_FILE).read_text())["port"]
+        if type(port) is int:  # not a bool
+            host = setup_check.core_registered(ws.root, port)
+    except UNREADABLE:
+        host = False
+    checks = [
+        _check(
+            "binding",
+            bound,
+            f"The campaign is bound to this world, {_shown(world, 'unknown')!r}.",
+            "The workspace's foundry.yaml no longer names this world.",
+            "Reload the world: the Core checks the binding again at connect and says what to do.",
+        ),
+        _check(
+            "adapter",
+            isinstance(context, dict),
+            "The PF2e adapter answered.",
+            "No system adapter answered the rules context.",
+            f"Enable the {ADAPTER} module in this world, then reload it.",
+        ),
+        _check(
+            "adapter_version",
+            isinstance(version, str) and version == library,
+            f"{ADAPTER} {_shown(version, '')} matches {LIBRARY} {_shown(library, '')}.",
+            f"{ADAPTER} {_shown(version, 'missing')} differs from {LIBRARY} "
+            f"{_shown(library, 'missing')}.",
+            "Update both modules to the same version in Foundry's setup, then reload the world.",
+        ),
+        _check(
+            "system",
+            system == "pf2e",
+            "The world's game system is pf2e.",
+            f"The world's game system is {_shown(system, 'unknown')}, not pf2e.",
+            "Open a pf2e world bound to this campaign.",
+        ),
+        _check(
+            "snapshot",
+            kept,
+            "A compendium snapshot is kept.",
+            "No compendium snapshot is kept yet.",
+            "Reload the world and wait for the snapshot (up to two minutes); the serve "
+            "console says why one was not kept.",
+        ),
+        _check(
+            "agent_host",
+            host,
+            "An agent host registers the Core.",
+            "No agent host on this machine registers the Core."
+            if host is False
+            else "Cannot verify that an agent host registers the Core.",
+            f"{HOST_FIX} `secondchair check-setup` says more.",
+        ),
+    ]
+    try:
+        as_of = observations.position(ws) | {"at": datetime.now(UTC).isoformat()}
+    except UNREADABLE:
+        return None  # where play stands is unreadable: no card, as `wrap`
+    ready = all(c["ok"] is not False for c in checks)
+    return {"ready": ready, "checks": checks, "as_of": as_of}
+
+
+def _check(name: str, ok: bool | None, yes: str, no: str, fix: str) -> dict:
+    """One check; `ok` None when it cannot be verified, shown with `no` and the fix."""
+    return {"check": name, "ok": ok, "says": yes if ok else no, "fix": None if ok else fix}
 
 
 def cue(ws: Workspace) -> dict | None:

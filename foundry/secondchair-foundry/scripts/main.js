@@ -204,6 +204,7 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
       pile: desk?.pile ?? null,
       ceiling,
       cardOpen: desk?.cardOpen ?? false,
+      readinessOpen: desk?.readinessOpen ?? null,
       keys: {
         desk: game.keybindings.get(MODULE, "desk"),
         situation: game.keybindings.get(MODULE, "situation"),
@@ -218,6 +219,11 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
     const card = content.querySelector("details.secondchair-card");
     card?.addEventListener("toggle", () =>
       desk?.setCardOpen(/** @type {HTMLDetailsElement} */ (card).open),
+    );
+    // Likewise the readiness card, opened or collapsed by the GM (#196 S3).
+    const readiness = content.querySelector("details.secondchair-readiness");
+    readiness?.addEventListener("toggle", () =>
+      desk?.setReadinessOpen(/** @type {HTMLDetailsElement} */ (readiness).open),
     );
   }
 }

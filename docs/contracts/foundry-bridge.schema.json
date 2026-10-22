@@ -718,6 +718,76 @@
             }
           ]
         },
+        "readiness": {
+          "description": "The readiness card (#196 S3, D7, ARC-14): the Core's checks of this connection, run once after the welcome when the compendium snapshot and the first rules context were answered or not. Null until then, and when the Core cannot read where play stands. Each check fails closed. It holds no token, no host or machine configuration path or content, and no path outside the workspace. Per connection: stale once the connection closes. Absent from a Core before it.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "ready": {
+                  "type": "boolean",
+                  "description": "No check failed (an unverified one, ok null, does not count). The Desk opens the card by itself only when false."
+                },
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "check": {
+                        "enum": [
+                          "binding",
+                          "adapter",
+                          "adapter_version",
+                          "system",
+                          "snapshot",
+                          "agent_host"
+                        ],
+                        "description": "binding: foundry.yaml names the world this client said hello with. adapter: a system adapter answered the rules context. adapter_version: secondchair-foundry-pf2e's version equals secondchair-foundry's, both from the rules context's active modules. system: the rules context's system is pf2e. snapshot: a compendium snapshot is kept. agent_host: an agent host on the Core's PATH registers the Core (as `secondchair check-setup` checks it); ok null when no host configuration can tell, false when none registers it or the Core's port cannot be read."
+                      },
+                      "ok": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ],
+                        "description": "true: passed. false: failed. null: cannot be verified (agent_host only, as check-setup's WARN); it does not make the card not ready."
+                      },
+                      "says": {
+                        "type": "string",
+                        "description": "What was found, in plain words. A value from the GM client (world id, module version, system id) appears only as text cut to 64 characters, else as missing or unknown."
+                      },
+                      "fix": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "The one action that fixes a failed or unverified check, null when it passed."
+                      }
+                    },
+                    "required": [
+                      "check",
+                      "ok",
+                      "says",
+                      "fix"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "as_of": {
+                  "$ref": "#/$defs/as_of"
+                }
+              },
+              "required": [
+                "ready",
+                "checks",
+                "as_of"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "turn_driver": {
           "type": [
             "string",

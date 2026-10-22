@@ -13,6 +13,7 @@ import uuid
 from concurrent.futures import Future
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import yaml
 from starlette.routing import BaseRoute, WebSocketRoute
@@ -98,6 +99,9 @@ class Bridge:
         self.rules_context: tuple[int, object] | None = None  # (moment seq, last one recorded)
         self.turn_driver: str | None = None  # the connected client's, from its rules context
         self.ceiling_changes = 0  # ceiling observations received, to realise refused scenes again
+        self.readiness: dict | None = None  # this connection's readiness card (#196 S3)
+        self.context_read = asyncio.Event()  # this connection's first rules context answered
+        self.context: object = None  # what it answered, None when no adapter did
 
     @property
     def binding_path(self) -> Path:
@@ -157,13 +161,16 @@ class Bridge:
             raise Refused(
                 "world",
                 f"The Foundry world {world!r} is bound to another campaign. Open the world bound "
-                f"to {self.ws.root.name!r}, or serve that other campaign's workspace.",
+                f"to {self.ws.root.name!r}, or serve that other campaign's workspace. To free "
+                'this world, run `game.settings.set("secondchair-foundry", "campaign", "")` '
+                "in the browser console as GM, then reload.",
             )
         if binding is not None and binding["world"] != world:
             raise Refused(
                 "world",
                 f"The campaign {self.ws.root.name!r} is bound to the Foundry world "
-                f"{binding['world']!r}, not {world!r}.",
+                f"{binding['world']!r}, not {world!r}. Open that world, or, to bind the campaign "
+                "to this one instead, delete foundry.yaml in its workspace, then reload.",
             )
         if binding is None:
             binding = {"world": world, "campaign": uuid.uuid4().hex}
@@ -179,6 +186,7 @@ class Bridge:
             except ValueError:
                 hello = None
             campaign = self.check(hello)
+            world = cast(dict, hello)["world"]  # `check` passed it: a dict with a world
         except Refused as refused:
             await socket.send_json(
                 {"type": "refused", "reason": refused.reason, "message": str(refused)}
@@ -190,7 +198,9 @@ class Bridge:
             return
         self.gm = socket
         self.loop = asyncio.get_running_loop()
+        self.readiness, self.context, self.context_read = None, None, asyncio.Event()
         watch: asyncio.Task | None = None
+        readying: asyncio.Task | None = None
         realising: asyncio.Task | None = None
         snapshotting: asyncio.Task | None = None
         gestures: set[asyncio.Task] = set()  # kept referenced until done
@@ -206,6 +216,7 @@ class Bridge:
             watch = asyncio.create_task(self._watch(socket))
             realising = asyncio.create_task(self._realise(socket))
             snapshotting = asyncio.create_task(self._snapshot(socket))
+            readying = asyncio.create_task(self._ready(world, snapshotting))
             while True:
                 try:
                     message = json.loads(await socket.receive_text())
@@ -234,6 +245,9 @@ class Bridge:
                 watch.cancel()
             self.gm = None
             self.turn_driver = None  # the next client's rules context says again
+            self.readiness = None  # stale once this connection is gone
+            if readying is not None:
+                readying.cancel()
             if realising is not None:
                 realising.cancel()
             if snapshotting is not None:
@@ -268,6 +282,7 @@ class Bridge:
                         # the wrap job's status changes; its `at` moves every read
                         (w := desk.wrap(self.ws)) and w | {"as_of": {**w["as_of"], "at": None}},
                         self.turn_driver,
+                        self.readiness,
                         len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
                     )
                 )
@@ -284,7 +299,16 @@ class Bridge:
             await asyncio.sleep(POLL)
 
     async def _send_desk(self, socket: WebSocket) -> None:
-        await socket.send_json(await asyncio.to_thread(desk.state, self.ws, self.turn_driver))
+        await socket.send_json(
+            await asyncio.to_thread(desk.state, self.ws, self.turn_driver, self.readiness)
+        )
+
+    async def _ready(self, world: str, snapshotting: asyncio.Task) -> None:
+        """Run the readiness checks once per connection (#196 S3), when the compendium snapshot
+        was kept or not and the first rules context answered or not; `_watch` sends the card."""
+        await asyncio.wait([snapshotting])
+        await self.context_read.wait()
+        self.readiness = await asyncio.to_thread(desk.readiness, self.ws, world, self.context)
 
     async def _gesture(self, socket: WebSocket, message: dict) -> None:
         """Take a GM gesture from the Director's Desk, answer it, then refresh the Desk. In a
@@ -323,9 +347,15 @@ class Bridge:
         read = {"type": "read", "id": uuid.uuid4().hex, "op": RULES_CONTEXT, "params": {}}
         try:
             reply = await asyncio.wait_for(self._request(socket, read), REPLY_TIMEOUT)
-        except TimeoutError, VttError:
-            return
-        if reply.get("ok") is True and isinstance(reply.get("result"), dict):
+        except TimeoutError:
+            reply = {}  # no adapter answered
+        except VttError:
+            return  # the GM client left: the next connection reads its own
+        ok = reply.get("ok") is True and isinstance(reply.get("result"), dict)
+        if not self.context_read.is_set():  # the connection's first: what readiness checks
+            self.context = reply["result"] if ok else None
+            self.context_read.set()
+        if ok:
             self.turn_driver = _driver_of(reply["result"])
             await asyncio.to_thread(self._record, RULES_CONTEXT, reply["result"])
 

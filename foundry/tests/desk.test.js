@@ -435,3 +435,103 @@ test("the wrap-state card ignores a status that is only an inherited property na
     assert.doesNotMatch(html, /secondchair-wrap/);
   }
 });
+
+/** @param {string} check @param {boolean | null} ok @param {string} [says] @param {string | null} [fix] */
+const check = (check, ok, says = `${check} said`, fix = ok ? null : `fix ${check}`) => ({
+  check,
+  ok,
+  says,
+  fix,
+});
+const CHECKS = ["binding", "adapter", "adapter_version", "system", "snapshot", "agent_host"];
+
+test("an all-ready readiness card is one collapsed line the GM can open", () => {
+  const readiness = { ready: true, checks: CHECKS.map((c) => check(c, true)), as_of: CARD.as_of };
+  const state = /** @type {DeskState} */ ({ ...STATE, readiness });
+  assert.ok(valid(state), JSON.stringify(valid.errors));
+  const html = deskHtml({ isGM: true, state, pile: null, ceiling: "propose" });
+  assert.match(html, /<details class="secondchair-readiness">\n<summary><strong>Ready<\/strong>/);
+  assert.doesNotMatch(html, /secondchair-readiness" open/);
+  assert.doesNotMatch(html, /Fix:/);
+  // Not a `secondchair-card`: the module's toggle stays on the situation card.
+  assert.doesNotMatch(html, /secondchair-card secondchair-readiness/);
+});
+
+test("a failing readiness card opens by itself with each fix, escaped", () => {
+  const checks = CHECKS.map((c) => check(c, c !== "binding"));
+  checks[0] = check("binding", false, "bound to <b>other</b>", "Reload <script>x</script>");
+  const readiness = { ready: false, checks, as_of: CARD.as_of };
+  const state = /** @type {DeskState} */ ({ ...STATE, readiness });
+  assert.ok(valid(state), JSON.stringify(valid.errors));
+  const html = deskHtml({ isGM: true, state, pile: null, ceiling: "propose" });
+  assert.match(html, /<details class="secondchair-readiness" open>/);
+  assert.match(html, /Not ready<\/strong>: 1 check failed/);
+  assert.match(html, /bound to &lt;b&gt;other&lt;\/b&gt;<br>Fix: Reload &lt;script&gt;/);
+  assert.doesNotMatch(html, /<b>other|<script>/);
+  // A card whose checks fail but which says ready is shown as not ready.
+  const lying = { ...state, readiness: { ...readiness, ready: true } };
+  assert.match(deskHtml({ isGM: true, state: lying, pile: null, ceiling: "x" }), / open>/);
+  // Never for a player.
+  assert.equal(deskHtml({ isGM: false, state, pile: null, ceiling: "propose" }), "");
+});
+
+test("an unverifiable check says so and leaves the card ready and collapsed", () => {
+  const checks = CHECKS.map((c) => check(c, true));
+  checks[5] = { check: "agent_host", ok: null, says: "Cannot verify <i>it</i>", fix: "Run x" };
+  const state = /** @type {DeskState} */ ({
+    ...STATE,
+    readiness: { ready: true, checks, as_of: CARD.as_of },
+  });
+  assert.ok(valid(state), JSON.stringify(valid.errors));
+  const html = deskHtml({ isGM: true, state, pile: null, ceiling: "x" });
+  assert.match(html, /<details class="secondchair-readiness">/);
+  assert.match(html, /Ready<\/strong>: 1 check could not be verified/);
+  assert.match(html, /cannot verify: Cannot verify &lt;i&gt;it&lt;\/i&gt;<br>Fix: Run x/);
+});
+
+test("the GM's open or collapsed readiness card survives a re-render, until a new card", () => {
+  const { d } = desk();
+  const failing = {
+    ready: false,
+    checks: [check("snapshot", false)],
+    as_of: CARD.as_of,
+  };
+  const render = () =>
+    deskHtml({
+      isGM: true,
+      state: d.state,
+      pile: null,
+      ceiling: "x",
+      readinessOpen: d.readinessOpen,
+    });
+  d.receive({ ...STATE, readiness: failing });
+  assert.match(render(), /secondchair-readiness" open>/); // opens by itself
+  d.setReadinessOpen(false); // the GM collapses it
+  d.receive({ ...STATE, readiness: failing, decisions: [] }); // another desk message
+  assert.match(render(), /<details class="secondchair-readiness">/);
+  // A ready card the GM opened stays open too.
+  const readyCard = { ready: true, checks: [check("snapshot", true)], as_of: CARD.as_of };
+  const later = { ...readyCard, as_of: { ...CARD.as_of, at: "2026-10-21T21:00:00+00:00" } };
+  d.receive({ ...STATE, readiness: later }); // a new card: its own default again
+  assert.equal(d.readinessOpen, null);
+  assert.match(render(), /<details class="secondchair-readiness">/);
+  d.setReadinessOpen(true);
+  d.receive({ ...STATE, readiness: later });
+  assert.match(render(), /secondchair-readiness" open>/);
+});
+
+test("the readiness card is absent until the checks ran and stale once the bridge closed", () => {
+  for (const readiness of [null, undefined])
+    assert.doesNotMatch(
+      deskHtml({ isGM: true, state: { ...STATE, readiness }, pile: null, ceiling: "x" }),
+      /secondchair-readiness/,
+    );
+  const { d } = desk();
+  const readiness = { ready: false, checks: [check("snapshot", false)], as_of: CARD.as_of };
+  d.receive({ ...STATE, readiness });
+  assert.equal(d.state?.readiness, readiness);
+  d.close();
+  assert.equal(d.state?.readiness, null);
+  const html = deskHtml({ isGM: true, state: d.state, pile: null, ceiling: "x" });
+  assert.doesNotMatch(html, /secondchair-readiness/);
+});

@@ -17,7 +17,7 @@ from collections.abc import Generator, Iterator
 from concurrent.futures import CancelledError
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import jsonschema
 import pytest
@@ -148,7 +148,9 @@ def test_a_compatible_patch_version_connects(bridge: str, token: str) -> None:
 
 def test_a_world_bound_to_another_campaign_is_refused(bridge: str, token: str) -> None:
     other = "0" * 32
-    assert "another campaign" in refusal(bridge, hello(token, campaign=other))
+    message = refusal(bridge, hello(token, campaign=other))
+    assert "another campaign" in message
+    assert 'game.settings.set("secondchair-foundry", "campaign", "")' in message  # what to run
 
 
 def test_a_campaign_bound_to_another_world_refuses_this_one(bridge: str, token: str) -> None:
@@ -156,6 +158,7 @@ def test_a_campaign_bound_to_another_world_refuses_this_one(bridge: str, token: 
     message = refusal(bridge, hello(token, world="another-world", campaign=None))
     assert WORLD in message
     assert "another-world" in message
+    assert "delete foundry.yaml" in message  # how to rebind, never done from the module
 
 
 def test_a_bound_world_that_lost_its_mark_reconnects(bridge: str, token: str) -> None:
@@ -638,3 +641,106 @@ def test_the_desk_refreshes_when_the_wrap_status_changes(
         # A client without the GM's token, a player's, is refused and told nothing of the wrap.
         assert "wrap" not in json.dumps(reply(bridge, hello("not-the-token")))
         assert next_of(inbox, "desk", lambda m: m["wrap"] is None)
+
+
+RULES_CONTEXT = {
+    "foundry": "14.360",
+    "system": "pf2e",
+    "system_version": "7.5.2",
+    "modules": {"secondchair-foundry": "0.1.0", "secondchair-foundry-pf2e": "0.1.0"},
+    "settings": {},
+    "turn_driver": None,
+}
+
+
+def readiness_card(inbox: queue.Queue, socket: ClientConnection, adapter: bool) -> dict:
+    """Answer the Core's reads after the welcome, with or without an adapter, until the Desk
+    carries the readiness card; it is null before."""
+    desks = 0
+    while True:
+        message = inbox.get(timeout=10)
+        if message["type"] == "desk":
+            desks += 1
+            if message["readiness"] is not None:
+                assert desks > 1  # never in the desk message the welcome is followed by
+                return message["readiness"]
+        if message["type"] == "read":
+            result = {"system": {"id": "pf2e", "version": "7.5.2"}, "entries": []}
+            if message["op"] == "rules_context":
+                result = RULES_CONTEXT
+            answer = {"ok": True, "result": result}
+            if message["op"] == "rules_context" and not adapter:
+                answer = {"ok": False, "error": "Unknown read rules_context."}
+            say(socket, {"type": "reply", "id": message["id"], **answer})
+
+
+def test_the_readiness_card_follows_the_welcome_and_is_per_connection(
+    token: str,
+    workspace: Path,
+    machine_config: dict[str, str],
+    serving: Serving,
+    tmp_path: Path,
+) -> None:
+    # A machine of the test's own: its home, and only a `claude` on PATH.
+    home = tmp_path / "home"
+    (home / "bin").mkdir(parents=True)
+    (home / "bin/claude").write_text("#!/bin/sh\n")
+    (home / "bin/claude").chmod(0o755)
+    env = {k: v for k, v in machine_config.items() if k not in ("CLAUDE_CONFIG_DIR", "CODEX_HOME")}
+    env |= {"HOME": str(home), "PATH": str(home / "bin")}
+    with serving(workspace, env) as line:
+        port = line.rsplit(":", 1)[1]
+        url = f"ws://127.0.0.1:{port}/foundry"
+        server = {"secondchair": {"url": f"http://127.0.0.1:{port}/mcp"}}
+        (home / ".claude.json").write_text(json.dumps({"mcpServers": server}))
+        inbox: queue.Queue = queue.Queue()
+        sockets: list[ClientConnection] = []
+        with gm_client(url, token, inbox=inbox, sent=sockets):
+            card = readiness_card(inbox, sockets[0], adapter=True)
+        assert card["ready"] is True
+        assert all(c["ok"] is True for c in card["checks"]), card
+        assert token not in json.dumps(card) and str(home) not in json.dumps(card)
+
+        # The next connection starts without the last one's card, and checks again.
+        (home / ".claude.json").write_text(json.dumps({"mcpServers": {}}))
+        inbox = queue.Queue()
+        sockets.clear()
+        with gm_client(url, token, inbox=inbox, sent=sockets):
+            card = readiness_card(inbox, sockets[0], adapter=False)
+        assert card["ready"] is False
+        assert [c["check"] for c in card["checks"] if c["ok"] is False] == [
+            "adapter",
+            "adapter_version",
+            "system",
+            "agent_host",
+        ]
+        # A player's client never gets a Desk, let alone the card.
+        assert "readiness" not in json.dumps(reply(url, hello("not-the-token")))
+
+
+def test_a_pending_snapshot_holds_the_card_back_and_a_silent_adapter_fails_it(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bridge_module, "REPLY_TIMEOUT", 0.1)
+    core = Bridge(load(workspace))
+
+    class Silent:  # a GM client that never answers a read
+        async def send_json(self, message: dict) -> None:
+            pass
+
+    async def run() -> tuple[object, dict | None]:
+        snapshot = asyncio.Event()
+        snapshotting = asyncio.create_task(snapshot.wait())
+        readying = asyncio.create_task(core._ready(WORLD, snapshotting))
+        await core._record_rules_context(cast(Any, Silent()))  # times out
+        await asyncio.sleep(0.2)
+        held = core.readiness  # the snapshot is still pending
+        snapshot.set()
+        await readying
+        return held, core.readiness
+
+    held, card = asyncio.run(run())
+    assert held is None
+    assert card is not None
+    failed = [c["check"] for c in card["checks"] if c["ok"] is False]
+    assert {"adapter", "adapter_version", "system"} <= set(failed)
