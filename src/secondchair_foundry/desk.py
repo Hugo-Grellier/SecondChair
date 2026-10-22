@@ -74,9 +74,9 @@ def wrap(ws: Workspace) -> dict | None:
     wrapped, where its wrap stands: `queued` or `running` (a wrap job of the last session), else
     `waiting` for the grouped round, which needs an interactive terminal (CAP-13): `secondchair
     wrap`. Only the last session is checked. It carries `as_of`, where play stood when it was sent
-    (rebuilt at each read, so it follows the moment). A read of state, writing nothing; None during a live
-    session, before any, once wrapped, and, failing closed like `director.current`, when a file
-    it reads is damaged."""
+    (rebuilt at each read, so it follows the moment). A read of state, writing nothing; None during
+    a live session, before any, once wrapped, and, failing closed like `director.current`, when a
+    file it reads is damaged."""
     try:
         if delegation.current_moment(ws)[0] == "live-session":
             return None

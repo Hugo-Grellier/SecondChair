@@ -396,7 +396,7 @@ test("a hint escapes the binding, shows only the first, and passes other codes t
   assert.match(html, /&lt;script&gt;&quot;/);
   assert.doesNotMatch(html, /<kbd>Z<\/kbd>/);
   assert.match(html, /Show the situation<\/button> <kbd>Numpad4<\/kbd>/);
-||||||| parent of d60d213 (feat: wrap-state card on the Director's Desk after End session (#196 S1))
+});
 
 test("the wrap-state card says where the wrap stands, one collapsed line per status", () => {
   const between = { ...STATE, moment: "between-sessions", session: null };
