@@ -297,6 +297,28 @@ test("a world bound elsewhere shows the Core's message and the commands, no rebi
   );
 });
 
+test("a reconnection forgets the GM's choice on the last connection's readiness card", () => {
+  const { d } = desk();
+  d.setReadinessOpen(true);
+  d.setCardOpen(true);
+  d.reopen();
+  assert.equal(d.readinessOpen, null);
+  assert.equal(d.cardOpen, false);
+});
+
+test("a port that is not one is named, escaped, with Retry", () => {
+  const html = deskHtml({
+    isGM: true,
+    state: null,
+    pile: null,
+    ceiling: "x",
+    link: { state: "unreachable", url: "", error: "The Core port must be … not <abc>." },
+  });
+  assert.match(html, /Core not reachable/);
+  assert.match(html, /not &lt;abc&gt;\./);
+  assert.match(html, /data-action="retry"/);
+});
+
 test("a player never sees the disconnected Desk", () => {
   for (const link of /** @type {const} */ ([
     { state: "lost" },

@@ -144,6 +144,47 @@ test("Retry dials the port and token set since, and the notice names the URL dia
   assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7240/foundry" });
 });
 
+test("a mistyped port is reported and does not block the Retry after it is fixed", () => {
+  for (const port of [Number.NaN, 99999, -1, 0, 72.4, "abc"]) {
+    const { l, statuses, bound, last } = link();
+    bound.port = /** @type {number} */ (port);
+    const before = FakeSocket.opened.length;
+    assert.equal(l.dial(), true);
+    assert.equal(FakeSocket.opened.length, before, `${port}: no socket`);
+    assert.equal(l.status?.state, "unreachable", String(port));
+    assert.match(/** @type {{error: string}} */ (l.status).error, /from 1 to 65535/);
+    assert.deepEqual(statuses, ["dialing", "unreachable"]);
+    bound.port = 7240;
+    assert.equal(l.dial(), true, `${port}: Retry dials once the port is fixed`);
+    assert.equal(last().url, "ws://127.0.0.1:7240/foundry");
+  }
+});
+
+test("a URL the WebSocket refuses at once is unreachable, not a dial stuck in flight", () => {
+  const l = createLink({
+    url: () => coreUrl(7240),
+    hello: () => hello({ token: "t", world: "w" }),
+    onWelcome: () => {},
+    onStatus: () => {},
+    WebSocketImpl: /** @type {typeof WebSocket} */ (
+      /** @type {unknown} */ (
+        class {
+          constructor() {
+            throw new SyntaxError("The URL is invalid.");
+          }
+        }
+      )
+    ),
+  });
+  assert.equal(l.dial(), true);
+  assert.deepEqual(l.status, {
+    state: "unreachable",
+    url: "ws://127.0.0.1:7240/foundry",
+    error: "The URL is invalid.",
+  });
+  assert.equal(l.dial(), true, "Retry is not refused");
+});
+
 test("Retry dials an unreachable Core again, with no reload, and never on its own", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { l, statuses, welcomed, bound, last } = link();

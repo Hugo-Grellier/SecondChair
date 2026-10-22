@@ -8,14 +8,18 @@ export const PROTOCOL_VERSION = "0.1.0";
  * @typedef {{type: "hello", protocol: string, token: string, world: string, campaign: string | null}} Hello
  * @typedef {{type: "welcome", protocol: string, campaign: string, campaign_language: string}} Welcome
  * @typedef {{type: "refused", reason: string, message: string}} Refusal
- * @typedef {{state: "dialing"} | {state: "connected"} | {state: "unreachable", url: string} | {state: "refused", reason: string, message: string} | {state: "lost"}} LinkStatus
+ * @typedef {{state: "dialing"} | {state: "connected"} | {state: "unreachable", url: string, error?: string} | {state: "refused", reason: string, message: string} | {state: "lost"}} LinkStatus
  */
 
 /**
- * The URL of the Core's bridge on this machine's loopback.
+ * The URL of the Core's bridge on this machine's loopback; it throws on a port that is not one.
  * @param {number} port
  */
 export function coreUrl(port) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
+    throw new Error(
+      `The Core port must be a whole number from 1 to 65535, not ${port}: fix it in this module's settings, then Retry.`,
+    );
   return `ws://127.0.0.1:${port}/foundry`;
 }
 
@@ -131,29 +135,18 @@ export function createLink({ url, hello, onWelcome, onStatus, onPending, WebSock
     dial() {
       if (status?.state === "dialing" || status?.state === "connected") return false;
       set({ state: "dialing" });
-      const dialed = url();
-      connect({
-        url: dialed,
-        hello: hello(),
-        onPending,
-        WebSocketImpl,
-        onWelcome: (welcome, opened) => {
-          socket = opened;
-          opened.addEventListener("close", () => {
-            socket = null;
-            if (status?.state === "connected") set({ state: "lost" });
-          });
-          set({ state: "connected" });
-          onWelcome(welcome, opened);
-        },
-        onRefused: (refusal) =>
-          set({
-            state: "refused",
-            reason: String(refusal.reason),
-            message: String(refusal.message),
-          }),
-        onUnreachable: () => set({ state: "unreachable", url: dialed }),
-      });
+      let dialed = "";
+      try {
+        dialed = url();
+        dialOnce(dialed);
+      } catch (error) {
+        // A bad port, or a URL the browser refuses at once: no dial in flight, so Retry works.
+        set({
+          state: "unreachable",
+          url: dialed,
+          error: String(/** @type {Error} */ (error).message),
+        });
+      }
       return true;
     },
     /** Drop a welcomed connection this side cannot use, with why. @param {string} message */
@@ -162,4 +155,30 @@ export function createLink({ url, hello, onWelcome, onStatus, onPending, WebSock
       socket?.close();
     },
   };
+
+  /** One socket to `dialed`; it throws at once on a URL the browser refuses. @param {string} dialed */
+  function dialOnce(dialed) {
+    connect({
+      url: dialed,
+      hello: hello(),
+      onPending,
+      WebSocketImpl,
+      onWelcome: (welcome, opened) => {
+        socket = opened;
+        opened.addEventListener("close", () => {
+          socket = null;
+          if (status?.state === "connected") set({ state: "lost" });
+        });
+        set({ state: "connected" });
+        onWelcome(welcome, opened);
+      },
+      onRefused: (refusal) =>
+        set({
+          state: "refused",
+          reason: String(refusal.reason),
+          message: String(refusal.message),
+        }),
+      onUnreachable: () => set({ state: "unreachable", url: dialed }),
+    });
+  }
 }

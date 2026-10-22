@@ -341,6 +341,8 @@ function linkHtml(link) {
     case "dialing":
       return "<p>Connecting to the Core…</p>";
     case "unreachable":
+      if (link.error)
+        return `<p><strong>Core not reachable.</strong> ${esc(link.error)}</p>\n${retry("Retry")}`;
       return `<p><strong>Core not reachable</strong> at ${esc(link.url)}.</p>
 <p>Start it on this computer with <code>secondchair serve -w &lt;campaign workspace&gt;</code>. If the browser asked whether this site may access local devices, allow it.</p>
 ${retry("Retry")}`;
