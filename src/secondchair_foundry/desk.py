@@ -7,7 +7,7 @@ to the GM whose client holds the bridge, which the token authenticates. It holds
 
 import json
 
-from secondchair.core import calls, canon, delegation, director, index, knowledge, vtt
+from secondchair.core import calls, canon, capture, delegation, director, index, knowledge, vtt
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.workspace import Workspace, WorkspaceError
@@ -53,8 +53,32 @@ def state(ws: Workspace, turn_driver: str | None = None) -> dict:
         "decisions": decisions(ws),
         "cue": shown,
         "situation": director.current(ws),
+        "wrap": wrap(ws),
         "turn_driver": turn_driver,
     }
+
+
+def wrap(ws: Workspace) -> dict | None:
+    """The wrap-state card (#196 S1, ARC-14): after End session, until the session is marked
+    wrapped, where its wrap stands: `queued` or `running` (the wrap job), else `waiting` for the
+    grouped round, which needs an interactive terminal (CAP-13): `secondchair wrap`. A read of
+    state, writing nothing; None during a live session, before any, once wrapped, and, failing
+    closed like `director.current`, when a file it reads is damaged."""
+    try:
+        if delegation.current_moment(ws)[0] == "live-session":
+            return None
+        session = delegation.last_session(ws)
+        if not session or capture.time(ws)["sessions"].get(session, {}).get("wrapped"):
+            return None
+        running = {
+            j["status"]
+            for j in calls._jobs(ws)
+            if j["playbook"] == capture.PLAYBOOK and j["inputs"].get("session") == str(session)
+        }
+    except WorkspaceError, OSError, KeyError, TypeError, AttributeError:
+        return None
+    status = "running" if "started" in running else "queued" if "queued" in running else "waiting"
+    return {"session": session, "status": status}
 
 
 def cue(ws: Workspace) -> dict | None:

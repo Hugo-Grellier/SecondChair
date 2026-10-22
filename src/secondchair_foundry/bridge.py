@@ -265,6 +265,7 @@ class Bridge:
                         desk.due_now(self.ws),
                         knowledge.active_cue(self.ws),
                         director.current(self.ws),  # withdrawn once play moves on
+                        desk.wrap(self.ws),  # the wrap job's status changes
                         self.turn_driver,
                         len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
                     )

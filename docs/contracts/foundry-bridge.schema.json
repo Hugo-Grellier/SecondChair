@@ -683,6 +683,37 @@
             "additionalProperties": false
           }
         },
+        "wrap": {
+          "description": "The wrap-state card (#196 S1, ARC-14): after End session, until the session is marked wrapped, where its wrap stands. Null during a live session, once wrapped, or when the Core cannot read its state. Absent from a Core before it.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "The ended session."
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "waiting"
+                  ],
+                  "description": "queued: the wrap job waits for an agent. running: an agent works on it. waiting: no wrap job is pending; the GM's grouped round, `secondchair wrap`, is next."
+                }
+              },
+              "required": [
+                "session",
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "turn_driver": {
           "type": [
             "string",
