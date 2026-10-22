@@ -55,7 +55,9 @@ Write `adventure-<slug>/players-guide.md` for the players, with no GM-only fact:
 - **Tie-ins**: how a character can be connected to the starting place or its people.
 - **Backgrounds and skills** that fit, and options the table may use.
 - **Expectations**: the table's lines and veils from the brief, the party's size, level and how the group should hang together.
-- **Notice**, verbatim: *Options in this guide written by a model are unofficial: they are not published rules, and the GM decides whether the table uses them.*
+- **Notice**, verbatim, the one for the campaign language (English for any language not listed):
+  - `en`: *Options in this guide written by a model are unofficial: they are not published rules, and the GM decides whether the table uses them.*
+  - `fr`: *Les options de ce guide rédigées par un modèle sont non officielles : ce ne sont pas des règles publiées, et le MJ décide si la table les utilise.*
 
 Mention only what the party already knows or may be told. Cite in the index block's `cites` the ids of the canon facts the guide uses; flavour with no truth value cites nothing. The GM shares the guide outside SecondChair; you never publish it.
 
@@ -83,7 +85,7 @@ Find creature UUIDs with `search_compendium` (read `entries`; when `offline` is 
 ## Before you finish
 
 1. `check_prep` on the dossier (and on the guide if it has encounters or scene keys). A problem is reported, never fixed for you: correct the text or the block, write it again, and run it again. A UUID reported `unchecked` means no GM client was connected; say so.
-2. `check_prep_guide` on the guide. It refuses a canary, a name the party holds no fact about and a cited fact the party does not know. Fix the guide until it passes; never remove a cite to make it pass.
+2. `check_prep_guide` on the guide. It refuses a canary, a name the party holds no fact about, a cited fact the party does not know, and a guide whose body lacks the notice verbatim (in the index block or an HTML comment it does not count). Fix the guide until it passes; never remove a cite to make it pass.
 3. Rewrite files whole with `write_prep` (read first: it replaces the file) and keep the GM's own edits.
 
 Call `finish_job` when you ran one. Reply with the two paths, the result of each check (and every problem you could not settle), and the open questions: choices you made without the GM's word, missing party data, canon contradictions. Claim a file is written only after its tool result says so.
