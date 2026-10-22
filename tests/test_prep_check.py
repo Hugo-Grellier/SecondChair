@@ -188,3 +188,7 @@ def test_adventure_and_session_playbooks_onboard_the_gm() -> None:
     assert "there is no job id" in session
     assert session.index("## What canon says") < session.index("## Plan first")
     assert session.index("## Plan first") < session.index("## The handoff")
+    assert "or a note that `supersedes` one that had it" in adventure
+    assert "leaving out any note that another note `supersedes`" in adventure
+    direction = skills["develop-campaign-direction"]
+    assert direction.count("keeps `alternatives: campaign-direction`") == 2
