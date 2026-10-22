@@ -203,9 +203,10 @@ def tools(ws: Workspace) -> list[Tool]:
         {clock_gte}, status: pending}, "situation" {stage: available|active|resolved|expired,
         deadline (date or null), participants}; on a faction, "intent" [1-3 {id, goal,
         pursues: [front or situation ids]}], "pool" {name: {value, income, cap}}, "capacity"
-        (an integer >= 1) and "catalogue" [{id, cost: {pool: n}, duration, effect: {class:
-        derived|narrative, does}, prerequisites: [{holds: fact id} or {front, clock_gte}],
-        target (entity id or null), contest ({pool} or null), serves: [goal ids]}], which
+        (an integer >= 1) and "catalogue" [{id (no / or @), cost: {pool: n}, duration, effect:
+        {class: derived|narrative, does}, prerequisites: [{holds: fact id}, {front, clock_gte}
+        or {situation, stage}], target (entity id or null), contest ({pool} or null), serves:
+        [goal ids]}], which
         only the GM writes in prep: draft them into notes/ instead (a job origin is refused).
         A faction holds one fact per key on any date, so change one in two steps: end the
         current fact on date D (correct_fact with valid_to D, or an event on D that closes it),

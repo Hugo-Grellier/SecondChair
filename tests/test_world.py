@@ -4,6 +4,8 @@ the deterministic world-turn and the read-only forecast. The v3 world-turn crite
 
 import asyncio
 import json
+import shutil
+from collections import Counter
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,7 @@ from secondchair.core import (
     delegation,
     index,
     jobs,
+    journal,
     knowledge,
     observations,
     workspace,
@@ -1176,3 +1179,505 @@ def test_the_faction_step_is_one_week_unless_the_campaign_sets_it(ws: Workspace)
     config.write_text(yaml.safe_dump(data | {"faction_step": "1m"}))
     with pytest.raises(workspace.WorkspaceError, match="faction_step"):
         world.faction_step(ws)
+
+
+# Faction turns: the deterministic validator and contests (ADR 0022 items 4 and 5, F4)
+
+TURN = "4725-01-05"
+
+
+def decided(ws: Workspace, fact_id: str) -> str:
+    """The GM confirms a fact at a terminal: a GM decision, the only faction fact read."""
+    with patch.object(cli, "interactive", return_value=True):
+        assert main(["confirm", fact_id, "-w", str(ws.root)]) == 0
+    return fact_id
+
+
+def action(name: str, cost: dict, **more: Any) -> dict:
+    effect = {"class": "derived", "does": f"{name} happens."}
+    return {"id": name, "cost": cost, "duration": "1w", "effect": effect, **more}
+
+
+def gm_faction(
+    ws: Workspace, name: str, coin: int, capacity: int, *catalogue: dict, pool: bool = True
+) -> str:
+    me = entity(ws, name)
+    if pool:
+        decided(ws, state_fact(ws, me, "pool", {"coin": {"value": coin, "income": 1, "cap": 10}}))
+    decided(ws, state_fact(ws, me, "capacity", capacity))
+    decided(ws, state_fact(ws, me, "catalogue", list(catalogue)))
+    return me
+
+
+def learn(ws: Workspace, knower: str, fact_id: str, mode: str) -> None:
+    [found] = [t for t in knowledge.tools(ws) if t.name == "record_knowledge"]
+    record = partial(found.fn, knower=knower, fact=fact_id, origin=GM, mode=mode, date=DAY0)
+    delegation.act(ws, found, "prep-agent", record)
+
+
+def chose(*actions: str) -> list[dict]:
+    return [{"action": a, "cites": []} for a in actions]
+
+
+def fturn(ws: Workspace, date: str, choices: Any, job: int | None = None) -> list[dict]:
+    """A faction turn on `date`, the world-turn cursor first brought up to it."""
+    at = world.cursor(ws)
+    if at is None or index.date_key(ws.calendar, at) < index.date_key(ws.calendar, date):
+        turn(ws, date)
+    return world.faction_turn(ws, date, choices, job)
+
+
+def failure_event(ws: Workspace, key: str) -> list[dict]:
+    return [e for e in index.search_events(ws) if e["origin"].get("key") == key]
+
+
+def test_a_prerequisite_is_checked_against_truth_and_a_false_belief_is_learnt_by_its_faction(
+    ws: Workspace,
+) -> None:
+    tolls, carrier = front(ws, "Toll Squeeze")
+    gate = situation(ws, "Open Gate", stage="available")
+    squeeze = action("squeeze", {"coin": 1}, prerequisites=[{"front": tolls, "clock_gte": 2}])
+    rumour = action("rumour", {"coin": 1}, prerequisites=[{"front": tolls, "clock_gte": 3}])
+    enter = action("enter", {"coin": 1}, prerequisites=[{"situation": gate, "stage": "available"}])
+    council = gm_faction(ws, "Council", 5, 3, squeeze, rumour, enter)
+    spy = entity(ws, "Spy")
+    member = {"type": "member_of", "subject": spy, "object": council}
+    fact(ws, "The spy serves the Council.", relation=member)
+    # The Council believes the clock is at 2; in truth it is at 0. It holds nothing about 3.
+    belief = {"of": tolls, "key": "clock", "value": 2}
+    believed = fact(ws, "The squeeze is well under way.", never_true=True, state=belief)
+    learn(ws, council, believed, "believes")
+    jobs_before = jobs.pending(ws)
+
+    records = fturn(ws, TURN, {council: chose("squeeze", "rumour", "enter")})
+
+    by = {r["action"]: r for r in records}
+    ok = by["enter"]
+    assert (ok["kind"], ok["status"], ok["debit"]) == ("action", "validated", {"coin": 1})
+    assert (by["rumour"]["kind"], by["rumour"]["status"]) == ("failure", "failed")
+    assert by["rumour"]["belief"] is None and by["rumour"]["entries"] == []
+    false = by["squeeze"]
+    assert (false["kind"], false["status"], false["belief"]) == ("failure", "applied", believed)
+    assert "does not hold on 4725-01-05" in false["validation"]
+    assert jobs.pending(ws) == jobs_before  # a faction turn queues no job
+
+    # ADR 0022 decision (c): an offscreen event on its date that only the Council learns.
+    [event] = failure_event(ws, false["key"])
+    assert (event["kind"], event["date"]) == ("offscreen", TURN)
+    [failed] = event["opens"]
+    learnt = index.search_knowledge(ws, [council, carrier, spy, index.PARTY])
+    assert [(k["knower"], k["fact"]) for k in learnt if k["fact"] == failed] == [(council, failed)]
+    assert knowledge.known(ws, spy, at=TURN)[failed]["via"] == council  # CAN-14: its members
+    assert failed not in knowledge.known(ws, carrier, at=TURN)
+    [said] = [f for f in index.search_facts(ws, at=TURN) if f["id"] == failed]
+    assert said["rank"] == "agent_proposal" and "squeeze failed" in said["statement"]
+    assert said["origin"]["kind"] == "rule"
+    assert world.state(ws)["fronts"][tolls]["clock"] == 0  # truth is untouched
+
+
+def test_a_false_belief_on_a_fact_or_a_stage_fails_while_a_suspicion_does_not_count(
+    ws: Workspace,
+) -> None:
+    gate = situation(ws, "Gate", stage="resolved")
+    ford = fact(ws, "The ford is shallow.", valid_from=DAY0, valid_to="4725-01-03")
+    rumour = fact(ws, "The ford is guarded.", never_true=True)
+    cross = action("cross", {"coin": 1}, prerequisites=[{"holds": ford}])
+    raid = action("raid", {"coin": 1}, prerequisites=[{"holds": rumour}])
+    enter = action("enter", {"coin": 1}, prerequisites=[{"situation": gate, "stage": "available"}])
+    council = gm_faction(ws, "Council", 5, 3, cross, raid, enter)
+    learn(ws, council, ford, "knows")  # true once, no longer on the turn's date
+    learn(ws, council, rumour, "suspects")  # a suspicion is no belief
+    stage = {"of": gate, "key": "situation", "value": {"stage": "available"}}
+    opened = fact(ws, "The gate stands open.", never_true=True, state=stage)
+    learn(ws, council, opened, "believes")
+
+    records = fturn(ws, TURN, {council: chose("cross", "raid", "enter")})
+
+    assert {r["action"]: (r["status"], r["belief"]) for r in records} == {
+        "cross": ("applied", ford),
+        "raid": ("failed", None),
+        "enter": ("applied", opened),
+    }
+
+
+def test_only_gm_decided_or_rule_effect_faction_facts_are_read(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 0, 2, action("bribe", {"coin": 1}), pool=False)
+    guild = entity(ws, "Guild")
+    state_fact(ws, guild, "catalogue", [action("bribe", {"coin": 1})])  # relayed, not decided
+    turn(ws, TURN)
+    before = snapshot(ws.root)
+
+    with pytest.raises(index.CanonError, match="whole output is refused"):
+        world.faction_turn(ws, TURN, {guild: chose("bribe")})
+    assert snapshot(ws.root) == before
+    relayed = state_fact(ws, council, "pool", {"coin": {"value": 5, "income": 1, "cap": 10}})
+    assert world.validate(ws, TURN, {council: chose("bribe")})[0]["reason"] == "no pool coin"
+
+    # A rule effect on the pool (F3's income or debit, here hand-written) is read.
+    delegation.undo(ws, delegation.read_log(ws)[0][-1]["id"], "other", "cli", True)
+    assert relayed not in {f["id"] for f in index.search_facts(ws)}
+    [catalogue] = [
+        f for f in index.search_facts(ws, entity=council) if f["state"]["key"] == "catalogue"
+    ]
+    pool: dict[str, Any] = {"id": "f-r0000001", "entities": [council], "relation": None}
+    pool |= {"valid_from": None, "valid_to": None, "rank": "agent_proposal"}
+    pool |= {"origin": {"kind": "rule", "fact": catalogue["id"], "key": f"{council}/income@{DAY0}"}}
+    pool |= {
+        "state": {
+            "of": council,
+            "key": "pool",
+            "value": {"coin": {"value": 5, "income": 1, "cap": 10}},
+        }
+    }
+    (ws.root / index.FACTS_DIR / "f-r0000001.md").write_text(index.join_doc(pool, "Income."))
+    assert world.validate(ws, TURN, {council: chose("bribe")})[0]["reason"] is None
+
+
+def test_a_malformed_or_off_catalogue_output_is_refused_whole(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 5, 2, action("bribe", {"coin": 1}))
+    turn(ws, TURN)
+    before = snapshot(ws.root)
+
+    for choices in (
+        {council: chose("bribe", "invade")},
+        {council: [{"action": "bribe"}]},
+        {council: ["bribe"]},
+        {council: [{"action": "bribe", "cites": "f-1"}]},
+        {council: "bribe"},
+        [council],
+    ):
+        with pytest.raises(index.CanonError, match="whole output is refused"):
+            world.faction_turn(ws, TURN, choices)
+    with pytest.raises(index.CanonError, match="already used"):
+        world.faction_turn(ws, TURN, {council: chose("bribe", "bribe")})
+
+    assert snapshot(ws.root) == before  # nothing recorded
+
+
+def test_cost_capacity_and_pool_names_are_checked_in_rank_order(ws: Workspace) -> None:
+    council = gm_faction(
+        ws,
+        "Council",
+        3,
+        2,
+        action("march", {"troops": 1}),
+        action("hoard", {"coin": 4}),
+        action("bribe", {"coin": 2}),
+        action("toll", {"coin": 1}),
+        action("spy", {"coin": 2}),
+        action("feast", {"coin": 0}),
+    )
+    order = chose("march", "hoard", "bribe", "spy", "toll", "feast")
+
+    records = fturn(ws, TURN, {council: order})
+
+    assert {r["action"]: r["validation"] for r in records} == {
+        "march": "no pool troops",  # an unknown pool is named
+        "hoard": 'pools cannot cover {"coin": 4}',
+        "bribe": "ok",
+        "spy": 'pools cannot cover {"coin": 2}',  # 2 of its 3 coins are already committed
+        "toll": "ok",
+        "feast": "no capacity left this step",
+    }
+
+
+def test_one_faction_turn_per_step_never_after_the_cursor(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 5, 1, action("bribe", {"coin": 1}))
+    fturn(ws, TURN, {council: chose("bribe")})
+
+    with pytest.raises(DelegationError, match="on or before the cursor"):
+        world.faction_turn(ws, "4725-01-06", {council: chose("bribe")})
+    turn(ws, "4725-01-12")
+    for inside in ("4725-01-11", "4725-01-05", "4725-01-01"):
+        with pytest.raises(DelegationError, match="One faction turn per step"):
+            world.faction_turn(ws, inside, {council: chose("bribe")})
+    [next_week] = world.faction_turn(ws, "4725-01-12", {council: chose("bribe")})
+    assert next_week["status"] == "validated"
+
+
+def test_a_faction_turn_is_refused_up_front_at_manual_for_an_unstarted_job_or_live(
+    ws: Workspace,
+) -> None:
+    council = gm_faction(ws, "Council", 5, 1, action("bribe", {"coin": 1}))
+    turn(ws, TURN)
+    queued_job = jobs.queue(
+        ws,
+        playbook="settle-an-unless",
+        inputs={"occurrence": "x"},
+        expected_output="x",
+        responsibility="living_world",
+    )["id"]
+    before = snapshot(ws.root)
+
+    with pytest.raises(DelegationError, match="not started"):
+        world.faction_turn(ws, TURN, {council: chose("bribe")}, job=queued_job)
+    set_level(ws, "prep", "living_world", "manual")
+    with pytest.raises(DelegationError, match="living_world is at manual"):
+        world.faction_turn(ws, TURN, {council: chose("bribe")})
+    set_level(ws, "prep", "living_world", "act-then-review")
+    delegation.change_moment(ws, "live-session")
+    with pytest.raises(DelegationError, match="never act during a live session"):
+        world.faction_turn(ws, TURN, {council: chose("bribe")})
+
+    after = snapshot(ws.root)
+    assert {p for p in after if p.startswith(("occurrences/", "canon/", "action-log/"))} == {
+        p for p in before if p.startswith(("occurrences/", "canon/", "action-log/"))
+    }
+
+
+def test_an_interrupted_faction_turn_is_finished_by_recovery(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    squeeze = action("squeeze", {"coin": 1}, prerequisites=[{"front": tolls, "clock_gte": 1}])
+    council = gm_faction(ws, "Council", 5, 3, squeeze, action("toll", {"coin": 1}))
+    learn(
+        ws,
+        council,
+        fact(ws, "It began.", never_true=True, state={"of": tolls, "key": "clock", "value": 1}),
+        "believes",
+    )
+    turn(ws, TURN)
+
+    def crash(step: str) -> None:
+        if step.startswith("occurrences/"):
+            raise RuntimeError(step)
+
+    monkeypatch.setattr(journal, "_fault", crash)
+    with pytest.raises(RuntimeError):
+        world.faction_turn(ws, TURN, {council: chose("squeeze", "toll")})
+    monkeypatch.setattr(journal, "_fault", lambda step: None)
+    with delegation.locked(ws):  # the first acquisition recovers
+        pass
+
+    found = {r["action"]: r["status"] for r in world.occurrences(ws) if r["kind"] != "tick"}
+    assert found == {"squeeze": "applied", "toll": "validated"}
+    assert not list((ws.root / delegation.JOURNAL_DIR).glob("*.yaml"))
+
+
+def contest(ws: Workspace, council_cost: int = 2, guild_cost: int = 2) -> tuple[str, str, str]:
+    bridge = entity(ws, "Bridge")
+    seize = {"target": bridge, "contest": {"pool": "coin"}}
+    council = gm_faction(ws, "Council", 5, 1, action("seize", {"coin": council_cost}, **seize))
+    guild = gm_faction(ws, "Guild", 5, 1, action("seize", {"coin": guild_cost}, **seize))
+    return council, guild, bridge
+
+
+def test_a_contest_is_seeded_from_its_keys_and_replays_to_the_same_records(
+    ws: Workspace, tmp_path: Path
+) -> None:
+    council, guild, bridge = contest(ws)
+    turn(ws, TURN)
+    copy = tmp_path / "replay"
+    shutil.copytree(ws.root, copy)
+    choices = {council: chose("seize"), guild: chose("seize")}
+
+    def outcome(w: Workspace) -> list[dict]:
+        records = world.faction_turn(w, TURN, choices)
+        return [{k: v for k, v in r.items() if k != "at"} for r in records]
+
+    first, replay = outcome(ws), outcome(workspace.load(copy))
+
+    assert first == replay  # every field but the wall-clock `at`
+    rolls = {r["entity"]: r["contest"]["roll"] for r in first}
+    assert rolls == {f: world.roll(f"{f}/seize@{TURN}") for f in (council, guild)}
+    [won] = [r for r in first if r["status"] == "validated"]
+    [lost] = [r for r in first if r["status"] == "failed"]
+    assert won["contest"]["won"] and not lost["contest"]["won"]
+    assert lost["validation"] == f"lost the contest for {bridge} to {won['key']}"
+    assert won["contest"]["roll"] >= lost["contest"]["roll"]  # equal commitments: the roll
+
+
+def test_a_larger_commitment_wins_a_contest_whatever_the_roll(ws: Workspace) -> None:
+    council, guild, _ = contest(ws, council_cost=3, guild_cost=1)
+
+    records = fturn(ws, TURN, {council: chose("seize"), guild: chose("seize")})
+
+    assert {r["entity"]: r["status"] for r in records} == {council: "validated", guild: "failed"}
+
+
+def test_a_contest_loser_commits_nothing_so_its_faction_can_afford_its_next_choice(
+    ws: Workspace,
+) -> None:
+    bridge = entity(ws, "Bridge")
+    seize = {"target": bridge, "contest": {"pool": "coin"}}
+    council = gm_faction(
+        ws, "Council", 3, 2, action("seize", {"coin": 2}, **seize), action("toll", {"coin": 2})
+    )
+    guild = gm_faction(ws, "Guild", 5, 1, action("seize", {"coin": 3}, **seize))
+
+    records = fturn(ws, TURN, {council: chose("seize", "toll"), guild: chose("seize")})
+
+    assert {r["key"]: r["validation"] for r in records} == {
+        f"{council}/seize@{TURN}": f"lost the contest for {bridge} to {guild}/seize@{TURN}",
+        f"{council}/toll@{TURN}": "ok",  # its 3 coins cover it once the lost seize is dropped
+        f"{guild}/seize@{TURN}": "ok",
+    }
+
+
+def dissolving(ws: Workspace, c_coin: int, c_capacity: int, *c_more: dict) -> tuple[str, ...]:
+    """A loses X to B, which frees coin for `ay`, which then starves `a1`, which had beaten C's
+    `c1` on T: the contest on T dissolves after `c1` lost it."""
+    x, t = entity(ws, "X"), entity(ws, "T")
+    cx = {"target": x, "contest": {"pool": "coin"}}
+    ct = {"target": t, "contest": {"pool": "coin"}}
+    a = gm_faction(
+        ws,
+        "A",
+        3,
+        3,
+        action("ax", {"coin": 2}, **cx),
+        action("ay", {"coin": 3}),
+        action("a1", {"coin": 1}, **ct),
+    )
+    b = gm_faction(ws, "B", 5, 1, action("bx", {"coin": 3}, **cx))
+    c = gm_faction(ws, "C", c_coin, c_capacity, action("c1", {"coin": 0}, **ct), *c_more)
+    return a, b, c
+
+
+def test_a_contest_loser_stays_lost_when_its_winner_fails_later(ws: Workspace) -> None:
+    a, b, c = dissolving(ws, 0, 1, action("c2", {"coin": 0}))
+
+    records = fturn(ws, TURN, {a: chose("ax", "ay", "a1"), b: chose("bx"), c: chose("c1", "c2")})
+
+    by = {r["key"].split("/")[1].split("@")[0]: r for r in records}
+    assert by["a1"]["validation"] == 'pools cannot cover {"coin": 1}'
+    assert (by["c1"]["status"], by["c1"]["contest"]["won"]) == ("failed", False)
+    assert by["c1"]["validation"].startswith("lost the contest")
+    assert by["c2"]["status"] == "validated"  # the lost c1 used no capacity
+    assert by["bx"]["contest"]["won"] and by["ay"]["status"] == "validated"
+
+
+def test_validated_choices_never_overdraw_a_pool(ws: Workspace) -> None:
+    a, b, c = dissolving(ws, 2, 2, action("c2", {"coin": 2}), action("c3", {"coin": 2}))
+
+    records = fturn(
+        ws, TURN, {a: chose("ax", "ay", "a1"), b: chose("bx"), c: chose("c1", "c2", "c3")}
+    )
+
+    spent: Counter[str] = Counter()
+    for r in records:
+        if r["status"] == "validated":
+            spent[r["entity"]] += r["debit"].get("coin", 0)
+    assert spent == {a: 3, b: 3, c: 2}
+    assert [r["action"] for r in records if r["entity"] == c and r["status"] == "validated"] == [
+        "c2"
+    ]
+
+
+def test_a_cite_that_is_no_canon_fact_refuses_the_whole_output(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 5, 2, action("bribe", {"coin": 1}))
+    belief = fact(ws, "The Guild is broke.", never_true=True)
+    turn(ws, TURN)
+    before = snapshot(ws.root)
+
+    for cites in (["../../../nope"], ["f-00000000"]):
+        with pytest.raises(index.CanonError, match="not canon fact ids"):
+            world.faction_turn(ws, TURN, {council: [{"action": "bribe", "cites": cites}]})
+    assert snapshot(ws.root) == before
+    # A belief may be cited, held by the faction or not (D25).
+    [record] = world.faction_turn(ws, TURN, {council: [{"action": "bribe", "cites": [belief]}]})
+    assert record["cites"] == [belief]
+
+
+def test_an_empty_faction_turn_records_nothing_and_leaves_its_step_free(ws: Workspace) -> None:
+    council = gm_faction(ws, "Council", 5, 1, action("bribe", {"coin": 1}))
+
+    assert fturn(ws, TURN, {}) == [] and fturn(ws, TURN, {council: []}) == []
+    assert world.faction_turn(ws, TURN, {council: chose("bribe")})[0]["status"] == "validated"
+
+
+def test_a_hand_edit_to_any_faction_it_read_rolls_an_interrupted_turn_back(
+    ws: Workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    squeeze = action("squeeze", {"coin": 1}, prerequisites=[{"front": tolls, "clock_gte": 1}])
+    council = gm_faction(ws, "Council", 5, 3, squeeze, action("toll", {"coin": 1}))
+    guild = gm_faction(ws, "Guild", 5, 3, squeeze, action("toll", {"coin": 1}))
+    for who in (council, guild):
+        began = {"of": tolls, "key": "clock", "value": 1}
+        learn(ws, who, fact(ws, f"It began for {who}.", never_true=True, state=began), "believes")
+    turn(ws, TURN)
+    choices = {council: chose("squeeze", "toll"), guild: chose("squeeze", "toll")}
+    second = sorted(choices)[1]  # not the faction whose record commits the journal
+    [pool] = [f for f in index.search_facts(ws, entity=second) if f["state"]["key"] == "pool"]
+
+    def crash(step: str) -> None:
+        if step.startswith("occurrences/"):
+            raise RuntimeError(step)
+
+    monkeypatch.setattr(journal, "_fault", crash)
+    with pytest.raises(RuntimeError):
+        world.faction_turn(ws, TURN, choices)
+    monkeypatch.setattr(journal, "_fault", lambda step: None)
+    path = ws.root / index.FACTS_DIR / f"{pool['id']}.md"
+    path.write_text(path.read_text().replace("value: 5", "value: 0"))
+    with delegation.locked(ws):  # the first acquisition recovers
+        pass
+
+    assert [r for r in world.occurrences(ws) if r["kind"] != "tick"] == []
+    assert "faction turn must run again" in calls.read_calls(ws)[-1]["message"]
+    assert len(world.faction_turn(ws, TURN, choices)) == 4  # run again, it plans afresh
+
+
+def test_failed_choices_are_listed_collapsed_with_their_reason_in_the_report(
+    ws: Workspace,
+) -> None:
+    council, guild, _ = contest(ws)
+    records = fturn(ws, TURN, {council: chose("seize"), guild: chose("seize")})
+
+    shown = world.present(records)
+
+    [lost] = [r for r in records if r["kind"] == "failure"]
+    failures = {"kind": "failures", "entity": lost["entity"]}
+    assert failures | {"failed": {lost["key"]: lost["validation"]}} in shown
+    assert sorted(s["kind"] for s in shown) == ["action", "failures"]
+
+
+def false_belief(ws: Workspace) -> str:
+    tolls, _ = front(ws, "Toll Squeeze")
+    squeeze = action("squeeze", {"coin": 1}, prerequisites=[{"front": tolls, "clock_gte": 1}])
+    council = gm_faction(ws, "Council", 5, 1, squeeze)
+    belief = {"of": tolls, "key": "clock", "value": 1}
+    learn(ws, council, fact(ws, "The squeeze began.", never_true=True, state=belief), "believes")
+    return council
+
+
+def test_a_failure_on_a_false_belief_waits_for_the_gm_at_propose(ws: Workspace) -> None:
+    council = false_belief(ws)
+    set_level(ws, "prep", "living_world", "propose")
+
+    [record] = fturn(ws, TURN, {council: chose("squeeze")})
+
+    assert (record["status"], record["entries"]) == ("queued", [])
+    assert record["call"] is not None and failure_event(ws, record["key"]) == []
+    with pytest.raises(DelegationError, match="accept or reject"):
+        world.decide(ws, record["key"], "reschedule", True, date="4725-01-12")
+    assert world.decide(ws, record["key"], "reject", authenticated=True)["status"] == "rejected"
+    assert failure_event(ws, record["key"]) == []
+
+
+def test_an_applied_failure_is_accepted_late_or_undone_back_to_the_queue(ws: Workspace) -> None:
+    council = false_belief(ws)
+
+    [record] = fturn(ws, TURN, {council: chose("squeeze")})
+    assert record["status"] == "applied" and failure_event(ws, record["key"])
+
+    assert world.undo(ws, record["key"], "other", "cli", authenticated=True) == [record["key"]]
+    assert occ(ws, record["key"])["status"] == "queued"
+    assert failure_event(ws, record["key"]) == []
+    assert world.decide(ws, record["key"], "accept", authenticated=True)["status"] == "applied"
+    [event] = failure_event(ws, record["key"])
+    assert event["date"] == TURN  # LW-17: it keeps its date
+
+
+def test_a_catalogue_action_id_never_breaks_its_occurrence_key(ws: Workspace) -> None:
+    council, gate = entity(ws, "Council"), situation(ws, "Gate", stage="available")
+    for bad, message in (
+        (action("a/b", {}), "no '/' or '@'"),
+        (action("a@b", {}), "no '/' or '@'"),
+        (action("x", {}, prerequisites=[{"situation": gate, "stage": "open"}]), "stage is one"),
+        (action("x", {}, prerequisites=[{"situation": "e-x", "stage": "active"}]), "Unknown"),
+    ):
+        with pytest.raises(index.CanonError, match=message):
+            state_fact(ws, council, "catalogue", [bad])

@@ -189,9 +189,19 @@ def recover(ws: Workspace, force: bool = False) -> list[str]:
                         _put(target, dump({**entry, "status": "undone", "reason": "recovery"}))
                 else:
                     _put(target, w["before"])
+            # A faction turn's records (ADR 0022) are planned by running that turn again.
+            faction = yaml.safe_load(journal["writes"][-1]["after"])["kind"] in (
+                "action",
+                "failure",
+            )
+            again = (
+                "its faction turn must run again"
+                if faction
+                else "the next world-turn plans it afresh"
+            )
             message = (
                 f"Occurrence {key} was interrupted and what it read changed since: it was "
-                "rolled back, and the next world-turn plans it afresh."
+                f"rolled back, and {again}."
             )
             called = call(message)
             record = _journaled(ws, journal["writes"][-1]["path"])
