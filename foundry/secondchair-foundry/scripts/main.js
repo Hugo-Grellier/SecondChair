@@ -2,7 +2,7 @@
 import { aboveCeiling, CEILING, createActions, missingTranslation } from "./actions.js";
 import { connect, coreUrl, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
-import { createDesk, deskHtml, esc } from "./desk.js";
+import { createDesk, deskHtml, esc, keyHint } from "./desk.js";
 import {
   DOCUMENT_TYPES,
   finder,
@@ -204,6 +204,10 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
       pile: desk?.pile ?? null,
       ceiling,
       cardOpen: desk?.cardOpen ?? false,
+      keys: {
+        desk: keyHint(game.keybindings.get(MODULE, "desk")),
+        situation: keyHint(game.keybindings.get(MODULE, "situation")),
+      },
     });
   }
 

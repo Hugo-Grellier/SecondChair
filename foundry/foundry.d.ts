@@ -73,6 +73,7 @@ declare const game: {
         onDown: () => boolean;
       },
     ): void;
+    get(module: string, key: string): { key: string; modifiers?: string[] }[];
   };
   /** A Foundry Collection: iterating it yields the values. */
   modules: Iterable<FoundryModule> & {
