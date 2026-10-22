@@ -11,7 +11,8 @@ state fact and opening the new one, known only to the carrier and the named part
 
 The world-turn is deterministic over `]cursor, now]` (LW-04): the v3 occurrence keys
 (`<front>/tick@<date>`, `<front>/<step>`, `<situation>/deadline@<date>`, a rescheduled key
-`<key>~<date>`) are each used once, whatever happens to them (LW-13). Rule effects apply at the
+`<key>~<date>`, and a faction's `<faction>/<action>@<date>` and `<faction>/income@<date>`)
+are each used once, whatever happens to them (LW-13). Rule effects apply at the
 living world's level with the rule's rank; an `unless` and a narrative deadline become jobs
 (LW-06); an occurrence contradicting played canon becomes a call and stays queued (LW-09).
 
@@ -51,6 +52,7 @@ FRONT, CLOCK, AGENDA, SITUATION = "front", "clock", "agenda", "situation"
 INTENT, POOL, CAPACITY, CATALOGUE = "intent", "pool", "capacity", "catalogue"  # ADR 0022
 FACTION_KEYS = (INTENT, POOL, CAPACITY, CATALOGUE)
 ACTION, FAILURE = "action", "failure"  # a faction's validated choice, and one that failed
+INCOME = "income"  # a faction's income for one faction step (ADR 0022 item 2)
 EFFECT_CLASSES = ("derived", "narrative")  # a catalogue effect's class, the GM's call (ADR 0009)
 STEP = "1w"  # the campaign-wide faction step unless workspace.yaml sets faction_step (ADR 0022)
 STAGES = ("available", "active", "resolved", "expired")  # `active`: the party engaged it
@@ -646,6 +648,24 @@ def _effect(
         new_state = {**old["state"], "value": {**old["state"]["value"], "status": "done"}}
         statement = old["statement"]
         knowers = [rule["carrier"], *rule["participants"]]
+    elif record["kind"] in (INCOME, ACTION):  # a faction's pools (ADR 0022 items 2 and 4)
+        old = s.get(POOL)
+        if old is None or not _decided(old):
+            raise _Blocked(f"{entity} holds no pool")
+        pools = old["state"]["value"]
+        if record["kind"] == INCOME:
+            if (value := _credited(pools)) == pools:  # a late accept finds them at their caps
+                raise _Blocked(f"{entity}'s pools are at their caps")
+        else:  # a pool never goes below zero, whatever moved since the validation
+            debit = record["debit"]
+            if short := {n: c for n, c in debit.items() if n not in pools or c > pools[n]["value"]}:
+                raise _Blocked(f"its pools no longer cover {json.dumps(short)}")
+            value = {n: {**r, "value": r["value"] - debit.get(n, 0)} for n, r in pools.items()}
+        new_state = {**old["state"], "value": value}
+        statement = f"{names[entity]}: " + ", ".join(
+            f"{n} {r['value']}/{r['cap']}" for n, r in value.items()
+        )
+        knowers = [entity]
     else:
         old = s.get(SITUATION)
         if old is None or old["id"] != record["rule"]:
@@ -693,6 +713,14 @@ def _changes(
 ) -> list[Change]:
     if record["kind"] == FAILURE:
         return _failure(ws, record)
+    if record["kind"] == ACTION:  # its debit and its effect, one plan (ADR 0022 item 4)
+        rank = ("agent_proposal", {"kind": "rule", "fact": record["rule"], "key": record["key"]})
+        debit = _effect(ws, record, *rank, overlay) if any(record["debit"].values()) else []
+        return debit + _learnt(ws, record, f": {_does(ws, record)}", "effect")
+    if record["kind"] == INCOME and rank is None:  # the rank of the pool it credits, its head:
+        head = _current(ws, head=True, overlay=overlay).get(record["entity"], {}).get(POOL)
+        if head is not None:  # a debited pool's lower rank is never promoted (ADR 0009)
+            rank = (head["rank"], {"kind": "rule", "fact": record["rule"], "key": record["key"]})
     if rank is None and record["cites"]:  # an unless settled by a job (LW-10)
         rank = ("agent_proposal", {"kind": "job", "job": str(record["job"])})
     return _effect(ws, record, *(rank or _rule_rank(ws, record)), overlay)
@@ -826,11 +854,12 @@ def _journal(
         path = f"{OCCURRENCES_DIR}/{r['id']:06d}.yaml"
         records.append({"path": path, "before": before, "after": delegation.dump(r)})
     entity, read = record["entity"], set(facts)
-    for e in (entity, *entities):
+    entities = sorted({entity, *entities, *(r["entity"] for r, _, _ in planned)})
+    for e in entities:
         read |= {f["id"] for f in index.search_facts(ws, entity=e, include_retconned=True)}
     read |= {r["rule"] for r, _, _ in planned} | {c for r, _, _ in planned for c in r["cites"]}
     events = [e["id"] for e in index.search_events(ws) if read & {*e["opens"], *e["closes"]}]
-    reads = [f"{index.ENTITIES_DIR}/{e}.md" for e in (entity, *entities)]
+    reads = [f"{index.ENTITIES_DIR}/{e}.md" for e in entities]
     reads += [*(f"{index.FACTS_DIR}/{f}.md" for f in read), *files]
     reads += [f"{index.EVENTS_DIR}/{e}.md" for e in events]
     plan = journal.new_journal(ws, record["key"], entity, reads, writes + records[1:] + records[:1])
@@ -1002,14 +1031,17 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
     """The factions' turn for the faction step ending on `date`: every faction's ranked
     choices at once (F5 and F6 collect every answer first, since contests happen only inside
     one turn), validated (`validate`) and recorded under their keys `<faction>/<action>@<date>`,
-    used once (LW-13), in one journal (ADR 0016). An accepted one is an `action` occurrence,
-    `validated`, carrying its `debit`; applying its debit and effect is F3's. A failed one is a
+    used once (LW-13), in one journal (ADR 0016). An accepted one is an `action` occurrence
+    carrying its `debit`, applied in that journal: the debit on its faction's pool and its
+    effect, a fact only its faction learns, never one without the other; a narrative one waits
+    queued behind a proposal call (ADR 0022 item 6). After the debits, each faction's income is
+    credited up to its caps, a rule effect keyed `<faction>/income@<date>`. A failed one is a
     `failure`, `failed`, with its reason (`validation`), listed in the world-turn report
     (`present`). One failed on a false belief is an offscreen event only its faction learns, a
     derived consequence at the living world's level (ADR 0022 decision c), held behind a
     proposal call at propose. `job`: the started faction-intent job that chose. Refused during
     a live session (LW-05), at manual, after the world-turn cursor, and within one faction step
-    of another faction turn. Queues no job. Returns the records."""
+    of another faction turn. Queues no job. Returns the records, its income ones included."""
     from secondchair.core import jobs  # it builds on canon, which builds on this module
 
     with locked(ws):
@@ -1032,13 +1064,24 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
         if near := [
             r["key"]
             for r in occurrences(ws)
-            if r["kind"] in (ACTION, FAILURE)
+            if r["kind"] in (ACTION, FAILURE, INCOME)  # income once per step, too
             and at(cal.add(r["date"], step)) > at(date)
             and at(cal.add(date, step)) > at(r["date"])
         ]:
             raise DelegationError(f"One faction turn per step: {near[0]} is within {step}.")
         planned: _Plan = []
         prereqs: list[dict] = []
+        overlay: list[Change] = []
+
+        def plan_one(record: dict) -> None:
+            try:
+                changes = _changes(ws, record, None, overlay)
+            except _Blocked as e:
+                planned.append((record, None, str(e)))
+                return
+            overlay.extend(changes)
+            planned.append((record, changes, None))
+
         for v in validate(ws, date, choices):
             a, failed = v["action"], v["reason"] is not None
             prereqs += a["prerequisites"]
@@ -1048,18 +1091,36 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
             occ |= {"cites": v["cites"], "action": a["id"], "target": a["target"]}
             occ |= {"validation": v["reason"] or "ok", "belief": v["belief"]}
             occ |= {"debit": {} if failed else a["cost"], "contest": v["contest"]}
-            if v["belief"] is None:
-                occ["status"] = "failed" if failed else "validated"
             record = _new(occ)
-            planned.append((record, _failure(ws, record) if v["belief"] else None, None))
+            if failed and v["belief"] is None:
+                planned.append((record | {"status": "failed"}, None, None))
+            elif occ["class"] == "narrative":  # new narrative waits for the GM (ADR 0022 item 6)
+                planned.append((record, None, None))
+            else:
+                plan_one(record)
+        used = {r["key"] for r in occurrences(ws)}
+        # Over the planned debits whatever the level, so propose then accept ends where act
+        # does; an income accepted onto pools at their caps (its debit rejected) calls instead.
+        heads = _current(ws, head=True, overlay=overlay)
+        for faction, s in sorted(_current(ws, at=date).items()):  # credited after the debits
+            pool = heads.get(faction, {}).get(POOL)
+            key = f"{faction}/income@{date}"
+            if (
+                POOL in s
+                and _decided(s[POOL])
+                and pool is not None
+                and _credited(pool["state"]["value"]) != pool["state"]["value"]
+                and key not in used
+            ):
+                occ = {"key": key, "kind": INCOME, "class": "rule", "entity": faction}
+                plan_one(_new(occ | {"date": date, "rule": s[POOL]["id"], "job": job}))
         if not planned:
             return []
         applied = [(c, r["key"]) for r, changes, _ in planned for c in changes or []]
         entries = (
             delegation.plan_actions(ws, _effect_tool(), AGENT, applied, job) if applied else []
         )
-        held = entries is None  # at propose: the false beliefs wait, queued, behind a call each
-        if held:
+        if entries is None:  # held at propose whole: each record waits, queued, behind a call
             planned = [(r, None, why) for r, _, why in planned]
         # What the plan read (ADR 0016): every faction's facts and knowledge, and the facts its
         # prerequisites name, so a hand edit to any of them before recovery rolls it back.
@@ -1077,29 +1138,57 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
                 f"{index.KNOWLEDGE_DIR}/{k['id']}.md" for k in index.search_knowledge(ws, via)
             }
         _journal(ws, planned[0][0], planned, entries or [], entities, sorted(facts), sorted(files))
-        records = [r for r, _, _ in planned]
-        for r in records:
-            if held and r["belief"]:
+        for r, _, why in planned:
+            if why is not None:
+                _ask(ws, r, "exception", f"{why}; reject it, or accept it once it applies")
+            elif r["status"] == "queued" and r["kind"] == INCOME:
+                _ask(ws, r, "proposal", "its faction is credited its income; accept or reject it")
+            elif r["status"] == "queued" and r["kind"] == FAILURE:
                 _ask(ws, r, "proposal", "its faction learns its choice failed; accept or reject it")
-        return records
+            elif r["status"] == "queued":
+                _ask(ws, r, "proposal", "its faction acts and pays for it; accept or reject it")
+        return [r for r, _, _ in planned]
+
+
+def _credited(pools: dict) -> dict:
+    """A faction's pools after one step's income, each up to its cap (ADR 0022 item 2)."""
+    return {n: {**r, "value": min(r["value"] + r["income"], r["cap"])} for n, r in pools.items()}
+
+
+def _does(ws: Workspace, record: dict) -> str:
+    """What a faction's action does, from the catalogue fact it was validated against."""
+    [catalogue] = [
+        f for f in index.search_facts(ws, include_retconned=True) if f["id"] == record["rule"]
+    ]
+    [does] = [
+        a["effect"]["does"] for a in catalogue["state"]["value"] if a["id"] == record["action"]
+    ]
+    return does
 
 
 def _failure(ws: Workspace, record: dict) -> list[Change]:
     """A choice failed on a false belief: an offscreen event on its date opening a fact that
-    says so, which its faction alone learns (ADR 0022 decision c), at the agent-proposal rank
-    of a derived consequence. File ids derive from the key, used once."""
+    says so, which its faction alone learns (ADR 0022 decision c)."""
+    return _learnt(ws, record, f" failed: {record['validation']}")
+
+
+def _learnt(ws: Workspace, record: dict, says: str, role: str = "") -> list[Change]:
+    """An offscreen event on a faction choice's date opening a fact, `<faction>: <action><says>`,
+    which its faction alone learns, at the agent-proposal rank of a derived consequence. File
+    ids derive from the key, used once, and `role`."""
     key, faction, date = record["key"], record["entity"], record["date"]
     origin = {"kind": "rule", "fact": record["rule"], "key": key}
     admission.admit(ws, origin, admission.CORE)  # the Core composes it
     rank, names = "agent_proposal", {e["id"]: e["names"][0] for e in index.search_entities(ws)}
-    fact_id, event_id, k_id = _id("f", key, "fact"), _id("v", key, "event"), _id("k", key, faction)
+    fact_id, event_id = _id("f", key, f"{role}fact"), _id("v", key, f"{role}event")
+    k_id = _id("k", key, f"{role}{faction}")
     fact: dict[str, Any] = {"id": fact_id, "entities": [faction], "relation": None}
     fact |= {"valid_from": None, "valid_to": None, "rank": rank, "origin": origin}
     event: dict[str, Any] = {"id": event_id, "date": date, "kind": "offscreen"}
     event |= {"opens": [fact_id], "closes": [], "replaces": None, "rank": rank, "origin": origin}
     learnt: dict[str, Any] = {"id": k_id, "knower": faction, "fact": fact_id, "mode": "knows"}
     learnt |= {"date": date, "event": event_id, "rank": rank, "origin": origin}
-    statement = f"{names[faction]}: {record['action']} failed: {record['validation']}"
+    statement = f"{names[faction]}: {record['action']}{says}"
     return [
         Change(f"{index.FACTS_DIR}/{fact_id}.md", index.join_doc(fact, statement), key),
         Change(f"{index.EVENTS_DIR}/{event_id}.md", index.join_doc(event, key), key),
@@ -1165,14 +1254,14 @@ def decide(
             raise DelegationError(f"{key} is {record['status']}, not queued.")
         if answer not in ("accept", "reject", "reschedule"):
             raise DelegationError(f"Answer {answer!r}: expected accept, reject or reschedule.")
-        if answer == "accept" and record["class"] == "narrative":
+        if answer == "accept" and record["class"] == "narrative" and record["kind"] != ACTION:
             raise DelegationError(
                 f"{key} is new narrative: answer its narrative-direction proposal, or reject "
                 "or reschedule it."
             )
         if answer == "reschedule":
-            if record["kind"] == FAILURE:  # its faction learns it on the date it failed
-                raise DelegationError(f"{key} is a failed faction choice: accept or reject it.")
+            if record["kind"] in (FAILURE, ACTION, INCOME):  # it belongs to its faction step
+                raise DelegationError(f"{key} belongs to its faction step: accept or reject it.")
             if date is None:
                 raise DelegationError("Rescheduling needs the new date.")
             date = ws.calendar.canonical(date)
@@ -1188,6 +1277,14 @@ def decide(
             record["rescheduled_to"] = f"{key}~{date}"
         _save(ws, record, OCCURRENCES_DIR)
         return _find(ws, key)
+
+
+def undoable_alone(ws: Workspace, entry: dict) -> bool:
+    """Whether one entry of an occurrence may be undone on its own: only a narrative-direction
+    job's, whose last undo returns its occurrence to the queue (LW-19). Every other occurrence
+    is undone whole (`undo`), or half of it would stay applied."""
+    record = next((r for r in occurrences(ws) if r["key"] == entry["occurrence"]), None)
+    return record is None or (record["class"] == "narrative" and record["kind"] != ACTION)
 
 
 def proposal_answered(ws: Workspace, entry: dict) -> None:
@@ -1219,13 +1316,20 @@ def undo(ws: Workspace, key: str, reason: str, channel: str, authenticated: bool
             raise DelegationError(f"{key} is {target['status']}, not applied.")
         if target["kind"] in ("pause", "resume"):
             raise DelegationError(f"{key} is a GM gesture: resume or pause the front instead.")
-        first = min(target["entries"])
+        first, faction = min(target["entries"]), target["kind"] in (ACTION, FAILURE, INCOME)
+
+        def built_on(r: dict) -> bool:
+            """A later effect on the target's entity; for a faction, only along its pool chain:
+            a later debit or income on the pool a debit or an income closed."""
+            later = r["entity"] == target["entity"] and min(r["entries"]) > first
+            return later and (not faction or (_pooled(target) and _pooled(r)))
+
         todo = {
             r["key"]: r
             for r in records
             if r["status"] == "applied"
             and r["kind"] not in ("pause", "resume")
-            and (r["key"] == key or (r["entity"] == target["entity"] and min(r["entries"]) > first))
+            and (r["key"] == key or built_on(r))
         }
         while more := [
             r
@@ -1241,11 +1345,18 @@ def undo(ws: Workspace, key: str, reason: str, channel: str, authenticated: bool
                 "correction or a retcon can change it now."
             )
         for entry in entries:
-            delegation.undo(ws, entry, reason, channel, authenticated)
+            delegation.undo(ws, entry, reason, channel, authenticated, whole=True)
         for r in todo.values():
             r |= {"status": "queued", "entries": []}
             _save(ws, r, OCCURRENCES_DIR)
+            if r["kind"] in (ACTION, FAILURE, INCOME):  # back in the queue, it waits on the GM
+                _ask(ws, r, "proposal", f"undone ({reason}); accept or reject it")
         return sorted(todo)
+
+
+def _pooled(record: dict) -> bool:
+    """Whether a faction occurrence changes its pool: an income, or a debit."""
+    return record["kind"] == INCOME or (record["kind"] == ACTION and any(record["debit"].values()))
 
 
 def set_active(ws: Workspace, front: str, active: bool, date: str, authenticated: bool) -> dict:

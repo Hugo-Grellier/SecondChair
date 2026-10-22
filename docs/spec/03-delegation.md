@@ -90,7 +90,7 @@ Decisions: [ADR 0003](../adr/0003-core-is-the-only-gateway.md), [ADR 0005](../ad
 
 - **DEL-23** Each **delegated action** belongs to exactly one responsibility. A compound act is split into atomic actions, each checked on its own (a goblin strikes under rules and combat, then shouts an insult under disclosure). An act that truly cannot be split takes the most restrictive level.
 - **DEL-24** There is a single **action log**. Each entry records the responsibility, the effective level and whether an override lowered it, the acting agent, the source, the before and after state, the runner configuration used for job work, and the approval channel.
-- **DEL-25** Each action type is classed as reversible or irreversible at tool registration. A reversible action stays undoable one by one until its moment ends. The log of a moment is then frozen; afterwards only a correction or a retcon changes what it did ([ADR 0009](../adr/0009-world-turn-deterministic-three-effect-classes.md)).
+- **DEL-25** Each action type is classed as reversible or irreversible at tool registration. A reversible action stays undoable one by one until its moment ends, except the entries of a world occurrence, which are undone together with `world undo` (LW-12, LW-22); a narrative-direction job's own entries stay undoable one by one (LW-19). The log of a moment is then frozen; afterwards only a correction or a retcon changes what it did ([ADR 0009](../adr/0009-world-turn-deterministic-three-effect-classes.md)).
 - **DEL-26** Every rejection or undo carries a **rejection reason** from a closed list: contradiction, rules, tone, other.
 - **DEL-27** Adding or removing an override, and every approval, rejection, edit, undo or answer, is a logged GM interaction (it counts in GM effort).
 

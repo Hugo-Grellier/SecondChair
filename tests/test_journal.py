@@ -15,7 +15,8 @@ from pathlib import Path
 import jsonschema
 import pytest
 import yaml
-from test_world import DAY0, SCHEMA, front
+from test_world import DAY0, SCHEMA, TURN, action, chose, fact, front, gm_faction, learn
+from test_world import turn as world_to
 from test_world import ws as _ws  # noqa: F401  (a fixture)
 
 from secondchair.cli import main
@@ -330,3 +331,73 @@ def test_two_core_processes_racing_the_second_waits_and_finds_nothing_to_recover
         assert journals(ws) == [] and jrnl.recover(ws) == []
     assert waited > 0.5 and child.wait(timeout=60) == 0
     assert state(ws.root) == expected and hand_edits(ws) == []
+
+
+# A faction turn: its records, a false belief's files, a debit with its effect, and its income
+# in one journal (ADR 0022 item 4, F3)
+
+
+def test_an_interrupted_faction_turn_never_debits_without_its_effect_or_twice(
+    _ws: Workspace,  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = _ws
+    tolls, _ = front(ws, "Toll Squeeze")
+    squeeze = action("squeeze", {"coin": 1}, prerequisites=[{"front": tolls, "clock_gte": 1}])
+    council = gm_faction(ws, "Council", 5, 2, squeeze, action("bribe", {"coin": 2}))
+    belief = {"of": tolls, "key": "clock", "value": 1}
+    learn(ws, council, fact(ws, "The squeeze began.", never_true=True, state=belief), "believes")
+    world_to(ws, TURN)
+    monkeypatch.setattr(delegation, "datetime", Frozen)
+    choices = {council: chose("squeeze", "bribe")}
+    bribe, runs, labels = f"{council}/bribe@{TURN}", iter(range(10**6)), []
+
+    def run(k: int | None) -> Workspace:
+        copied, steps = shutil.copytree(ws.root, tmp_path / f"run-{next(runs)}"), iter(range(10**6))
+        copied_ws = workspace.load(copied)
+
+        def fault(step: str) -> None:
+            labels.append(step)
+            if next(steps) == k:
+                raise Crash(step)
+
+        labels.clear()
+        monkeypatch.setattr(jrnl, "_fault", fault)
+        try:
+            world.faction_turn(copied_ws, TURN, choices)
+            assert k is None
+        except Crash:
+            assert k is not None
+        finally:
+            monkeypatch.setattr(jrnl, "_fault", lambda step: None)
+        return copied_ws
+
+    def debited(w: Workspace) -> tuple[list[dict], list[dict]]:
+        mine = [f for f in index.search_facts(w) if f["origin"].get("key") == bribe]
+        return [f for f in mine if f["state"]], [f for f in mine if not f["state"]]
+
+    baseline = run(None)
+    steps, expected = list(labels), state(baseline.root)
+    assert len(debited(baseline)[0]) == len(debited(baseline)[1]) == 1  # one debit, one effect
+    assert steps[:2] == ["plan", "journal"] and steps[-1] == "commit"
+    # Three files and their entries for the false belief, the debit, the effect and the income,
+    # then the three records, the turn's first one last.
+    assert len(steps) == 2 + 4 * 3 * 2 + 3 + 1
+    for k in range(len(steps)):
+        crashed = run(k)
+        left = journals(crashed)
+        assert len(left) == (0 if k == 0 else 1)
+        kept = left[0].read_text() if left else None
+        recover(crashed)
+        if k == 0:  # interrupted before its journal: nothing written, the turn runs again
+            assert world.occurrences(crashed) == world.occurrences(ws)
+            world.faction_turn(crashed, TURN, choices)
+        assert state(crashed.root) == expected, steps[k]
+        assert hand_edits(crashed) == []
+        with pytest.raises(DelegationError, match="One faction turn per step"):
+            world.faction_turn(crashed, TURN, choices)  # never a second debit
+        if kept is not None:  # recovery itself interrupted: retried, changing nothing
+            (crashed.root / delegation.JOURNAL_DIR / left[0].name).write_text(kept)
+            recover(crashed)
+            assert journals(crashed) == [] and state(crashed.root) == expected, steps[k]
