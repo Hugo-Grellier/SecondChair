@@ -1,7 +1,7 @@
 // The Director's Desk, module side (ARC-12, ARC-14, docs/contracts/foundry-bridge.md).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createDesk, deskHtml, keyHint, REASONS } from "../secondchair-foundry/scripts/desk.js";
+import { createDesk, deskHtml, REASONS } from "../secondchair-foundry/scripts/desk.js";
 import { validMessage as valid } from "./schema.js";
 
 /** @typedef {import("../secondchair-foundry/scripts/desk.js").DeskState} DeskState */
@@ -306,7 +306,8 @@ test("an empty situation card says so in each part, and none offers to show one"
   // Withdrawn or never pulled (and from a Core before it): a button to pull it.
   for (const situation of [null, undefined]) {
     const none = deskHtml({ isGM: true, state: { ...STATE, situation }, pile: null, ceiling: "x" });
-    assert.match(none, /data-gesture="situation">Show the situation<\/button> no key bound/);
+    assert.match(none, /data-gesture="situation">Show the situation<\/button><\/p>/);
+    assert.doesNotMatch(none, /<kbd>|no key bound/);
     assert.doesNotMatch(none, /GM only/);
   }
 });
@@ -354,14 +355,14 @@ test("pulling the situation sends the gesture; the card comes with the Core's ne
 });
 
 test("the shortcut hints show the keys bound: default, rebound, unbound (#196 S4)", () => {
-  /** @param {Parameters<typeof keyHint>[0]} desk @param {Parameters<typeof keyHint>[0]} situation */
+  /** @param {{key: string, modifiers?: string[]}[]} desk @param {{key: string, modifiers?: string[]}[]} situation */
   const render = (desk, situation) =>
     deskHtml({
       isGM: true,
       state: { ...STATE, situation: null },
       pile: null,
       ceiling: "x",
-      keys: { desk: keyHint(desk), situation: keyHint(situation) },
+      keys: { desk, situation },
     });
   const defaults = render(
     [{ key: "KeyD", modifiers: ["Shift"] }],
@@ -375,7 +376,24 @@ test("the shortcut hints show the keys bound: default, rebound, unbound (#196 S4
   );
   assert.match(rebound, /<kbd>Control<\/kbd>\+<kbd>Alt<\/kbd>\+<kbd>4<\/kbd>/);
   assert.doesNotMatch(rebound, /<kbd>Shift<\/kbd>\+<kbd>S<\/kbd>/);
-  const unbound = render([], undefined);
+  const unbound = render([], []);
   assert.match(unbound, /Open the Desk: no key bound/);
   assert.match(unbound, /Show the situation<\/button> no key bound/);
+});
+
+test("a hint escapes the binding, shows only the first, and passes other codes through", () => {
+  const html = deskHtml({
+    isGM: true,
+    state: { ...STATE, situation: null },
+    pile: null,
+    ceiling: "x",
+    keys: {
+      desk: [{ key: 'Key<script>"', modifiers: ['"><b>'] }, { key: "KeyZ" }],
+      situation: [{ key: "Numpad4" }],
+    },
+  });
+  assert.doesNotMatch(html, /<script>|<b>/);
+  assert.match(html, /&lt;script&gt;&quot;/);
+  assert.doesNotMatch(html, /<kbd>Z<\/kbd>/);
+  assert.match(html, /Show the situation<\/button> <kbd>Numpad4<\/kbd>/);
 });
