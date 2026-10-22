@@ -77,6 +77,16 @@ def _registered(host: str, url: str, root: Path) -> bool | None:
         return None
 
 
+def core_registered(
+    root: Path, port: int, which: Callable[[str], str | None] = shutil.which
+) -> bool | None:
+    """Whether an agent host on PATH registers the Core at `port` (the readiness card, #196);
+    None when none can tell. A bare answer: no host file's path or content."""
+    url = f"http://{LOOPBACK}:{port}{MCP_PATH}"
+    found = [_registered(h, url, root) for h in ("claude", "codex") if which(h)]
+    return True if True in found else (None if None in found else False)
+
+
 def _playbooks_installed(host: str, plugins: list[str], skills: list[str]) -> bool | None:
     try:
         if host == "codex":

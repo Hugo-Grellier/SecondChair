@@ -148,7 +148,9 @@ def test_a_compatible_patch_version_connects(bridge: str, token: str) -> None:
 
 def test_a_world_bound_to_another_campaign_is_refused(bridge: str, token: str) -> None:
     other = "0" * 32
-    assert "another campaign" in refusal(bridge, hello(token, campaign=other))
+    message = refusal(bridge, hello(token, campaign=other))
+    assert "another campaign" in message
+    assert 'game.settings.set("secondchair-foundry", "campaign", "")' in message  # what to run
 
 
 def test_a_campaign_bound_to_another_world_refuses_this_one(bridge: str, token: str) -> None:
@@ -156,6 +158,7 @@ def test_a_campaign_bound_to_another_world_refuses_this_one(bridge: str, token: 
     message = refusal(bridge, hello(token, world="another-world", campaign=None))
     assert WORLD in message
     assert "another-world" in message
+    assert "delete foundry.yaml" in message  # how to rebind, never done from the module
 
 
 def test_a_bound_world_that_lost_its_mark_reconnects(bridge: str, token: str) -> None:
@@ -638,3 +641,68 @@ def test_the_desk_refreshes_when_the_wrap_status_changes(
         # A client without the GM's token, a player's, is refused and told nothing of the wrap.
         assert "wrap" not in json.dumps(reply(bridge, hello("not-the-token")))
         assert next_of(inbox, "desk", lambda m: m["wrap"] is None)
+
+
+RULES_CONTEXT = {
+    "foundry": "14.360",
+    "system": "pf2e",
+    "system_version": "7.5.2",
+    "modules": {"secondchair-foundry": "0.1.0", "secondchair-foundry-pf2e": "0.1.0"},
+    "settings": {},
+    "turn_driver": None,
+}
+
+
+def readiness_card(inbox: queue.Queue, socket: ClientConnection, adapter: bool) -> dict:
+    """Answer the Core's reads after the welcome, with or without an adapter, until the Desk
+    carries the readiness card; it is null before."""
+    desks = 0
+    while True:
+        message = inbox.get(timeout=10)
+        if message["type"] == "desk":
+            desks += 1
+            if message["readiness"] is not None:
+                assert desks > 1  # never in the desk message the welcome is followed by
+                return message["readiness"]
+        if message["type"] == "read":
+            result = {"system": {"id": "pf2e", "version": "7.5.2"}, "entries": []}
+            if message["op"] == "rules_context":
+                result = RULES_CONTEXT
+            answer = {"ok": True, "result": result}
+            if message["op"] == "rules_context" and not adapter:
+                answer = {"ok": False, "error": "Unknown read rules_context."}
+            say(socket, {"type": "reply", "id": message["id"], **answer})
+
+
+def test_the_readiness_card_follows_the_welcome_and_is_per_connection(
+    bridge: str, token: str, workspace: Path
+) -> None:
+    inbox: queue.Queue = queue.Queue()
+    sockets: list[ClientConnection] = []
+    with gm_client(bridge, token, inbox=inbox, sent=sockets):
+        card = readiness_card(inbox, sockets[0], adapter=True)
+    checks = {c["check"]: c["ok"] for c in card["checks"]}
+    # This machine's agent host is not the test's to set; every other check passes.
+    assert checks == {
+        "binding": True,
+        "adapter": True,
+        "adapter_version": True,
+        "system": True,
+        "snapshot": True,
+        "agent_host": checks["agent_host"],
+    }
+    assert token not in json.dumps(card)
+
+    # The next connection starts without the last one's card, and checks again.
+    inbox = queue.Queue()
+    sockets.clear()
+    with gm_client(bridge, token, inbox=inbox, sent=sockets):
+        card = readiness_card(inbox, sockets[0], adapter=False)
+    assert card["ready"] is False
+    assert [c["check"] for c in card["checks"] if not c["ok"]][:3] == [
+        "adapter",
+        "adapter_version",
+        "system",
+    ]
+    # A player's client never gets a Desk, let alone the card.
+    assert "readiness" not in json.dumps(reply(bridge, hello("not-the-token")))

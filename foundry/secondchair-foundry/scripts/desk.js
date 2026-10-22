@@ -1,6 +1,6 @@
 // The Director's Desk (ARC-12, ARC-14, docs/contracts/foundry-bridge.md): the calls due now,
 // approve or reject with a reason, the break pile, Start / End session, the situation card the GM
-// pulls, decisions to confirm and the ceiling, read-only. No tabs. It holds no state of its own (ARC-11): the Core sends what to
+// pulls, the readiness and wrap-state cards, decisions to confirm and the ceiling, read-only. No tabs. It holds no state of its own (ARC-11): the Core sends what to
 // show and takes the gestures. Free of Foundry globals, so it runs under `node --test`.
 
 /**
@@ -10,7 +10,9 @@
  * @typedef {{id: string, statement: string, mode: string, party_mode?: string}} CardFact
  * @typedef {{as_of: CueAsOf, scene: string | null, acting: string | null, npcs: {id: string, name: string, shared: CardFact[], secret: CardFact[]}[], handoff: string[], calls: {id: number, kind: string, deadline: string, text: string}[]}} SituationCard
  * @typedef {{session: number, status: "queued" | "running" | "waiting", as_of: CueAsOf}} WrapCard
- * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, wrap?: WrapCard | null, turn_driver?: string | null}} DeskState
+ * @typedef {{check: string, ok: boolean, says: string, fix: string | null}} ReadinessCheck
+ * @typedef {{ready: boolean, checks: ReadinessCheck[], as_of: CueAsOf}} ReadinessCard
+ * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, wrap?: WrapCard | null, readiness?: ReadinessCard | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */
 
@@ -91,6 +93,8 @@ export function createDesk({ send, isGM, onChange }) {
     /** The bridge closed: gestures still waiting fail, and no new one is sent. */
     close() {
       closed = true;
+      // The readiness card was this connection's: stale once it closed (#196 S3).
+      if (state?.readiness) state = { ...state, readiness: null };
       for (const [id, resolve] of waiting)
         resolve({ type: "result", id, ok: false, error: "The connection to the Core closed." });
       waiting.clear();
@@ -238,6 +242,33 @@ function wrapHtml(card) {
 }
 
 /**
+ * The readiness card (#196 S3): the Core's checks of this connection. Open by itself only when a
+ * check fails, each failure with its one fix; otherwise one collapsed "ready" line the GM can
+ * open. A read, with no gesture: a wrong binding is fixed where the fix says, never from here.
+ * Not a `secondchair-card`, whose toggle the module keeps for the situation card.
+ * @param {ReadinessCard | null | undefined} card
+ */
+function readinessHtml(card) {
+  if (!card || !Array.isArray(card.checks)) return "";
+  const failed = card.checks.filter((c) => c.ok !== true).length;
+  const ready = card.ready === true && failed === 0;
+  const summary = ready
+    ? "<strong>Ready</strong>: every check passed at connect"
+    : `<strong>Not ready</strong>: ${failed || "a"} check${failed === 1 ? "" : "s"} failed`;
+  const checks = card.checks
+    .map(
+      (c) =>
+        `<li>${c.ok === true ? "ok" : "<strong>failed</strong>"}: ${esc(c.says)}${c.ok === true || !c.fix ? "" : `<br>Fix: ${esc(c.fix)}`}</li>`,
+    )
+    .join("");
+  return `<details class="secondchair-readiness"${ready ? "" : " open"}>
+<summary>${summary} · ${ageHtml(card.as_of)}</summary>
+<ul>${checks}</ul>
+</details>
+`;
+}
+
+/**
  * The active NPC's acting cue (DEL-15): shown at every level, manual included, since it is a read.
  * Its age is the time it was shown; the Core withdraws it once play moves on (ADR 0020 item 3).
  * @param {ActingCue | null} cue
@@ -293,7 +324,7 @@ export function deskHtml({ isGM, state, pile, ceiling, cardOpen = false, keys })
   return `<section class="secondchair-desk">
 <p>Moment: ${esc(state.moment)}${live ? ` (session ${state.session})` : ""} · Ceiling: ${esc(ceiling)}${keys ? ` · Open the Desk: ${keyHint(keys.desk)}` : ""}</p>
 <p>${session} <button type="button" data-action="gesture" data-gesture="break">Break</button></p>
-${wrapHtml(state.wrap)}<h3>Due now</h3>
+${readinessHtml(state.readiness)}${wrapHtml(state.wrap)}<h3>Due now</h3>
 ${callsHtml(state.calls, "Nothing due now.")}
 <h3>Situation</h3>
 ${situationHtml(state.situation, cardOpen, keys ? keyHint(keys.situation) : "")}

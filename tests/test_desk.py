@@ -27,7 +27,7 @@ from secondchair.core import (
 from secondchair.core.server import build_server
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import Workspace
-from secondchair_foundry import desk
+from secondchair_foundry import compendium, desk
 
 CONTRACTS = Path(__file__).parents[1] / "docs/contracts"
 BRIDGE = json.loads((CONTRACTS / "foundry-bridge.schema.json").read_text())
@@ -619,3 +619,151 @@ def test_the_wrap_card_follows_a_moment_change_and_a_damaged_observation_file_wi
     (ws.root / observations.path(None)).parent.mkdir(exist_ok=True)
     (ws.root / observations.path(None)).write_bytes(b"\xff\xfe not text \xff")
     assert state(ws)["wrap"] is None  # fails closed, and the Desk still builds
+
+
+# The readiness card (#196 S3, D7): checks of one connection, run by the Core with no model.
+WORLD = "secondchair-dev"
+FOUNDRY_TOKEN = "foundry-token-0123456789abcdef"
+HOST_SECRET = "host-config-secret-abcdef"
+CONTEXT = {
+    "foundry": "14.360",
+    "system": "pf2e",
+    "system_version": "7.5.2",
+    "modules": {"secondchair-foundry": "0.1.0", desk.ADAPTER: "0.1.0"},
+    "settings": {},
+    "turn_driver": None,
+}
+
+
+@pytest.fixture
+def machine(
+    ws: Workspace, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """A ready machine outside the workspace: a token, a host on PATH that registers the Core,
+    a served port, a bound world and a compendium snapshot. Its home, holding secrets."""
+    home = tmp_path_factory.mktemp("home")
+    (home / ".config/secondchair").mkdir(parents=True)
+    (home / ".config/secondchair/foundry-token").write_text(FOUNDRY_TOKEN)
+    (home / "bin").mkdir()
+    (home / "bin/claude").write_text("#!/bin/sh\n")
+    (home / "bin/claude").chmod(0o755)
+    for var in ("CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("PATH", str(home / "bin"))
+    server = {"url": "http://127.0.0.1:7240/mcp", "headers": {"Authorization": HOST_SECRET}}
+    (home / ".claude.json").write_text(json.dumps({"mcpServers": {"secondchair": server}}))
+    (ws.root / ".secondchair/serve.json").write_text(json.dumps({"port": 7240}))
+    (ws.root / "foundry.yaml").write_text(yaml.safe_dump({"world": WORLD, "campaign": "c1"}))
+    snapshot = {"system": {"id": "pf2e", "version": "7.5.2", "translation": None}, "entries": []}
+    compendium.store(ws, snapshot)
+    return home
+
+
+def ready(ws: Workspace, context: object = CONTEXT) -> dict:
+    card = desk.readiness(ws, WORLD, context)
+    assert card is not None
+    jsonschema.validate(desk.state(ws, None, card), BRIDGE)
+    return card
+
+
+def failing(card: dict) -> list[str]:
+    return [c["check"] for c in card["checks"] if not c["ok"]]
+
+
+def test_a_ready_connection_passes_every_check_and_writes_nothing(
+    ws: Workspace, machine: Path
+) -> None:
+    assert state(ws)["readiness"] is None  # until the bridge ran the checks
+    before = {p: p.read_bytes() for p in ws.root.rglob("*") if p.is_file()}
+    card = ready(ws)
+    assert {p: p.read_bytes() for p in ws.root.rglob("*") if p.is_file()} == before
+    assert card["ready"] is True
+    assert [c["check"] for c in card["checks"]] == [
+        "binding",
+        "adapter",
+        "adapter_version",
+        "system",
+        "snapshot",
+        "agent_host",
+    ]
+    assert all(c["fix"] is None for c in card["checks"])
+    assert card["as_of"]["moment"] == delegation.current_moment(ws)[1]
+
+
+def _write(name: str, text: str) -> Any:
+    return lambda ws: (ws.root / name).write_text(text)
+
+
+def _home(name: str, text: str | None) -> Any:
+    path = lambda: Path.home() / name  # noqa: E731
+    return lambda _: path().write_text(text) if text is not None else path().unlink()
+
+
+SNAPSHOT = f"{compendium.DIR}/7.5.2.json"
+SERVED = ".secondchair/serve.json"
+
+
+@pytest.mark.parametrize(
+    ("check", "context", "breaks"),
+    [
+        ("binding", CONTEXT, _write("foundry.yaml", "world: other\ncampaign: c1\n")),
+        ("binding", CONTEXT, lambda ws: (ws.root / "foundry.yaml").unlink()),
+        ("binding", CONTEXT, _write("foundry.yaml", "world: [")),
+        ("binding", CONTEXT, _write("foundry.yaml", "- a list")),
+        ("system", CONTEXT | {"system": "dnd5e"}, None),
+        ("system", CONTEXT | {"system": None}, None),
+        (
+            "adapter_version",
+            CONTEXT | {"modules": {"secondchair-foundry": "0.1.0", desk.ADAPTER: "0.2.0"}},
+            None,
+        ),
+        ("adapter_version", CONTEXT | {"modules": {"secondchair-foundry": "0.1.0"}}, None),
+        ("adapter_version", CONTEXT | {"modules": "not a mapping"}, None),
+        ("snapshot", CONTEXT, lambda ws: (ws.root / SNAPSHOT).unlink()),
+        ("snapshot", CONTEXT, _write(SNAPSHOT, "{")),
+        ("agent_host", CONTEXT, lambda ws: (ws.root / SERVED).unlink()),
+        ("agent_host", CONTEXT, _write(SERVED, "[")),
+        ("agent_host", CONTEXT, _home(".claude.json", "{oops")),
+        ("agent_host", CONTEXT, _home(".claude.json", '{"mcpServers": {}}')),
+        ("agent_host", CONTEXT, _home(".claude.json", None)),
+        ("agent_host", CONTEXT, _home("bin/claude", None)),
+    ],
+)
+def test_each_check_fails_closed_on_its_own_with_its_fix(
+    ws: Workspace, machine: Path, check: str, context: dict, breaks: Any
+) -> None:
+    if breaks:
+        breaks(ws)
+    card = ready(ws, context)
+    assert (card["ready"], failing(card)) == (False, [check])
+    [failed] = [c for c in card["checks"] if not c["ok"]]
+    assert failed["fix"] and failed["says"]
+
+
+def test_without_an_adapter_the_rules_context_checks_fail(ws: Workspace, machine: Path) -> None:
+    card = ready(ws, None)
+    assert failing(card) == ["adapter", "adapter_version", "system"]
+    assert desk.ADAPTER in card["checks"][1]["fix"]
+
+
+def test_the_card_carries_no_token_host_content_or_path_outside_the_workspace(
+    ws: Workspace, machine: Path
+) -> None:
+    secrets = [FOUNDRY_TOKEN, HOST_SECRET, str(machine), str(ws.root), ".claude", "config.yaml"]
+    passing = json.dumps(ready(ws))
+    (machine / ".claude.json").write_text("{oops " + HOST_SECRET)  # unreadable: never quoted
+    (ws.root / "foundry.yaml").write_text("world: [" + FOUNDRY_TOKEN)
+    (ws.root / SNAPSHOT).write_text("{" + HOST_SECRET)
+    card = ready(ws, CONTEXT | {"system": "dnd5e", "modules": {}})
+    assert failing(card) == [c["check"] for c in card["checks"] if c["check"] != "adapter"]
+    for shown in (passing, json.dumps(card)):
+        for secret in secrets:
+            assert secret not in shown, secret
+
+
+def test_a_damaged_position_withdraws_the_readiness_card(ws: Workspace, machine: Path) -> None:
+    (ws.root / observations.path(None)).parent.mkdir(exist_ok=True)
+    (ws.root / observations.path(None)).write_bytes(b"\xff\xfe not text \xff")
+    assert desk.readiness(ws, WORLD, CONTEXT) is None
