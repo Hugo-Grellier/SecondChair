@@ -5,7 +5,8 @@
 
 /**
  * @typedef {{id: number, kind: string, responsibility: string, deadline: string, status: string, entry: number | null, message: string | null, detail: string | null, reversible: boolean | null}} DeskCall
- * @typedef {{npc: string, name: string, goal: string, posture?: string, line: string | null, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean}} ActingCue
+ * @typedef {{npc: string, name: string, goal: string, posture?: string, line: string | null, knows: {id: string, statement: string, mode: string}[], does_not_know: {id: string, statement: string}[], voiced: boolean, as_of?: CueAsOf}} ActingCue
+ * @typedef {{moment: number, session: number | null, observation: string | null, scene: string | null, round: number | null, turn: number | null, at: string}} CueAsOf
  * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */
@@ -127,10 +128,20 @@ const callsHtml = (calls, none) =>
 
 /**
  * The active NPC's acting cue (DEL-15): shown at every level, manual included, since it is a read.
+ * Its age is the time it was shown; the Core withdraws it once play moves on (ADR 0020 item 3).
  * @param {ActingCue | null} cue
  */
 function cueHtml(cue) {
   if (!cue) return "<p>No acting cue.</p>";
+  // A Core from before as_of sends none: no age line rather than a broken one.
+  const asOf = cue.as_of?.at ? cue.as_of : null;
+  const time = asOf
+    ? new Date(asOf.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "";
+  const round = asOf?.round == null ? "" : `, round ${esc(asOf.round)}`;
+  const age = asOf
+    ? `<p><time datetime="${esc(asOf.at)}">As of ${esc(time)}${round}</time></p>\n`
+    : "";
   /** @param {{statement: string, mode?: string}[]} facts */
   const list = (facts) =>
     facts.length
@@ -138,7 +149,7 @@ function cueHtml(cue) {
       : "<p>None.</p>";
   const [gesture, label] = cue.voiced ? ["hand_back", "Hand back"] : ["voice", "I voice this one"];
   return `<p><strong>${esc(cue.name)}</strong> · ${esc(cue.goal)}</p>
-${cue.posture ? `<p><em>${esc(cue.posture)}</em></p>\n` : ""}${cue.line === null ? "" : `<p><em>“${esc(cue.line)}”</em></p>\n`}<p>Knows:</p>
+${age}${cue.posture ? `<p><em>${esc(cue.posture)}</em></p>\n` : ""}${cue.line === null ? "" : `<p><em>“${esc(cue.line)}”</em></p>\n`}<p>Knows:</p>
 ${list(cue.knows)}
 <p>Does not know:</p>
 ${list(cue.does_not_know)}

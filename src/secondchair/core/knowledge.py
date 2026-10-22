@@ -10,9 +10,10 @@ and goes through `guard`.
 import json
 import re
 import secrets
+from datetime import UTC, datetime
 from typing import Any
 
-from secondchair.core import admission, index
+from secondchair.core import admission, index, observations
 from secondchair.core.index import KNOWLEDGE_DIR, MODES, PARTY, CanonError
 from secondchair.core.tools import Change, Tool
 from secondchair.core.workspace import STATE_DIR, Workspace
@@ -103,7 +104,8 @@ def show_cue(
     """Make `npc`'s acting cue the active one the Director's Desk shows (DEL-15, ARC-14): its
     line goes through `guard` (CAN-16), every fact it knows must be held, every fact it does not
     know must not be. `posture` is GM-only direction, never audience content, so it skips `guard`.
-    A read: it is shown whatever the NPC's level, manual included."""
+    A read: it is shown whatever the NPC's level, manual included. It carries `as_of`, where
+    play stood when it was shown (`observations.position`) and when (`at`, UTC)."""
     names = {e["id"]: e["names"] for e in index.search_entities(ws)}
     if npc not in names:
         raise CanonError(f"No NPC {npc!r} in canon.")
@@ -133,8 +135,9 @@ def show_cue(
     }
     if posture:
         cue["posture"] = posture
+    cue["as_of"] = observations.position(ws) | {"at": datetime.now(UTC).isoformat()}
     # ponytail: one active cue in derived state, replaced by the next and kept until then (a
-    # stale NPC id included); a cue per NPC, cleared at the end of a moment, if needed.
+    # stale NPC id included); a cue per NPC if needed.
     written = ws.root / f"{CUE_FILE}.{secrets.token_hex(4)}"  # never read half written
     written.write_text(json.dumps(cue, ensure_ascii=False))
     written.replace(ws.root / CUE_FILE)
@@ -142,11 +145,22 @@ def show_cue(
 
 
 def active_cue(ws: Workspace) -> dict[str, Any] | None:
-    """The acting cue last shown, if any; none when its derived file is unreadable."""
+    """The acting cue last shown, if any; none when its derived file is unreadable. A cue is
+    withdrawn once play has moved on from its `as_of` (moment, session, scene, round or turn,
+    ADR 0020 item 3), so a stale cue is never shown as current; one with no `as_of` is too.
+    Deleting observation lines by hand is outside the contract: it may bring a withdrawn cue
+    back."""
     try:
-        return json.loads((ws.root / CUE_FILE).read_text())
+        cue = json.loads((ws.root / CUE_FILE).read_text())
     except OSError, ValueError:
         return None
+    as_of = cue.get("as_of") if isinstance(cue, dict) else None
+    if not isinstance(as_of, dict) or {**as_of, "at": None} != {
+        **observations.position(ws),
+        "at": None,
+    }:
+        return None
+    return cue
 
 
 def _mentions(text: str, name: str) -> bool:
@@ -240,7 +254,8 @@ def tools(ws: Workspace) -> list[Tool]:
         held by the NPC, or a fact it does not know is. `posture`, optional, is a few words on the
         NPC's emotional state: GM-only direction shown under the goal, never audience content, so
         it is not checked as a line. It replaces the active cue and is shown
-        whatever the NPC's delegation level, since it is a read."""
+        whatever the NPC's delegation level, since it is a read, until the moment, the session,
+        the scene, or the combat round or turn changes: then it is withdrawn."""
         return show_cue(ws, npc, goal, line, cites, knows, does_not_know, posture)
 
     return [

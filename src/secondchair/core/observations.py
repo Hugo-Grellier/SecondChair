@@ -117,3 +117,29 @@ def of_session(ws: Workspace, session: int | None) -> list[dict]:
         if isinstance(observation, dict) and problem(observation) is None:
             found.append(observation)
     return sorted(found, key=lambda o: datetime.fromisoformat(o["at"]))
+
+
+def position(ws: Workspace) -> dict:
+    """Where play stands, as an acting cue's `as_of` records it (ADR 0020 item 3): the moment's
+    sequence number, the live session (None outside one), the scene last activated and the combat
+    round and turn (None out of combat), from that session's scene and combat observations.
+    `moment` grows at every moment change and `observation` is the id of the last observation
+    that moved the position, so a change is final: a return to an earlier scene, a new combat back
+    at round 1, or prep again after a session all differ from a position seen before."""
+    moment, seq = delegation.current_moment(ws)
+    session = delegation.last_session(ws) if moment == "live-session" else None
+    found: dict = {"moment": seq, "session": session, "observation": None}
+    found |= {"scene": None, "round": None, "turn": None}
+    # ponytail: reads the session's file on every call (the Desk polls each second); keep the
+    # last position in memory if sessions grow past ~10k lines.
+    for o in of_session(ws, session):
+        if o["kind"] == "scene":
+            found |= {"observation": o["id"], "scene": o["scene"]}
+        elif o["kind"] == "combat":
+            ended = o["payload"].get("action") == "end"
+            found |= {
+                "observation": o["id"],
+                "round": None if ended else o["payload"].get("round"),
+                "turn": None if ended else o["payload"].get("turn"),
+            }
+    return found
