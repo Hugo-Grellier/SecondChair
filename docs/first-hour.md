@@ -49,7 +49,15 @@ secondchair host setup claude        # or: secondchair host setup codex
 
 It prints, and never applies, two things: the command or config that adds the Core's MCP server (`http://127.0.0.1:7240/mcp`) to your agent, and the commands that install the SecondChair playbooks. For Claude Code that is `claude mcp add --scope user --transport http secondchair http://127.0.0.1:7240/mcp` plus `claude plugin marketplace add …` and `claude plugin install …` lines. Copy the lines exactly as printed, one block at a time: the paths in them are specific to your machine.
 
-Check it: open your agent in the workspace (`cd ~/campaigns/my-campaign && claude`) and ask "what do you know about this campaign?". It should call SecondChair and tell you the campaign is empty, in English. If it cannot see SecondChair, `serve` is not running or the MCP command was not applied; restart the agent after applying it.
+Check the whole setup with one command (with `serve` still running):
+
+```sh
+secondchair check-setup
+```
+
+It prints one line per check: `ok`, `WARN` (worth knowing, not blocking) or `FAIL`, and under each warning or failure a `Fix:` line with the command to run. It covers the workspace, the campaign date, the Core answering on its port, the Foundry token, your agent host (registers the Core, has the playbooks), a configured runner and the transcription engine. It ends with the `status` summary and exits 1 if anything failed. Two things are expected at this point: `WARN campaign date not set` (step 6 fixes it) and `WARN no runner configured` (optional; your agent can start jobs). Fix every `FAIL` before going on, then run it again. The Foundry connection itself is checked in step 5.
+
+Then check the agent end to end: open your agent in the workspace (`cd ~/campaigns/my-campaign && claude`) and ask "what do you know about this campaign?". It should call SecondChair and tell you the campaign is empty, in English. If it cannot see SecondChair, `serve` is not running or the MCP command was not applied; restart the agent after applying it.
 
 ## 5. Connect Foundry
 
@@ -142,6 +150,8 @@ secondchair world turn 4726-03-21
 Now prepare session 2. That is the whole loop; the [GM guide](gm-guide.md) goes deeper.
 
 ## When something fails
+
+First run `secondchair check-setup`: every `FAIL` comes with the command that fixes it. The table below covers what it cannot see.
 
 | You see | Do this |
 | --- | --- |
