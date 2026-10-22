@@ -1099,9 +1099,9 @@ def faction_turn(ws: Workspace, date: str, choices: Any, job: int | None = None)
             else:
                 plan_one(record)
         used = {r["key"] for r in occurrences(ws)}
-        # Held at propose, no debit lands now: income is planned on the pools as they stand.
-        held = delegation.plan_actions(ws, _effect_tool(), AGENT, [], job) is None
-        heads = _current(ws, head=True, overlay=[] if held else overlay)
+        # Over the planned debits whatever the level, so propose then accept ends where act
+        # does; an income accepted onto pools at their caps (its debit rejected) calls instead.
+        heads = _current(ws, head=True, overlay=overlay)
         for faction, s in sorted(_current(ws, at=date).items()):  # credited after the debits
             pool = heads.get(faction, {}).get(POOL)
             key = f"{faction}/income@{date}"

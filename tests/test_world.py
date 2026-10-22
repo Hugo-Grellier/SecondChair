@@ -1904,18 +1904,36 @@ def test_one_entry_of_a_faction_occurrence_is_never_undone_alone(ws: Workspace) 
     assert coin(ws, council, TURN) == 2  # 5 - 2 + 1 - 2
 
 
-def test_at_propose_income_counts_no_held_debit_and_belongs_to_its_step(ws: Workspace) -> None:
+def test_propose_then_accept_ends_where_act_does_whatever_the_level(
+    ws: Workspace, tmp_path: Path
+) -> None:
     rich = gm_faction(ws, "Rich", 10, 1, action("bribe", {"coin": 2}))  # at its cap
-    poor = gm_faction(ws, "Poor", 5, 1, action("bribe", {"coin": 2}))
-    set_level(ws, "prep", "living_world", "propose")
+    turn(ws, TURN)
+    copy = workspace.load(shutil.copytree(ws.root, tmp_path / "propose"))
+    bribe, income = f"{rich}/bribe@{TURN}", f"{rich}/income@{TURN}"
 
-    fturn(ws, TURN, {rich: chose("bribe"), poor: chose("bribe")})
-
-    incomes = [r["key"] for r in world.occurrences(ws) if r["kind"] == "income"]
-    assert incomes == [f"{poor}/income@{TURN}"]  # the held debit is not counted for Rich
+    world.faction_turn(ws, TURN, {rich: chose("bribe")})  # act: 10 - 2 + 1
+    set_level(copy, "prep", "living_world", "propose")
+    world.faction_turn(copy, TURN, {rich: chose("bribe")})
+    assert occ(copy, income)["status"] == "queued"  # planned over the held debit, as act does
     with pytest.raises(DelegationError, match="accept or reject"):
-        world.decide(ws, incomes[0], "reschedule", True, date=NEXT)
+        world.decide(copy, income, "reschedule", True, date=NEXT)
+    for key in (bribe, income):
+        world.decide(copy, key, "accept", authenticated=True)
+
+    assert coin(ws, rich, TURN) == coin(copy, rich, TURN) == 9
+
+
+def test_an_income_whose_debit_was_rejected_finds_its_pools_at_the_caps(ws: Workspace) -> None:
+    rich = gm_faction(ws, "Rich", 10, 1, action("bribe", {"coin": 2}))
+    set_level(ws, "prep", "living_world", "propose")
+    fturn(ws, TURN, {rich: chose("bribe")})
+    income = f"{rich}/income@{TURN}"
+
     world.decide(ws, f"{rich}/bribe@{TURN}", "reject", authenticated=True)
+    record = world.decide(ws, income, "accept", authenticated=True)
+
+    assert record["status"] == "queued" and "at their caps" in calls.read_calls(ws)[-1]["message"]
     assert coin(ws, rich, TURN) == 10
 
 
