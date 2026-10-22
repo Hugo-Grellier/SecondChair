@@ -69,7 +69,7 @@ The [GM guide](docs/gm-guide.md) walks through one campaign, and [What to ask](d
 - **Play**: Start session on the Director's Desk; `quick-help` answers last-minute needs ("an NPC for this tavern, now").
 - **Wrap**: End session, `secondchair transcribe`, run the wrap job, `secondchair wrap 3`: what was played becomes canon.
 
-`secondchair status` says where the campaign stands and what to do next.
+`secondchair status` says where the campaign stands and what to do next, and `secondchair check-setup` checks the setup (workspace, Core, token, agent host) and says how to fix what fails.
 
 ## Review and read your prep
 
