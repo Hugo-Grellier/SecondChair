@@ -1,6 +1,7 @@
 """The `secondchair` command line."""
 
 import argparse
+import contextlib
 import json
 import shlex
 import sys
@@ -26,6 +27,7 @@ from secondchair.core import (
     mystery,
     notes,
     rules,
+    setup_check,
     signals,
     snapshot,
     workspace,
@@ -437,6 +439,36 @@ def doctor(ws: workspace.Workspace) -> int:
         print(f"secondchair: {problem}", file=sys.stderr)
     print(f"{len(found)} played or cited records whose evidence no longer resolves.")
     return 1 if found else 0
+
+
+def check_setup(root: Path) -> int:
+    """Checks of this machine, one fix per failure; 1 if any FAILs. Writes no host or machine
+    file; the status block may refresh the derived index."""
+    plugins = [
+        json.loads((d / ".claude-plugin/plugin.json").read_text())["name"]
+        for d in runner.playbook_dirs()
+    ]
+    port, runners, transcription, error = None, {}, None, False
+    try:
+        port, runners = configured_port(), configured_runners()[0]
+        transcription = configured_transcription()
+    # The error text may quote the file, so the line names the file instead.
+    except MachineConfigError, OSError, ValueError, RecursionError:
+        error = True
+    results = setup_check.run(
+        root,
+        port=port,
+        runners=runners,
+        transcription=transcription,
+        plugins=plugins,
+        skills=[s.name for s in runner.skills()],
+        config_error=error,
+    )
+    for level, what, fix in results:
+        print(f"{level:<4} {what}" + (f"\n     Fix: {fix}" if fix else ""))
+    with contextlib.suppress(WorkspaceError):  # an invalid workspace is the first check's FAIL
+        print("\n" + status(workspace.load(root)))
+    return 1 if any(level == setup_check.FAIL for level, _, _ in results) else 0
 
 
 def _runner_config(value: str) -> dict[str, str]:
@@ -879,7 +911,13 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "doctor",
         parents=[in_workspace],
-        help="report played or cited facts whose evidence no longer resolves (changes nothing)",
+        help="re-check the evidence of played and cited facts and report what no longer "
+        "resolves (changes nothing)",
+    )
+    commands.add_parser(
+        "check-setup",
+        parents=[in_workspace],
+        help="check this machine is ready, with one fix per problem (changes nothing)",
     )
     commands.add_parser(
         "promote",
@@ -1129,6 +1167,8 @@ def main(argv: list[str] | None = None) -> int:
                 done = journal.recover(ws, force=True)
             print("\n".join(done) or "Nothing to recover.")
             return 1 if journal._journals(ws) else 0  # what is left is stopped
+        elif args.command == "check-setup":
+            return check_setup(args.workspace)
         elif args.command == "doctor":
             return doctor(workspace.load(args.workspace))
         elif args.command == "serve":
