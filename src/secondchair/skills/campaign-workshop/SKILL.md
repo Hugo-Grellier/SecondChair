@@ -114,7 +114,8 @@ What is true now, such as a secret motive, stays a canon fact the party does not
 know; the dossier points to it by id and never restates it. Check any line a
 player may hear with `check_audience_content`. After a wrap, propose dossier
 updates in the body, each citing the played fact that motivates it; the GM
-decides what to adopt and sets the status.
+decides what to adopt and sets the status. The `write-an-npc-dossier` task skill
+drafts a dossier from canon when asked.
 
 PC hook notes `notes/pcs/<entity id>.md` follow the same front matter and hold
 only what the player gave (goals, ties), relayed by the GM, with the player named
