@@ -25,13 +25,7 @@ secondchair init ~/campaigns/my-campaign --language en --calendar absalom
 
 You should see `Created campaign workspace … (campaign language en)`. The directory holds your campaign: Markdown and YAML files that you own and can put under git. The language and the calendar cannot be changed later, so pick them now. `absalom` is the Pathfinder calendar; the other option is your own YAML calendar file (see `secondchair init --help`).
 
-Then check where you stand:
-
-```sh
-secondchair status -w ~/campaigns/my-campaign
-```
-
-You should see `Moment: prep`, `Canon: 0 entities, 0 facts, 0 events`, and `Next:` lines. `status` is your compass: run it whenever you wonder what to do next. All commands below take `-w <workspace>` or run from inside the workspace; the rest of this page assumes you are in it:
+`init` ends by printing the next steps (serve, connect your agent, Foundry token, open your agent). They are the steps 3 to 5 below, with the commands filled in for your workspace. At any time `secondchair status` says where the campaign stands and what to do next. Commands below take `-w <workspace>`, or run from inside the workspace; the rest of this page assumes you are in it:
 
 ```sh
 cd ~/campaigns/my-campaign
@@ -40,7 +34,7 @@ cd ~/campaigns/my-campaign
 ## 3. Start the Core
 
 ```sh
-secondchair serve ~/campaigns/my-campaign
+secondchair serve -w ~/campaigns/my-campaign
 ```
 
 You should see `Serving … on http://127.0.0.1:7240` and a line with the review page address. Leave this terminal open for the whole hour. The Core listens on your computer only. Open `http://127.0.0.1:7240/` in a browser: it is a read-only page for pending proposals, the action log and your prep. If the port is taken, set `port:` in `~/.config/secondchair/config.yaml`.
