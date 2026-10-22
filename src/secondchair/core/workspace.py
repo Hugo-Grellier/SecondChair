@@ -65,7 +65,9 @@ def init(root: Path, language: str, calendar: str | dict) -> Workspace:
             "the campaign language and calendar are fixed at creation and cannot be changed."
         )
     if not _BCP47.match(language):
-        raise WorkspaceError(f"{language!r} is not a BCP 47 language tag (for example: en, fr).")
+        raise WorkspaceError(
+            f"{language!r} is not a BCP 47 language tag (for example: en, fr, de, en-GB)."
+        )
     _calendar(calendar, "--calendar")
 
     from secondchair.core import campaign_skill

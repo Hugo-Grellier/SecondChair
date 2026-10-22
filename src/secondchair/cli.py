@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import shlex
 import sys
 import urllib.error
 import urllib.request
@@ -30,7 +31,7 @@ from secondchair.core import (
     workspace,
     world,
 )
-from secondchair.core.calendar import CalendarError
+from secondchair.core.calendar import CalendarError, available_calendars
 from secondchair.core.delegation import DelegationError
 from secondchair.core.index import CanonError
 from secondchair.core.machine import MachineConfigError
@@ -159,6 +160,16 @@ def host_setup(host: str) -> str:
     return HOST_SETUP[host].format(
         url=f"http://{LOOPBACK}:{configured_port()}{MCP_PATH}"
     ) + PLAYBOOK_SETUP[host].format(plugins=plugins, links=links)
+
+
+def _next_steps(root: Path) -> str:
+    q = shlex.quote(str(root.resolve()))
+    return f"""
+Next steps:
+  1. Serve the campaign (leave it running):  secondchair serve -w {q}
+  2. Connect your agent host:                secondchair host setup claude   (or codex)
+  3. Foundry: paste this token into the module settings:  secondchair token
+  4. Open your agent in the workspace:       cd {q} && claude   (or codex)"""
 
 
 def _calendar_arg(value: str) -> str | dict:
@@ -687,16 +698,29 @@ def main(argv: list[str] | None = None) -> int:
     init_cmd = commands.add_parser("init", help="create a campaign workspace")
     init_cmd.add_argument("workspace", type=Path)
     init_cmd.add_argument(
-        "--language", required=True, help="campaign language, a BCP 47 tag; fixed once set"
+        "--language",
+        help="campaign language, a BCP 47 tag such as en or fr; fixed once set (required)",
     )
     init_cmd.add_argument(
         "--calendar",
-        required=True,
-        help="campaign calendar, fixed once set: a System extension's calendar name (absalom) "
-        "or a YAML file declaring one",
+        help="campaign calendar, fixed once set (required): a System extension's calendar name "
+        "(`secondchair calendars` lists them) or a YAML file declaring one",
     )
-    serve_cmd = commands.add_parser("serve", help="serve a campaign workspace on 127.0.0.1")
-    serve_cmd.add_argument("workspace", type=Path)
+    commands.add_parser("calendars", help="list the calendars the installed extensions provide")
+    serve_cmd = commands.add_parser(
+        "serve", help="serve a campaign workspace on 127.0.0.1 (default: the current directory)"
+    )
+    serve_cmd.add_argument(
+        "-w",
+        "--workspace",
+        dest="workspace_opt",
+        metavar="DIR",
+        type=Path,
+        help="campaign workspace (default: .)",
+    )
+    serve_cmd.add_argument(
+        "workspace", nargs="?", type=Path, help="alias of -w, kept for older invocations"
+    )
     commands.add_parser(
         "token", help="print the token the Foundry module connects with, creating it once"
     )
@@ -1025,11 +1049,25 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "init":
+            if not args.language:
+                raise WorkspaceError(
+                    "--language is required: the campaign language, a BCP 47 tag such as "
+                    "en, fr, de or en-GB. It is fixed once set."
+                )
+            if not args.calendar:
+                raise WorkspaceError(
+                    "--calendar is required: a calendar name "
+                    f"({', '.join(available_calendars()) or 'none installed'}) or a .yaml file "
+                    "declaring one. It is fixed once set; `secondchair calendars` lists them."
+                )
             calendar = _calendar_arg(args.calendar)
             ws = workspace.init(args.workspace, args.language, calendar)
             print(
                 f"Created campaign workspace {ws.root} (campaign language {ws.campaign_language})"
             )
+            print(_next_steps(ws.root))
+        elif args.command == "calendars":
+            print("\n".join(available_calendars()) or "No calendar installed.")
         elif args.command == "campaign-skill":
             ws = workspace.load(args.workspace)
             changed = campaign_skill.install(ws.root)
@@ -1094,7 +1132,19 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "doctor":
             return doctor(workspace.load(args.workspace))
         elif args.command == "serve":
-            ws = workspace.load(args.workspace)
+            given = args.workspace, args.workspace_opt
+            if None not in given and given[0].resolve() != given[1].resolve():
+                raise WorkspaceError(
+                    f"serve got two different workspaces (positional {given[0]} and "
+                    f"-w {given[1]}): give one, preferably `serve -w DIR`."
+                )
+            root = next((g for g in given if g is not None), None)
+            try:
+                ws = workspace.load(root or Path())
+            except WorkspaceError as e:
+                if root is None:
+                    raise WorkspaceError(f"{e} (current directory; use -w DIR)") from e
+                raise
             serve(ws, configured_port(), review.routes(ws))
         elif args.command == "jobs":
             return _jobs_command(args)
