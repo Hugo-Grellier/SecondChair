@@ -73,8 +73,8 @@ def wrap(ws: Workspace) -> dict | None:
     """The wrap-state card (#196 S1, ARC-14): after End session, until the session is marked
     wrapped, where its wrap stands: `queued` or `running` (a wrap job of the last session), else
     `waiting` for the grouped round, which needs an interactive terminal (CAP-13): `secondchair
-    wrap`. Only the last session is checked. It carries `as_of`, as the situation card does, so
-    it is withdrawn when the moment changes. A read of state, writing nothing; None during a live
+    wrap`. Only the last session is checked. It carries `as_of`, where play stood when it was sent
+    (rebuilt at each read, so it follows the moment). A read of state, writing nothing; None during a live
     session, before any, once wrapped, and, failing closed like `director.current`, when a file
     it reads is damaged."""
     try:
@@ -88,12 +88,12 @@ def wrap(ws: Workspace) -> dict | None:
             for j in calls._jobs(ws)
             if j["playbook"] == capture.PLAYBOOK and j["inputs"].get("session") == str(session)
         }
-    except WorkspaceError, OSError, KeyError, TypeError, AttributeError:
+        as_of = observations.position(ws) | {"at": datetime.now(UTC).isoformat()}
+    except WorkspaceError, OSError, KeyError, TypeError, AttributeError, ValueError:
         return None
     status = (
         "running" if "started" in job_states else "queued" if "queued" in job_states else "waiting"
     )
-    as_of = observations.position(ws) | {"at": datetime.now(UTC).isoformat()}
     return {"session": session, "status": status, "as_of": as_of}
 
 

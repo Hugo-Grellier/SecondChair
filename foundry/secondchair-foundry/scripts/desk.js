@@ -9,7 +9,7 @@
  * @typedef {{moment: number, session: number | null, observation: string | null, scene: string | null, round: number | null, turn: number | null, at: string}} CueAsOf
  * @typedef {{id: string, statement: string, mode: string, party_mode?: string}} CardFact
  * @typedef {{as_of: CueAsOf, scene: string | null, acting: string | null, npcs: {id: string, name: string, shared: CardFact[], secret: CardFact[]}[], handoff: string[], calls: {id: number, kind: string, deadline: string, text: string}[]}} SituationCard
- * @typedef {{session: number, status: "queued" | "running" | "waiting", as_of?: CueAsOf}} WrapCard
+ * @typedef {{session: number, status: "queued" | "running" | "waiting", as_of: CueAsOf}} WrapCard
  * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, wrap?: WrapCard | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */

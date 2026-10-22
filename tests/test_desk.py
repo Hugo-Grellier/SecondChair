@@ -604,3 +604,18 @@ def test_the_wrap_card_is_about_the_last_session_only(ws: Workspace) -> None:
         gesture(ws, "start_session")
         gesture(ws, "end_session")
     assert wrapped(ws) == (2, "queued")
+
+
+def test_the_wrap_card_follows_a_moment_change_and_a_damaged_observation_file_withdraws_it(
+    ws: Workspace,
+) -> None:
+    gesture(ws, "start_session")
+    gesture(ws, "end_session")
+    first = state(ws)["wrap"]["as_of"]["moment"]
+    delegation.change_moment(ws, "prep")  # between non-live moments: the card stays
+    card = state(ws)["wrap"]
+    assert (card["session"], card["as_of"]["moment"]) == (1, delegation.current_moment(ws)[1])
+    assert card["as_of"]["moment"] != first
+    (ws.root / observations.path(None)).parent.mkdir(exist_ok=True)
+    (ws.root / observations.path(None)).write_bytes(b"\xff\xfe not text \xff")
+    assert state(ws)["wrap"] is None  # fails closed, and the Desk still builds
