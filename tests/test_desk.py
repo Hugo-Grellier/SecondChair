@@ -547,6 +547,11 @@ def test_a_situation_card_file_with_no_as_of_or_garbled_is_never_shown(ws: Works
     assert (state(ws)["situation"]["scene"], state(ws)["situation"]["npcs"]) == (None, [])
 
 
+def wrapped(ws: Workspace) -> tuple[int, str]:
+    card = state(ws)["wrap"]
+    return card["session"], card["status"]
+
+
 def wrap_jobs(ws: Workspace) -> list[dict]:
     return [j for j in calls._jobs(ws) if j["playbook"] == capture.PLAYBOOK]
 
@@ -556,12 +561,19 @@ def test_the_wrap_card_follows_the_wrap_from_end_session_to_wrapped(ws: Workspac
     gesture(ws, "start_session")
     assert state(ws)["wrap"] is None  # absent live
     gesture(ws, "end_session")
-    assert state(ws)["wrap"] == {"session": 1, "status": "queued"}
+    assert wrapped(ws) == (1, "queued")
+    assert state(ws)["wrap"]["as_of"]["moment"] == delegation.current_moment(ws)[1]
     [job] = wrap_jobs(ws)
     path = ws.root / delegation.JOBS_DIR / f"{job['id']:06d}.yaml"
-    for stored, shown in (("started", "running"), ("done", "waiting"), ("missed", "waiting")):
+    for stored, shown in (
+        ("started", "running"),
+        ("done", "waiting"),
+        ("missed", "waiting"),
+        ("withdrawn", "waiting"),
+        ("queued", "queued"),  # a failed attempt queues the job again
+    ):
         path.write_text(yaml.safe_dump({**job, "status": stored}))
-        assert state(ws)["wrap"] == {"session": 1, "status": shown}
+        assert wrapped(ws) == (1, shown)
     before = sorted(p for p in ws.root.rglob("*") if p.is_file())
     state(ws)
     assert sorted(p for p in ws.root.rglob("*") if p.is_file()) == before  # a read
@@ -585,3 +597,10 @@ def test_a_damaged_file_withdraws_the_wrap_card(ws: Workspace) -> None:
     [job] = wrap_jobs(ws)
     (ws.root / delegation.JOBS_DIR / f"{job['id']:06d}.yaml").write_text("- not a mapping")
     assert state(ws)["wrap"] is None
+
+
+def test_the_wrap_card_is_about_the_last_session_only(ws: Workspace) -> None:
+    for _ in range(2):  # session 1 is never wrapped
+        gesture(ws, "start_session")
+        gesture(ws, "end_session")
+    assert wrapped(ws) == (2, "queued")

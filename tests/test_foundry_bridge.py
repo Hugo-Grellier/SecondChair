@@ -622,7 +622,7 @@ def test_the_desk_refreshes_when_the_wrap_status_changes(
         for gesture in ("start_session", "end_session"):
             say(sockets[0], {"type": "gesture", "id": gesture, "gesture": gesture})
         queued = next_of(inbox, "desk", lambda m: m["wrap"] is not None)
-        assert queued["wrap"] == {"session": 1, "status": "queued"}
+        assert (queued["wrap"]["session"], queued["wrap"]["status"]) == (1, "queued")
 
         [job] = [j for j in calls._jobs(ws) if j["playbook"] == capture.PLAYBOOK]
         path = workspace / delegation.JOBS_DIR / f"{job['id']:06d}.yaml"
@@ -635,4 +635,6 @@ def test_the_desk_refreshes_when_the_wrap_status_changes(
         data = capture.time(ws)
         data["sessions"][1] = {"wrapped": True}
         (workspace / capture.TIME_FILE).write_text(yaml.safe_dump(data))
+        # A client without the GM's token, a player's, is refused and told nothing of the wrap.
+        assert "wrap" not in json.dumps(reply(bridge, hello("not-the-token")))
         assert next_of(inbox, "desk", lambda m: m["wrap"] is None)

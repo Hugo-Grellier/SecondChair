@@ -9,7 +9,7 @@
  * @typedef {{moment: number, session: number | null, observation: string | null, scene: string | null, round: number | null, turn: number | null, at: string}} CueAsOf
  * @typedef {{id: string, statement: string, mode: string, party_mode?: string}} CardFact
  * @typedef {{as_of: CueAsOf, scene: string | null, acting: string | null, npcs: {id: string, name: string, shared: CardFact[], secret: CardFact[]}[], handoff: string[], calls: {id: number, kind: string, deadline: string, text: string}[]}} SituationCard
- * @typedef {{session: number, status: "queued" | "running" | "waiting"}} WrapCard
+ * @typedef {{session: number, status: "queued" | "running" | "waiting", as_of?: CueAsOf}} WrapCard
  * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, wrap?: WrapCard | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */
@@ -217,7 +217,7 @@ const WRAP_SAYS = {
   waiting: "waiting for <code>secondchair wrap</code>",
 };
 const WRAP_WHY = {
-  queued: "An agent has not started the wrap job yet.",
+  queued: "The wrap job is queued; no agent has finished it.",
   running: "An agent is working on the wrap job.",
   waiting:
     "The grouped round settles the session's open questions and its dates. It needs an interactive terminal: run <code>secondchair wrap</code> there.",
@@ -229,7 +229,7 @@ const WRAP_WHY = {
  * @param {WrapCard | null | undefined} card
  */
 function wrapHtml(card) {
-  if (!card || !(card.status in WRAP_SAYS)) return "";
+  if (!card || !Object.hasOwn(WRAP_SAYS, card.status)) return "";
   return `<details class="secondchair-card secondchair-wrap">
 <summary><strong>Session ${esc(card.session)}</strong>: ${WRAP_SAYS[card.status]}</summary>
 <p>${WRAP_WHY[card.status]}</p>

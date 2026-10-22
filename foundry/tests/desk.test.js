@@ -403,7 +403,7 @@ test("the wrap-state card says where the wrap stands, one collapsed line per sta
   const show = (/** @type {any} */ wrap) =>
     deskHtml({ isGM: true, state: { ...between, wrap }, pile: null, ceiling: "propose" });
   assert.ok(
-    valid({ ...between, wrap: { session: 3, status: "waiting" } }),
+    valid({ ...between, wrap: { session: 3, status: "waiting", as_of: CARD.as_of } }),
     JSON.stringify(valid.errors),
   );
   for (const [status, words] of /** @type {[string, RegExp][]} */ ([
@@ -425,4 +425,13 @@ test("the wrap-state card says where the wrap stands, one collapsed line per sta
   assert.doesNotMatch(live, /secondchair-wrap/);
   const queued = /** @type {DeskState} */ ({ ...between, wrap: { session: 3, status: "queued" } });
   assert.equal(deskHtml({ isGM: false, state: queued, pile: null, ceiling: "x" }), "");
+});
+
+test("the wrap-state card ignores a status that is only an inherited property name", () => {
+  const between = { ...STATE, moment: "between-sessions", session: null };
+  for (const status of ["constructor", "toString", "__proto__"]) {
+    const wrap = /** @type {any} */ ({ session: 3, status });
+    const html = deskHtml({ isGM: true, state: { ...between, wrap }, pile: null, ceiling: "x" });
+    assert.doesNotMatch(html, /secondchair-wrap/);
+  }
 });

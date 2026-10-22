@@ -265,7 +265,8 @@ class Bridge:
                         desk.due_now(self.ws),
                         knowledge.active_cue(self.ws),
                         director.current(self.ws),  # withdrawn once play moves on
-                        desk.wrap(self.ws),  # the wrap job's status changes
+                        # the wrap job's status changes; its `at` moves every read
+                        (w := desk.wrap(self.ws)) and w | {"as_of": {**w["as_of"], "at": None}},
                         self.turn_driver,
                         len(list((self.ws.root / delegation.LOG_DIR).glob("*.yaml"))),
                     )
