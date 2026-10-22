@@ -192,3 +192,22 @@ def test_an_unreadable_token_is_a_fail_and_fixes_name_the_workspace(
     (w / "workspace.yaml").write_text("campaign_language: [")
     main(["check-setup", "-w", str(w)])
     assert f"secondchair upgrade -w {w}" in _out(capsys)
+
+
+@pytest.mark.parametrize("mode", [None, 0o000])
+def test_an_undecodable_or_unreadable_config_is_a_fail_line(
+    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], mode: int | None
+) -> None:
+    w = _workspace(tmp_path)
+    config = home / ".config/secondchair/config.yaml"
+    config.write_bytes(b"x: SECRET\xff")
+    if mode is not None:
+        config.chmod(mode)
+    try:
+        assert main(["check-setup", "-w", str(w)]) == 1
+        out = _out(capsys)
+    finally:
+        config.chmod(0o600)
+    assert "FAIL machine configuration unusable" in out
+    assert "SECRET" not in out
+    assert "workspace valid" in out  # the check went on

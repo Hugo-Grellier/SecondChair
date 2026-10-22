@@ -441,7 +441,8 @@ def check_setup(root: Path) -> int:
     try:
         port, runners = configured_port(), configured_runners()[0]
         transcription = configured_transcription()
-    except MachineConfigError:  # its text may quote the file: the line names the file instead
+    # The error text may quote the file, so the line names the file instead.
+    except MachineConfigError, OSError, ValueError, RecursionError:
         error = True
     results = setup_check.run(
         root,

@@ -1,7 +1,7 @@
 """`secondchair check-setup`: checks of the GM's machine with a one-action fix each.
 
 Writes no host or machine file (PKG-19). Reads only presence and the Core's URL: never a token's
-or a runner's content, and no message quotes a configuration file's content or a parse error."""
+or a runner's content, and no message quotes a host or machine configuration file's content or its parse error."""
 
 import json
 import os
