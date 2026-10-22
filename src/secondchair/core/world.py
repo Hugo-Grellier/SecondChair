@@ -4,7 +4,8 @@ facts, the world-turn that advances them and the forecast that looks ahead.
 A front or a situation is an entity; all its state is **state facts**, facts carrying
 `state: {of, key, value}` (LW-03): on a front, `front` (its rule: carrier, participants,
 capacity, rate, `unless`, active), `clock` and one `agenda` fact per step; on a situation,
-`situation` (stage, deadline, participants). Every effect is an offscreen event closing the old
+`situation` (stage, deadline, participants); on a faction, `intent`, `pool`, `capacity` and
+`catalogue`, which the GM writes (ADR 0022). Every effect is an offscreen event closing the old
 state fact and opening the new one, known only to the carrier and the named participants
 (LW-11).
 
@@ -25,6 +26,8 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
+import yaml
+
 from secondchair.core import admission, calls, delegation, index, journal
 from secondchair.core.calendar import Calendar, CalendarError
 from secondchair.core.delegation import (
@@ -40,9 +43,13 @@ from secondchair.core.delegation import (
 )
 from secondchair.core.index import CanonError
 from secondchair.core.tools import Change, Tool
-from secondchair.core.workspace import Workspace
+from secondchair.core.workspace import CONFIG_FILE, Workspace, WorkspaceError
 
 FRONT, CLOCK, AGENDA, SITUATION = "front", "clock", "agenda", "situation"
+INTENT, POOL, CAPACITY, CATALOGUE = "intent", "pool", "capacity", "catalogue"  # ADR 0022
+FACTION_KEYS = (INTENT, POOL, CAPACITY, CATALOGUE)
+EFFECT_CLASSES = ("derived", "narrative")  # a catalogue effect's class, the GM's call (ADR 0009)
+STEP = "1w"  # the campaign-wide faction step unless workspace.yaml sets faction_step (ADR 0022)
 STAGES = ("available", "active", "resolved", "expired")  # `active`: the party engaged it
 STEP_STATUSES = ("pending", "done", "averted")
 GROUP_ABOVE = 6  # LW-15
@@ -65,17 +72,35 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
         raise CanonError("state needs exactly of (an entity id), key and value.")
     key, value = state["key"], state["value"]
 
-    def fields(required: set[str], optional: dict[str, Any]) -> dict:
-        if not isinstance(value, dict) or not required <= set(value) <= required | set(optional):
-            raise CanonError(
-                f"A {key} state needs {sorted(required)}, optionally {sorted(optional)}."
-            )
-        return {**optional, **value}
+    def fields(
+        required: set[str], optional: dict[str, Any], v: Any = value, what: str = f"{key} state"
+    ) -> dict:
+        if not isinstance(v, dict) or not required <= set(v) <= required | set(optional):
+            raise CanonError(f"A {what} needs {sorted(required)}, optionally {sorted(optional)}.")
+        return {**optional, **v}
 
-    def ids(v: Any) -> list[str]:
+    def ids(v: Any, what: str = "participants") -> list[str]:
         if not isinstance(v, list) or not all(isinstance(i, str) and i for i in v):
-            raise CanonError("participants must be a list of entity ids.")
+            raise CanonError(f"{what} must be a list of entity ids.")
         return v
+
+    def words(v: Any, what: str) -> None:
+        if not isinstance(v, str) or not v.strip():
+            raise CanonError(f"{what} is words in the campaign language.")
+
+    def count(v: Any, what: str, least: int = 0) -> int:
+        if type(v) is not int or v < least:
+            raise CanonError(f"{what} is an integer of at least {least}.")
+        return v
+
+    def items(v: Any, what: str, least: int = 1, most: int | None = None) -> list:
+        if not isinstance(v, list) or len(v) < least or (most is not None and len(v) > most):
+            raise CanonError(f"{what} is a list of {least} to {most or 'any number of'} items.")
+        return v
+
+    def unique(found: list[dict], what: str) -> None:
+        if len({i["id"] for i in found}) != len(found):
+            raise CanonError(f"Each {what} has its own id.")
 
     refs: list[str] = []
     if key == CLOCK:
@@ -119,8 +144,73 @@ def check_state(cal: Calendar, state: Any) -> tuple[dict, list[str]]:
         if value["deadline"] is not None:
             value["deadline"] = cal.canonical(value["deadline"])
         refs = ids(value["participants"])
+    elif key == INTENT:  # one to three goals, in the GM's priority order (ADR 0022, item 7)
+        goals = items(value, "An intent", 1, 3)
+        value = [fields({"id", "goal", "pursues"}, {}, g, "goal") for g in goals]
+        for g in value:
+            words(g["id"], "A goal's id")
+            words(g["goal"], "A goal")
+            refs += ids(items(g["pursues"], "A goal's pursues"), "pursues (fronts or situations)")
+        unique(value, "goal")
+    elif key == POOL:  # named integer resources, each with its income per step and its cap
+        if not isinstance(value, dict) or not value:
+            raise CanonError("A pool state maps one or more resource names to their value.")
+        for name, r in value.items():
+            words(name, "A resource's name")
+            r = fields({"value", "income", "cap"}, {}, r, f"resource {name!r}")
+            count(r["income"], f"{name}'s income")
+            if count(r["value"], f"{name}'s value") > count(r["cap"], f"{name}'s cap"):
+                raise CanonError(f"{name}'s value is at most its cap.")
+    elif key == CAPACITY:
+        count(value, "A capacity (actions per step)", 1)
+    elif key == CATALOGUE:
+        value = [
+            fields(
+                {"id", "cost", "duration", "effect"},
+                {"prerequisites": [], "target": None, "contest": None, "serves": []},
+                a,
+                "catalogue action",
+            )
+            for a in items(value, "A catalogue")
+        ]
+        for a in value:
+            words(a["id"], "An action's id")
+            if not isinstance(a["cost"], dict):
+                raise CanonError(f"{a['id']}'s cost maps pool names to integers.")
+            for name, n in a["cost"].items():
+                words(name, "A cost's pool")
+                count(n, f"{a['id']}'s cost in {name}")
+            try:
+                cal.days(a["duration"])
+            except CalendarError as e:
+                raise CanonError(str(e)) from e
+            a["effect"] = fields({"class", "does"}, {}, a["effect"], "effect template")
+            if a["effect"]["class"] not in EFFECT_CLASSES:
+                raise CanonError(f"An effect's class is one of {', '.join(EFFECT_CLASSES)}.")
+            words(a["effect"]["does"], "An effect's does")
+            for p in items(a["prerequisites"], "Prerequisites", 0):
+                if isinstance(p, dict) and set(p) == {"holds"}:
+                    words(p["holds"], "A prerequisite's holds (a fact id)")
+                elif isinstance(p, dict) and set(p) == {"front", "clock_gte"}:
+                    count(p["clock_gte"], "A prerequisite's clock_gte", 1)
+                    refs += ids([p["front"]], "A prerequisite's front")
+                else:
+                    raise CanonError("A prerequisite is {holds: fact id} or {front, clock_gte}.")
+            for goal in items(a["serves"], "An action's serves (goal ids)", 0):
+                words(goal, "A served goal's id")
+            if a["target"] is not None:
+                refs += ids([a["target"]], "An action's target")
+            if a["contest"] is not None:
+                contest = fields({"pool"}, {}, a["contest"], "contest rule")
+                words(contest["pool"], "A contest's pool")
+                if a["target"] is None:
+                    raise CanonError(f"{a['id']} has a contest rule but no target.")
+        unique(value, "catalogue action")
     else:
-        raise CanonError(f"Unknown state key {key!r}; expected front, clock, agenda or situation.")
+        raise CanonError(
+            f"Unknown state key {key!r}; expected front, clock, agenda, situation, intent, pool, "
+            "capacity or catalogue."
+        )
     return {**state, "value": value}, refs
 
 
@@ -172,6 +262,16 @@ def _current(
 def _holds(ws: Workspace, f: dict, date: str) -> bool:
     """Whether fact `f` holds on `date`, by the as-of rule of `search_facts`."""
     return index.holds(ws.calendar, f, date)
+
+
+def faction_step(ws: Workspace) -> int:
+    """Days in the campaign-wide faction step, over which income and capacity count: one week
+    unless `workspace.yaml` sets `faction_step` (ADR 0022, GM answer 1)."""
+    config = yaml.safe_load((ws.root / CONFIG_FILE).read_text()) or {}
+    try:
+        return ws.calendar.days(config.get("faction_step", STEP))
+    except CalendarError as e:
+        raise WorkspaceError(f"workspace.yaml: faction_step: {e}") from e
 
 
 def state(ws: Workspace) -> dict[str, dict]:

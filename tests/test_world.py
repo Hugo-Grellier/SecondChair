@@ -942,3 +942,237 @@ def test_a_derived_consequence_is_an_agent_proposal_at_the_living_world_level(
     set_level(ws, "prep", "memory", "manual")
     with pytest.raises(DelegationError, match="memory is at manual"):
         job_act(ws, "record_fact", job, statement="Tolls rise.", entities=[tolls], origin=origin)
+
+
+# Faction state facts (ADR 0022, LW-02, LW-03, LW-20)
+
+
+def faction(ws: Workspace) -> tuple[str, str, str]:
+    """A faction with its four state facts, written by the GM; its front and a rival."""
+    tolls, _ = front(ws, "Toll Squeeze")
+    council, rival = entity(ws, "Council"), entity(ws, "Guild")
+    goal = {"id": "tolls", "goal": "Own the river", "pursues": [tolls]}
+    state_fact(ws, council, "intent", [goal])
+    state_fact(ws, council, "pool", {"coin": {"value": 3, "income": 2, "cap": 10}})
+    state_fact(ws, council, "capacity", 1)
+    bribe: dict[str, Any] = {"id": "bribe", "cost": {"coin": 2}, "duration": "1w"}
+    bribe |= {"effect": {"class": "derived", "does": "A toll clerk looks away."}}
+    bribe |= {"prerequisites": [{"front": tolls, "clock_gte": 1}], "contest": {"pool": "coin"}}
+    state_fact(ws, council, "catalogue", [bribe | {"target": rival}])
+    return council, tolls, rival
+
+
+def test_a_faction_holds_intent_pool_capacity_and_catalogue_as_state_facts(
+    ws: Workspace,
+) -> None:
+    council, tolls, rival = faction(ws)
+
+    s = world._current(ws)[council]
+    assert {k for k in s if s[k]} == {"intent", "pool", "capacity", "catalogue"}
+    [bribe] = s["catalogue"]["state"]["value"]
+    assert bribe["contest"] == {"pool": "coin"} and bribe["target"] == rival
+    assert {council, tolls, rival} <= set(s["catalogue"]["entities"])  # what it names
+    assert world.state(ws)["fronts"].keys() == {tolls}  # a faction is no front
+
+
+def test_a_faction_state_fact_must_have_a_shape_the_world_turn_reads(ws: Workspace) -> None:
+    tolls, _ = front(ws, "Toll Squeeze")
+    council = entity(ws, "Council")
+    goal = {"id": "tolls", "goal": "Own the river", "pursues": [tolls]}
+    coin = {"value": 3, "income": 2, "cap": 10}
+    effect = {"class": "derived", "does": "A clerk looks away."}
+    bribe = {"id": "bribe", "cost": {"coin": 2}, "duration": "1w", "effect": effect}
+    for key, value, message in (
+        ("intent", [], "list of 1 to 3"),
+        ("intent", [goal] * 4, "list of 1 to 3"),
+        ("intent", [goal, goal], "own id"),
+        ("intent", [goal | {"pursues": []}], "pursues"),
+        ("intent", [goal | {"pursues": ["e-nobody"]}], "Unknown"),
+        ("intent", [goal | {"goal": " "}], "words"),
+        ("intent", [goal | {"why": "x"}], "goal needs"),
+        ("pool", {}, "one or more"),
+        ("pool", {"coin": coin | {"value": 11}}, "at most its cap"),
+        ("pool", {"coin": coin | {"income": -1}}, "income"),
+        ("pool", {"coin": coin | {"value": 1.5}}, "value"),
+        ("pool", {"coin": {"value": 3}}, "resource 'coin' needs"),
+        ("capacity", 0, "at least 1"),
+        ("capacity", True, "capacity"),
+        ("catalogue", [], "list of 1"),
+        ("catalogue", [bribe, bribe], "own id"),
+        ("catalogue", [bribe | {"cost": 2}], "cost maps"),
+        ("catalogue", [bribe | {"cost": {"coin": -1}}], "cost in coin"),
+        ("catalogue", [bribe | {"duration": "1m"}], "uration"),
+        ("catalogue", [bribe | {"effect": effect | {"class": "rule"}}], "derived, narrative"),
+        ("catalogue", [bribe | {"effect": {"class": "derived"}}], "effect template needs"),
+        ("catalogue", [bribe | {"prerequisites": [{"holds": "f-1", "x": 1}]}], "prerequisite is"),
+        ("catalogue", [bribe | {"prerequisites": [{"front": tolls, "clock_gte": 0}]}], "clock_gte"),
+        ("catalogue", [bribe | {"prerequisites": [{"front": "e-x", "clock_gte": 1}]}], "Unknown"),
+        ("catalogue", [bribe | {"target": "e-nobody"}], "Unknown"),
+        ("catalogue", [bribe | {"contest": {"pool": "coin"}}], "no target"),
+        ("catalogue", [bribe | {"contest": {"rule": "x"}, "target": tolls}], "contest rule needs"),
+        ("catalogue", [bribe | {"secret": True}], "catalogue action needs"),
+        ("catalogue", [bribe | {"cost": True}], "cost maps"),
+        ("pool", {"coin": 3}, "resource 'coin' needs"),
+        ("catalogue", [bribe | {"duration": "0d"}], "uration"),
+        ("catalogue", [bribe | {"prerequisites": {"holds": "f-1"}}], "Prerequisites is a list"),
+        ("catalogue", [bribe | {"contest": {"pool": " "}, "target": tolls}], "contest's pool"),
+        ("catalogue", [bribe | {"serves": "tolls"}], "serves"),
+    ):
+        with pytest.raises(index.CanonError, match=message):
+            state_fact(ws, council, key, value)
+    assert council not in world._current(ws)  # nothing was written
+
+
+def test_a_faction_pool_is_read_as_of_a_date_and_never_from_a_belief(ws: Workspace) -> None:
+    council, _, _ = faction(ws)
+    old = world._current(ws)[council]["pool"]
+    act(
+        ws,
+        "correct_fact",
+        fact=old["id"],
+        statement=old["statement"],
+        entities=old["entities"],
+        origin=GM,
+        state=old["state"],
+        valid_from=DAY0,
+        valid_to="4725-01-10",
+    )
+    richer = {**old["state"], "value": {"coin": {"value": 7, "income": 2, "cap": 10}}}
+    new = fact(ws, "The Council is richer.", state=richer, valid_from="4725-01-10")
+    broke = {**old["state"], "value": {"coin": {"value": 0, "income": 0, "cap": 1}}}
+    fact(ws, "The Council is broke.", never_true=True, state=broke)
+
+    def coin(at: str) -> int:
+        return world._current(ws, at=at)[council]["pool"]["state"]["value"]["coin"]["value"]
+
+    assert (coin("4725-01-09"), coin("4725-01-10")) == (3, 7)  # end-exclusive (#170)
+    on_9th = {f["id"] for f in index.search_facts(ws, at="4725-01-09")}
+    assert old["id"] in on_9th and new not in on_9th
+
+
+def test_undoing_a_faction_state_fact_removes_it(ws: Workspace) -> None:
+    council, _, _ = faction(ws)
+    entries, _ = delegation.read_log(ws)
+    catalogue = world._current(ws)[council]["catalogue"]["id"]
+
+    delegation.undo(ws, entries[-1]["id"], "other", "cli", True)
+
+    assert "catalogue" not in world._current(ws)[council]
+    assert catalogue not in {f["id"] for f in index.search_facts(ws)}
+    assert {"intent", "pool", "capacity"} <= world._current(ws)[council].keys()
+
+
+def test_a_faction_holds_one_fact_per_key_on_any_date(ws: Workspace) -> None:
+    council, _, _ = faction(ws)
+    poorer = {"of": council, "key": "pool", "value": {"coin": {"value": 1, "income": 1, "cap": 5}}}
+
+    # A second current pool would stop every later world-turn (#251 review): refused at write.
+    with pytest.raises(index.CanonError, match="already holds a pool fact"):
+        fact(ws, "The Council is poorer.", state=poorer)
+    with pytest.raises(index.CanonError, match="already holds a pool fact"):
+        fact(ws, "The Council is poorer later.", state=poorer, valid_from="4725-03-01")
+    fact(ws, "The Council fears it is poorer.", state=poorer, never_true=True)  # a belief may
+    old = world._current(ws)[council]["pool"]
+    act(  # correcting the one pool in place is no second pool
+        ws,
+        "correct_fact",
+        fact=old["id"],
+        statement=old["statement"],
+        entities=old["entities"],
+        origin=GM,
+        state=old["state"],
+        valid_to="4725-03-01",
+    )
+    fact(ws, "The Council is poorer later.", state=poorer, valid_from="4725-03-01")
+    world.state(ws)  # the world still reads
+    assert world._current(ws, at="4725-03-01")[council]["pool"]["state"] == poorer
+
+    # The other documented first step: an event that closes the current one, then the new one.
+    current = world._current(ws, at="4725-03-01")[council]["pool"]["id"]
+    act(
+        ws,
+        "record_event",
+        description="The Council's coffers are emptied.",
+        date="4725-04-01",
+        origin=GM,
+        closes=[current],
+    )
+    broke = {**poorer, "value": {"coin": {"value": 0, "income": 1, "cap": 5}}}
+    fact(ws, "The Council is broke.", state=broke, valid_from="4725-04-01")
+    assert world._current(ws, at="4725-04-01")[council]["pool"]["state"] == broke
+
+
+def test_a_catalogue_action_serves_the_faction_goals(ws: Workspace) -> None:
+    council, _, _ = faction(ws)
+    old = world._current(ws)[council]["catalogue"]
+    effect = {"class": "derived", "does": "A clerk looks away."}
+    bribe = {"id": "bribe", "cost": {}, "duration": "1w", "effect": effect}
+
+    for serves, ok in ((["tolls"], True), (["crown"], False)):
+        state = {**old["state"], "value": [bribe | {"serves": serves}]}
+        args = {"fact": old["id"], "statement": "Bribes.", "entities": [], "origin": GM}
+        if ok:
+            act(ws, "correct_fact", state=state, **args)
+        else:
+            with pytest.raises(index.CanonError, match="unknown goals"):
+                act(ws, "correct_fact", state=state, **args)
+    [action] = world._current(ws)[council]["catalogue"]["state"]["value"]
+    assert action["serves"] == ["tolls"]
+
+
+def test_a_job_never_writes_a_faction_state_fact(ws: Workspace) -> None:
+    council, _, _ = faction(ws)
+    turn(ws, "4725-01-08")
+    [job] = [j["id"] for j in jobs.pending(ws) if j["playbook"] == "propose-consequences"]
+    jobs.start(ws, job, CONFIG, manual=True)
+    state = {"of": council, "key": "capacity", "value": 2}
+
+    # ADR 0022 (a): the GM writes the menu; a job's own work never does, whatever its cell.
+    with pytest.raises(index.CanonError, match="GM's to write"):
+        job_act(
+            ws,
+            "record_fact",
+            job,
+            statement="The Council acts twice.",
+            entities=[council],
+            origin={"kind": "job", "job": str(job)},
+            state=state,
+        )
+    assert world._current(ws)[council]["capacity"]["state"]["value"] == 1
+
+
+def test_a_hand_edited_faction_fact_is_read_as_the_tools_write_it(ws: Workspace) -> None:
+    council = entity(ws, "Council")
+    effect = {"class": "derived", "does": "A clerk looks away."}
+    bribe = {"id": "bribe", "cost": {}, "duration": "1w", "effect": effect}
+
+    def hand(fact_id: str, action: dict) -> None:
+        front: dict[str, Any] = {"id": fact_id, "entities": [council], "relation": None}
+        front |= {"valid_from": None}
+        front |= {"valid_to": None, "rank": "agent_proposal", "origin": GM}
+        front |= {"state": {"of": council, "key": "catalogue", "value": [action]}}
+        (ws.root / index.FACTS_DIR).mkdir(exist_ok=True)
+        (ws.root / index.FACTS_DIR / f"{fact_id}.md").write_text(index.join_doc(front, "Bribes."))
+
+    hand("f-hand0001", bribe)
+    [read] = index.search_facts(ws, entity=council)
+    assert read["state"]["value"] == [  # the defaults filled, as record_fact fills them
+        bribe | {"prerequisites": [], "target": None, "contest": None, "serves": []}
+    ]
+
+    hand("f-hand0001", bribe | {"target": "e-nobody"})
+    assert "unknown entities ['e-nobody']" in " ".join(index.rebuild(ws))
+    assert index.search_facts(ws, entity=council) == []  # skipped, like an invalid shape
+    hand("f-hand0001", bribe | {"prerequisites": [{"front": "e-gone", "clock_gte": 1}]})
+    assert "unknown entities ['e-gone']" in " ".join(index.rebuild(ws))
+
+
+def test_the_faction_step_is_one_week_unless_the_campaign_sets_it(ws: Workspace) -> None:
+    assert world.faction_step(ws) == 7
+    config = ws.root / workspace.CONFIG_FILE
+    data = yaml.safe_load(config.read_text())
+    config.write_text(yaml.safe_dump(data | {"faction_step": "2w"}))
+    assert world.faction_step(ws) == 14
+    config.write_text(yaml.safe_dump(data | {"faction_step": "1m"}))
+    with pytest.raises(workspace.WorkspaceError, match="faction_step"):
+        world.faction_step(ws)

@@ -5,11 +5,12 @@ Decisions: [ADR 0009](../adr/0009-world-turn-deterministic-three-effect-classes.
 ## Scope
 
 - **LW-01** The living world covers **fronts** (a clock filled by ticks at an anchored rate, an optional `unless` condition, agenda steps reached by date or clock threshold, pause and resume), **situations** (hooks, a stage relative to the party, progress, an optional deadline) and offscreen consequences.
-- **LW-02** No faction simulation in v4: a faction acts through the fronts it carries.
+- **LW-02** A faction acts through the fronts it carries and its catalogue ([ADR 0022](../adr/0022-factions-choose-from-a-gm-written-catalogue-under-deterministic-validation.md)).
 
 ## Model
 
-- **LW-03** Fronts and situations are entities. All their state (clock value, stage, agenda steps, deadline, stakes) is facts. Every tick or step is an offscreen event that closes and opens facts ([ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md)). There is no separate store.
+- **LW-03** Fronts, situations and factions are entities. All their state (clock value, stage, agenda steps, deadline, stakes; a faction's intent, pools, capacity and catalogue, which the GM writes) is facts. Every tick or step is an offscreen event that closes and opens facts ([ADR 0007](../adr/0007-facts-are-the-unit-of-canon.md)). There is no separate store. A faction holds one fact per key on any date, so the GM changes one in two steps: end the current fact on a date, then record the new one starting that date.
+- **LW-20** Faction pools and capacity count over one campaign-wide **faction step**, one fictional week unless the campaign sets another (`faction_step` in `workspace.yaml`). A slower faction is expressed through its income and capacity, not its own step (ADR 0022).
 
 ## World-turn
 
