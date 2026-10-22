@@ -28,10 +28,6 @@ You were given a job id: call `start_job` with it and the host, model and effort
 
 Also read, when they exist: earlier handoffs (`prep/session-*/handoff.md`), the working notes (`notes/`, the GM's provisional ideas: never treat them as canon; an opportunity note under `notes/opportunities/` whose front matter says `status: adopted` is an idea the GM chose to offer, to weave in as a proposal, never as something that happened), the scenes and documents already prepared (`scenes/*.yaml`, `documents/*.yaml`), and the house rules (`house-rules.yaml`).
 
-## Plan first
-
-After you have read the inputs and canon (below) and before the deep run, show the GM one short list: the scenes you will plan (a line each) and the Foundry material you will prepare (scenes, NPC actors, journals, handouts, treasure, playlists), then stop and wait for their go, change or no. Run interactively (the GM asked in conversation): this stop is required, and nothing is written before the answer. Run as a job (no GM): do not stop; put the same list at the top of the handoff's open questions and proceed. The rest of this playbook, its checks and its delegation rules, is unchanged.
-
 ## What canon says (read before writing anything)
 
 1. **Where we are**: the current date (`living_world`), the last sessions' events (`search_events`), the last handoff and what of it was played.
@@ -39,6 +35,10 @@ After you have read the inputs and canon (below) and before the deep run, show t
 3. **Threads**: open situations, fronts and their clocks (`living_world`), what the world will do up to the session's likely date (`forecast_world`), each mystery's state (`check_mystery`: found and missing clues, three-clue warnings, reachable conclusions).
 4. **The NPCs** likely to appear: their facts, their goals, and for each what they know and do not know (`what_knows` with their id). Check any line a player will hear with `check_audience_content` before you write it as a player-facing line.
 5. **Sources**: when the reference library is available, search it (`search_campaign_library`) for the setting and rules details the scenes need, and cite filename and page. A Source informs prep; it never overrides canon. Show a conflict with both provenances.
+
+## Plan first
+
+Once you have read the inputs and "What canon says" above, and before you write the handoff or touch Foundry, show the GM one short list: the scenes you will plan (a line each) and the Foundry material you will prepare (scenes, NPC actors, journals, handouts, treasure, playlists), then stop and wait for their go, change or no. Run interactively (the GM asked in conversation: there is no job id): this stop is required, and nothing is written before the answer. Run as a job (you were given a job id, no GM): do not stop; put the same list at the top of the handoff's open questions and proceed. The rest of this playbook, its checks and its delegation rules, is unchanged.
 
 ## The handoff
 
