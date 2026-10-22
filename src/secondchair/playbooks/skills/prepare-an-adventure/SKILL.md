@@ -6,7 +6,7 @@ compatibility: Needs the SecondChair MCP server (secondchair serve). The creatur
 metadata:
   secondchair-responsibility: prep
   secondchair-tier: standard
-  secondchair-inputs: direction, slug?, party_level?, party_size?
+  secondchair-inputs: direction, slug?, party_level?, party_size?, session_count?
   secondchair-expected-output: The adventure's dossier written with write_prep at adventure-<slug>/dossier.md and its players' guide at adventure-<slug>/players-guide.md, each ending with the YAML index block, check_prep clean on the dossier and check_prep_guide clean on the guide (or every remaining problem listed for the GM), and a summary of the open questions.
 ---
 
@@ -22,9 +22,13 @@ Write both files and every name in the **campaign language** (`campaign_language
 
 With a job id, call `start_job` with it and the host, model and effort you run with, and read the contract. Without a job, take the GM's words.
 
-- `inputs.direction`: the path of the adopted direction note under `notes/` (front matter `status: adopted`). Read it, never edit it. Refuse a note that is not adopted, and ask for one; do not pick a pitch yourself.
+- `inputs.direction`: the adopted direction, given as its **title** (the GM's words, for example "the Ashfall pitch") or as the path of its note under `notes/` (front matter `status: adopted`). The GM never needs to know a path. Given a title, resolve it yourself: list the notes under `notes/direction/` whose front matter says `status: adopted` and match the title; one match is your direction, several matches: show their titles and ask which, none: say so and ask for one. Never invent a path or pick a pitch yourself. Read the note, never edit it. Refuse a note that is not adopted.
 - `inputs.slug` (optional): lowercase words joined by dashes naming the adventure; derive it from the note's title otherwise.
-- `inputs.party_level`, `inputs.party_size` (optional): the party's starting level and size. Never guess them: take canon or the GM's word, or list the question as open.
+- `inputs.party_level`, `inputs.party_size`, `inputs.session_count` (optional): the party's starting level and size, and how many sessions the adventure spans. Never guess them.
+
+## Ask once, up front
+
+Before writing anything, read what canon holds (the PCs with `search_entities`, their facts, the current moment) and what the direction states for the level range and length. Collect only what is still missing among party level, party size and session count, and ask for all of it in **one** message, with each value you did find beside it. Do not ask for what canon already gives. In a job run (no GM to ask), do not stop: list each missing value as an open question and write the sessions and the level plan as proposals that hold for any value.
 
 Also read what canon and prep already hold: the PCs and what the party knows (`what_knows` with `party`), open situations and fronts (`living_world`, `forecast_world`), mysteries (`check_mystery`), earlier handoffs (`prep/session-*/handoff.md`), and the notes the direction cites.
 

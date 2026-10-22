@@ -28,6 +28,10 @@ You were given a job id: call `start_job` with it and the host, model and effort
 
 Also read, when they exist: earlier handoffs (`prep/session-*/handoff.md`), the working notes (`notes/`, the GM's provisional ideas: never treat them as canon; an opportunity note under `notes/opportunities/` whose front matter says `status: adopted` is an idea the GM chose to offer, to weave in as a proposal, never as something that happened), the scenes and documents already prepared (`scenes/*.yaml`, `documents/*.yaml`), and the house rules (`house-rules.yaml`).
 
+## Plan first
+
+After you have read the inputs and canon (below) and before the deep run, show the GM one short list: the scenes you will plan (a line each) and the Foundry material you will prepare (scenes, NPC actors, journals, handouts, treasure, playlists), then stop and wait for their go, change or no. Run interactively (the GM asked in conversation): this stop is required, and nothing is written before the answer. Run as a job (no GM): do not stop; put the same list at the top of the handoff's open questions and proceed. The rest of this playbook, its checks and its delegation rules, is unchanged.
+
 ## What canon says (read before writing anything)
 
 1. **Where we are**: the current date (`living_world`), the last sessions' events (`search_events`), the last handoff and what of it was played.

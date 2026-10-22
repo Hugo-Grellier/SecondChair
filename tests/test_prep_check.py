@@ -169,3 +169,16 @@ def test_the_playbook_is_a_standard_prep_task() -> None:
 
     meta = runner.playbook("prepare-an-adventure")
     assert (meta["tier"], meta["responsibility"]) == ("standard", "prep")
+
+
+def test_adventure_and_session_playbooks_onboard_the_gm() -> None:
+    """A title (never a path), one up-front question, a plan before the deep run."""
+    from secondchair import runner
+
+    assert "session_count?" in runner.playbook("prepare-an-adventure")["inputs"]
+    skills = {s.name: (s / "SKILL.md").read_text() for s in runner.skills()}
+    adventure = skills["prepare-an-adventure"]
+    assert "Never invent a path" in adventure and "## Ask once, up front" in adventure
+    assert "check_prep_guide" in adventure
+    session = skills["prepare-a-session"]
+    assert "## Plan first" in session and "check_audience_content" in session
