@@ -3,6 +3,7 @@
 PKG-07, PKG-08, PKG-09, ARC-18."""
 
 import asyncio
+import contextlib
 import json
 import queue
 import stat
@@ -23,6 +24,7 @@ import pytest
 import yaml
 from conftest import Serving
 from mcp import Client
+from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 from websockets.typing import Origin
 
@@ -540,3 +542,68 @@ def test_a_system_version_change_between_handshakes_is_reported(workspace: Path)
     )
     with pytest.raises(ValueError, match="malformed"):
         compendium.store(ws, {"system": {"version": "../x"}, "entries": []})
+
+
+SECRET = "The vault key hides under the altar."
+
+
+def holding(root: Path, text: str) -> set[str]:
+    """The workspace files whose content holds `text`."""
+    return {
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_file() and text.encode() in p.read_bytes()
+    }
+
+
+def test_a_situation_card_reaches_the_gm_desk_only(
+    bridge: str, token: str, workspace: Path
+) -> None:
+    from test_canon import entity, fact
+    from test_knowledge import learn
+
+    from secondchair.core import delegation, observations
+
+    ws = load(workspace)
+    tovan = entity(ws, "Tovan Reed")
+    learn(ws, tovan, fact(ws, SECRET, entities=[tovan]))
+    delegation.start_session(ws)
+    for i, (kind, payload) in enumerate(
+        [("scene", {"action": "activate", "name": "Tower"}), ("chat", {"speaker": "Tovan Reed"})]
+    ):
+        envelope: dict[str, Any] = {"id": f"o{i}", "session": 1, "kind": kind}
+        envelope["at"] = f"2026-10-21T20:0{i}:00Z"
+        envelope |= {"scene": "Scene.t", "actor": None, "visibility": "players"}
+        assert observations.record(ws, envelope | {"payload": payload}) is None
+    before = holding(workspace, SECRET)
+
+    # A client without the GM's token gets a refusal and nothing else.
+    assert SECRET not in json.dumps(reply(bridge, hello("not-the-token")))
+
+    inbox: queue.Queue = queue.Queue()
+    sockets: list[ClientConnection] = []
+    with gm_client(bridge, token, inbox=inbox, sent=sockets):
+        received = [next_of(inbox, "desk")]
+        say(sockets[0], {"type": "gesture", "id": "g1", "gesture": "situation"})
+        while not (received[-1]["type"] == "desk" and received[-1].get("situation")):
+            received.append(inbox.get(timeout=10))
+        # A second client, even with the token, is refused while the GM's holds the bridge.
+        with connect(bridge, origin=Origin("https://foundry.example")) as second:
+            second.send(json.dumps(hello(token)))
+            heard = []
+            with contextlib.suppress(ConnectionClosed):  # until the Core closes it
+                while True:
+                    heard.append(json.loads(second.recv(timeout=5)))
+        assert [m["type"] for m in heard] == ["refused"]
+        assert SECRET not in json.dumps(heard)
+        time.sleep(1.5)  # whatever else the Core sends meanwhile
+        while not inbox.empty():
+            received.append(inbox.get())
+
+    [card] = [m["situation"] for m in received if m["type"] == "desk" and m.get("situation")][:1]
+    assert [n["secret"][0]["statement"] for n in card["npcs"]] == [SECRET]
+    for message in received:  # the secret travels in the Desk's card, never anywhere else
+        rest = {k: v for k, v in message.items() if (message["type"], k) != ("desk", "situation")}
+        assert SECRET not in json.dumps(rest), message
+    # In the workspace, only the card's own derived file is new to hold it.
+    assert holding(workspace, SECRET) - before == {".secondchair/situation.json"}

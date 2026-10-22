@@ -203,12 +203,18 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
       state: desk?.state ?? null,
       pile: desk?.pile ?? null,
       ceiling,
+      cardOpen: desk?.cardOpen ?? false,
     });
   }
 
   /** @param {unknown} result @param {HTMLElement} content */
   _replaceHTML(result, content) {
     content.innerHTML = String(result);
+    // The GM's open or collapsed situation card outlives the next re-render.
+    const card = content.querySelector("details.secondchair-card");
+    card?.addEventListener("toggle", () =>
+      desk?.setCardOpen(/** @type {HTMLDetailsElement} */ (card).open),
+    );
   }
 }
 
@@ -331,6 +337,28 @@ Hooks.once("init", () => {
     onDown: () => {
       if (desk && !desk.closed) showDesk(true);
       else ui.notifications.warn("SecondChair: not connected to the Core.");
+      return true;
+    },
+  });
+  // The situation card (#188 D1): a read the GM pulls; the Core sends it in the Desk's state.
+  game.keybindings.register(MODULE, "situation", {
+    name: "Show the situation on the Director's Desk",
+    editable: [{ key: "KeyS", modifiers: ["Shift"] }],
+    restricted: true,
+    onDown: () => {
+      if (!desk || desk.closed) {
+        ui.notifications.warn("SecondChair: not connected to the Core.");
+        return true;
+      }
+      showDesk(true);
+      desk
+        .gesture("situation")
+        .then((result) => {
+          if (!result.ok) ui.notifications.error(`SecondChair: ${result.error}`);
+        })
+        .catch((/** @type {Error} */ error) =>
+          ui.notifications.error(`SecondChair: ${error.message}`),
+        );
       return true;
     },
   });

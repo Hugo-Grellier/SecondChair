@@ -143,3 +143,9 @@ def position(ws: Workspace) -> dict:
                 "turn": None if ended else o["payload"].get("turn"),
             }
     return found
+
+
+def still(ws: Workspace, as_of: object) -> bool:
+    """Whether play still stands where `as_of` (a `position` plus `at`) recorded it: a cue or a
+    card built there is current, and withdrawn once this is false (ADR 0020 item 3)."""
+    return isinstance(as_of, dict) and {**as_of, "at": None} == {**position(ws), "at": None}

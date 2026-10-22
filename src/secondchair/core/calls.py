@@ -216,6 +216,13 @@ def _log_default(
     )
 
 
+def entity_of(ws: Workspace, call: dict) -> str | None:
+    """A call's acting entity (DEL-16): its action entry's, else its job's, else none."""
+    if call["entry"] is not None:
+        return read_entry(ws, call["entry"]).get("entity")
+    return _job(ws, call["job"]).get("entity") if call["job"] is not None else None
+
+
 def read_calls(ws: Workspace) -> list[dict]:
     return [_read_yaml(p) for p in sorted((ws.root / CALLS_DIR).glob("*.yaml"))]
 

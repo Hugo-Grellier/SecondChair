@@ -772,63 +772,7 @@
                   "description": "The GM voices this NPC: npcs and disclosure overrides at manual for it, every moment."
                 },
                 "as_of": {
-                  "type": "object",
-                  "description": "Where play stood when the cue was shown (ADR 0020 item 3). The Core withdraws the cue (sends null) as soon as any field but `at` differs from where play stands now; the Desk shows its age from `at`.",
-                  "properties": {
-                    "moment": {
-                      "type": "integer",
-                      "description": "The moment's sequence number, which grows at every moment change: a cue shown in prep stays withdrawn after a session starts and ends."
-                    },
-                    "session": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ],
-                      "description": "The live session, null outside one."
-                    },
-                    "observation": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "The id of the last scene or combat observation of that session, null before the first."
-                    },
-                    "scene": {
-                      "type": [
-                        "string",
-                        "null"
-                      ],
-                      "description": "The scene last activated, null before an activation was observed."
-                    },
-                    "round": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ],
-                      "description": "The combat round, null out of combat."
-                    },
-                    "turn": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ],
-                      "description": "The combat turn index, null out of combat."
-                    },
-                    "at": {
-                      "type": "string",
-                      "description": "When the cue was shown, ISO 8601 in UTC."
-                    }
-                  },
-                  "required": [
-                    "moment",
-                    "session",
-                    "observation",
-                    "scene",
-                    "round",
-                    "turn",
-                    "at"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/$defs/as_of"
                 }
               },
               "required": [
@@ -840,6 +784,172 @@
                 "does_not_know",
                 "voiced",
                 "as_of"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "situation": {
+          "description": "The situation card the GM last pulled (#188 D1, ARC-14): GM-only, assembled by the Core with no model; null when none was pulled or play has moved on since. Absent from a Core before it.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "as_of": {
+                  "$ref": "#/$defs/as_of"
+                },
+                "scene": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The name of the scene last activated, null before one was observed."
+                },
+                "acting": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The combatant whose turn it is, null out of combat."
+                },
+                "npcs": {
+                  "type": "array",
+                  "description": "The NPCs present: an NPC whose name a combatant or a chat speaker of this scene carries in this session.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "description": "The NPC's entity id."
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "shared": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "statement": {
+                              "type": "string"
+                            },
+                            "mode": {
+                              "enum": [
+                                "knows",
+                                "believes",
+                                "suspects"
+                              ],
+                              "description": "How the NPC holds it."
+                            },
+                            "party_mode": {
+                              "enum": [
+                                "knows",
+                                "believes",
+                                "suspects"
+                              ],
+                              "description": "How the party holds it: one that only suspects or believes it does not know it."
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "statement",
+                            "mode",
+                            "party_mode"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "description": "Facts the NPC holds that the party holds too, each with how the party holds it."
+                      },
+                      "secret": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "statement": {
+                              "type": "string"
+                            },
+                            "mode": {
+                              "enum": [
+                                "knows",
+                                "believes",
+                                "suspects"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "statement",
+                            "mode"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "description": "Facts the NPC holds that the party does not: never to let slip unless the GM chooses to disclose."
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "shared",
+                      "secret"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "handoff": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The lines of the session's handoff (prep) naming the scene or an NPC present."
+                },
+                "calls": {
+                  "type": "array",
+                  "description": "The open calls whose acting entity is an NPC present.",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "integer"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "deadline": {
+                        "enum": [
+                          "now",
+                          "break"
+                        ]
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "kind",
+                      "deadline",
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "as_of",
+                "scene",
+                "acting",
+                "npcs",
+                "handoff",
+                "calls"
               ],
               "additionalProperties": false
             }
@@ -878,7 +988,8 @@
             "start_session",
             "end_session",
             "voice",
-            "hand_back"
+            "hand_back",
+            "situation"
           ]
         },
         "entity": {
@@ -1273,6 +1384,65 @@
       "required": [
         "type",
         "data"
+      ],
+      "additionalProperties": false
+    },
+    "as_of": {
+      "type": "object",
+      "description": "Where play stood when the cue was shown or the card pulled (ADR 0020 item 3). The Core withdraws it (sends null) as soon as any field but `at` differs from where play stands now; the Desk shows its age from `at`.",
+      "properties": {
+        "moment": {
+          "type": "integer",
+          "description": "The moment's sequence number, which grows at every moment change: a cue shown in prep stays withdrawn after a session starts and ends."
+        },
+        "session": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The live session, null outside one."
+        },
+        "observation": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The id of the last scene or combat observation of that session, null before the first."
+        },
+        "scene": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The scene last activated, null before an activation was observed."
+        },
+        "round": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The combat round, null out of combat."
+        },
+        "turn": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The combat turn index, null out of combat."
+        },
+        "at": {
+          "type": "string",
+          "description": "When it was shown or pulled, ISO 8601 in UTC."
+        }
+      },
+      "required": [
+        "moment",
+        "session",
+        "observation",
+        "scene",
+        "round",
+        "turn",
+        "at"
       ],
       "additionalProperties": false
     }
