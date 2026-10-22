@@ -8,6 +8,7 @@ export const PROTOCOL_VERSION = "0.1.0";
  * @typedef {{type: "hello", protocol: string, token: string, world: string, campaign: string | null}} Hello
  * @typedef {{type: "welcome", protocol: string, campaign: string, campaign_language: string}} Welcome
  * @typedef {{type: "refused", reason: string, message: string}} Refusal
+ * @typedef {{state: "dialing"} | {state: "connected"} | {state: "unreachable", url: string} | {state: "refused", reason: string, message: string} | {state: "lost"}} LinkStatus
  */
 
 /**
@@ -60,7 +61,14 @@ export function connect({
   socket.addEventListener("message", (event) => {
     if (answered) return;
     answered = true;
-    const reply = JSON.parse(String(event.data));
+    /** @type {any} */
+    let reply;
+    try {
+      reply = JSON.parse(String(event.data));
+    } catch {
+      reply = { type: "refused", reason: "malformed", message: "The Core sent a malformed reply." };
+      socket.close();
+    }
     if (reply.type === "welcome") onWelcome(reply, socket);
     else onRefused(reply);
   });
@@ -70,4 +78,65 @@ export function connect({
     answered = true;
   });
   return socket;
+}
+
+/**
+ * The GM client's link to the Core: one dial at a time, and a new one only when asked (the
+ * Desk's Retry), so a Core that is down or refuses is never dialed in a loop.
+ * @param {object} args
+ * @param {string} args.url
+ * @param {() => Hello} args.hello  built at each dial, so it carries the campaign bound since
+ * @param {(welcome: Welcome, socket: WebSocket) => void} args.onWelcome
+ * @param {(status: LinkStatus) => void} args.onStatus
+ * @param {() => void} [args.onPending]
+ * @param {typeof WebSocket} [args.WebSocketImpl]
+ */
+export function createLink({ url, hello, onWelcome, onStatus, onPending, WebSocketImpl }) {
+  /** @type {LinkStatus | null} */
+  let status = null;
+  /** @type {WebSocket | null} */
+  let socket = null;
+  /** @param {LinkStatus} next */
+  const set = (next) => {
+    status = next;
+    onStatus(next);
+  };
+  return {
+    get status() {
+      return status;
+    },
+    /** Dial the Core, unless a dial is in flight or connected; whether it dialed. */
+    dial() {
+      if (status?.state === "dialing" || status?.state === "connected") return false;
+      set({ state: "dialing" });
+      connect({
+        url,
+        hello: hello(),
+        onPending,
+        WebSocketImpl,
+        onWelcome: (welcome, opened) => {
+          socket = opened;
+          opened.addEventListener("close", () => {
+            socket = null;
+            if (status?.state === "connected") set({ state: "lost" });
+          });
+          set({ state: "connected" });
+          onWelcome(welcome, opened);
+        },
+        onRefused: (refusal) =>
+          set({
+            state: "refused",
+            reason: String(refusal.reason),
+            message: String(refusal.message),
+          }),
+        onUnreachable: () => set({ state: "unreachable", url }),
+      });
+      return true;
+    },
+    /** Drop a welcomed connection this side cannot use, with why. @param {string} message */
+    fail(message) {
+      set({ state: "refused", reason: "module", message });
+      socket?.close();
+    },
+  };
 }

@@ -88,7 +88,7 @@ export function createDesk({ send, isGM, onChange }) {
     async gesture(gesture, fields = {}) {
       // The Desk is an authenticated Surface only as the GM user (ARC-13, DEL-03a).
       if (!isGM()) throw new Error("Only a GM uses the Director's Desk.");
-      if (closed) throw new Error("Not connected to the Core: reload the world to connect again.");
+      if (closed) throw new Error("Not connected to the Core: use Retry on the Director's Desk.");
       const id = `g${++count}`;
       /** @type {Promise<Result>} */
       const answered = new Promise((resolve) => waiting.set(id, resolve));
@@ -113,6 +113,15 @@ export function createDesk({ send, isGM, onChange }) {
     },
     get closed() {
       return closed;
+    },
+    /** The bridge connected again: the Desk waits for the Core's state, nothing kept from before. */
+    reopen() {
+      closed = false;
+      state = null;
+      pile = null;
+      cardOpen = false;
+      readinessOpen = null;
+      onChange();
     },
     /**
      * A message from the Core; whether it was the Desk's.
@@ -306,6 +315,50 @@ ${list(cue.does_not_know)}
 <p><button type="button" data-action="gesture" data-gesture="${gesture}" data-entity="${esc(cue.npc)}">${label}</button></p>`;
 }
 
+/** What a refusal is about, by the Core's reason (docs/contracts/foundry-bridge.md, Handshake). */
+const REFUSED = {
+  malformed: "The Core does not understand this module",
+  no_token: "The Core has no token yet",
+  wrong_token: "Wrong token",
+  protocol: "Incompatible versions",
+  busy: "Another GM client is connected",
+  world: "This world is bound elsewhere",
+  module: "A module is missing",
+};
+
+/** A world bound elsewhere is rebound by hand, never in one click (PKG-09, ARC-18). */
+const REBIND = `<p>To bind the campaign to this world instead, delete <code>foundry.yaml</code> in its workspace. To free this world, run <code>game.settings.set("secondchair-foundry", "campaign", "")</code> in this browser's console. Then Retry.</p>`;
+
+/**
+ * The Desk while not connected: the cause and one action. Outside the cards (ARC-14), which the
+ * Core assembles: there is no Core here. The Core's message is escaped.
+ * @param {import("./bridge.js").LinkStatus} link
+ */
+function linkHtml(link) {
+  const retry = (/** @type {string} */ label) =>
+    `<p><button type="button" data-action="retry">${label}</button></p>`;
+  switch (link.state) {
+    case "dialing":
+      return "<p>Connecting to the Core…</p>";
+    case "unreachable":
+      return `<p><strong>Core not reachable</strong> at ${esc(link.url)}.</p>
+<p>Start it on this computer with <code>secondchair serve -w &lt;campaign workspace&gt;</code>. If the browser asked whether this site may access local devices, allow it.</p>
+${retry("Retry")}`;
+    case "refused": {
+      const what = Object.hasOwn(REFUSED, link.reason)
+        ? REFUSED[/** @type {keyof typeof REFUSED} */ (link.reason)]
+        : "The Core refused the connection";
+      return `<p><strong>${what}.</strong> ${esc(link.message)}</p>
+${link.reason === "world" ? `${REBIND}\n` : ""}${retry("Retry")}`;
+    }
+    case "lost":
+      return `<p><strong>Disconnected from the Core.</strong> Prepared scenes and documents changed since are not in the world yet: reconnecting realises them all again.</p>
+${retry("Reconnect")}`;
+    default:
+      return "";
+  }
+}
+
 /** @typedef {{key: string, modifiers?: string[]}} Binding */
 
 /**
@@ -324,7 +377,8 @@ export function keyHint(bindings) {
  * The Desk's content: nothing at all for a user who is not a GM.
  * `keys` holds the bindings Foundry reports per action; absent, no hint is shown.
  * `readinessOpen` is the GM's choice for the readiness card, null (absent) until they made one.
- * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown, cardOpen?: boolean, readinessOpen?: boolean | null, keys?: {desk: Binding[], situation: Binding[]}}} args
+ * `link`, when given and not connected, replaces it all with why and what to do.
+ * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown, cardOpen?: boolean, readinessOpen?: boolean | null, keys?: {desk: Binding[], situation: Binding[]}, link?: import("./bridge.js").LinkStatus | null}} args
  */
 export function deskHtml({
   isGM,
@@ -334,8 +388,10 @@ export function deskHtml({
   cardOpen = false,
   readinessOpen = null,
   keys,
+  link = null,
 }) {
   if (!isGM) return "";
+  if (link && link.state !== "connected") return linkHtml(link);
   if (!state) return "<p>Waiting for the Core…</p>";
   const live = state.moment === "live-session";
   const session = live

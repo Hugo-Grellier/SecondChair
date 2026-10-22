@@ -232,6 +232,80 @@ test("once the bridge closes, waiting gestures fail and no new one is sent", asy
   assert.equal(sent.length, 1);
 });
 
+test("after a Retry the Desk reopens empty, waits for the Core and relays gestures again", async () => {
+  const { d, sent, changes } = desk();
+  d.receive(STATE);
+  await d.gesture("break");
+  d.close();
+  d.reopen();
+  assert.equal(d.closed, false);
+  assert.equal(d.state, null, "nothing shown from before the disconnection");
+  assert.equal(d.pile, null);
+  assert.equal(changes(), 3);
+  assert.equal((await d.gesture("start_session")).ok, true);
+  assert.equal(sent.length, 2);
+});
+
+test("disconnected, the Desk names the cause and offers one action", () => {
+  /** @param {import("../secondchair-foundry/scripts/bridge.js").LinkStatus} link */
+  const html = (link) => deskHtml({ isGM: true, state: STATE, pile: null, ceiling: "x", link });
+  const actions = (/** @type {string} */ h) =>
+    [...h.matchAll(/data-action="(\w+)"/g)].map((m) => m[1]);
+
+  const down = html({ state: "unreachable", url: "ws://127.0.0.1:7240/foundry" });
+  assert.match(down, /Core not reachable/);
+  assert.match(down, /secondchair serve -w/);
+  assert.deepEqual(actions(down), ["retry"]);
+  assert.doesNotMatch(down, /secondchair-card|data-gesture/, "no card, no gesture: no Core here");
+
+  const busy = html({ state: "refused", reason: "busy", message: "Close it <b>first</b>." });
+  assert.match(busy, /Another GM client is connected/);
+  assert.match(busy, /Close it &lt;b&gt;first&lt;\/b&gt;\./, "the Core's message is escaped");
+  assert.deepEqual(actions(busy), ["retry"]);
+
+  const odd = html({ state: "refused", reason: "<i>new</i>", message: "m" });
+  assert.match(odd, /The Core refused the connection/);
+  assert.doesNotMatch(odd, /<i>/);
+
+  const lost = html({ state: "lost" });
+  assert.match(lost, /reconnecting realises them all again/);
+  assert.match(lost, />Reconnect</);
+  assert.deepEqual(actions(lost), ["retry"]);
+
+  // A dial in flight offers nothing to click twice.
+  assert.deepEqual(actions(html({ state: "dialing" })), []);
+  // Connected, the Desk is the Desk.
+  assert.match(html({ state: "connected" }), /Due now/);
+});
+
+test("a world bound elsewhere shows the Core's message and the commands, no rebind gesture", () => {
+  const message = "The campaign 'tower' is bound to the Foundry world 'other', not 'w'.";
+  const html = deskHtml({
+    isGM: true,
+    state: null,
+    pile: null,
+    ceiling: "x",
+    link: { state: "refused", reason: "world", message },
+  });
+  assert.match(html, /This world is bound elsewhere/);
+  assert.match(html, /bound to the Foundry world &#39;other&#39;/);
+  assert.match(html, /delete <code>foundry\.yaml<\/code>/);
+  assert.match(html, /game\.settings\.set\("secondchair-foundry", "campaign", ""\)/);
+  assert.deepEqual(
+    [...html.matchAll(/data-action="(\w+)"/g)].map((m) => m[1]),
+    ["retry"],
+  );
+});
+
+test("a player never sees the disconnected Desk", () => {
+  for (const link of /** @type {const} */ ([
+    { state: "lost" },
+    { state: "unreachable", url: "u" },
+    { state: "refused", reason: "busy", message: "m" },
+  ]))
+    assert.equal(deskHtml({ isGM: false, state: null, pile: null, ceiling: "x", link }), "");
+});
+
 /** @type {NonNullable<DeskState["situation"]>} */
 const CARD = {
   as_of: {

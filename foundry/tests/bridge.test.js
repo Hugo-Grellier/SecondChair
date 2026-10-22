@@ -1,7 +1,7 @@
 // The module's half of the handshake (docs/contracts/foundry-bridge.md), against the contract's schema.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { connect, coreUrl, hello } from "../secondchair-foundry/scripts/bridge.js";
+import { connect, coreUrl, createLink, hello } from "../secondchair-foundry/scripts/bridge.js";
 
 import { validMessage as valid } from "./schema.js";
 
@@ -11,6 +11,7 @@ class FakeSocket extends EventTarget {
   static opened = [];
   /** @type {string[]} */
   sent = [];
+  closed = false;
   /** @param {string} url */
   constructor(url) {
     super();
@@ -24,6 +25,10 @@ class FakeSocket extends EventTarget {
   /** @param {object} message */
   reply(message) {
     this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) }));
+  }
+  close() {
+    this.closed = true;
+    this.dispatchEvent(new Event("close"));
   }
 }
 
@@ -100,4 +105,101 @@ test("a socket that opens or closes in time is never reported as pending", (t) =
   t.mock.timers.tick(10000);
   assert.deepEqual(opened.calls, []);
   assert.deepEqual(closed.calls, ["unreachable"]);
+});
+
+const WELCOME = { type: "welcome", protocol: "0.1.0", campaign: "c1", campaign_language: "fr" };
+
+/** A link to a fake Core; the hello is rebuilt from `bound` at each dial. */
+function link() {
+  /** @type {string[]} */
+  const statuses = [];
+  /** @type {string[]} */
+  const welcomed = [];
+  const bound = { campaign: "" };
+  const l = createLink({
+    url: coreUrl(7240),
+    hello: () => hello({ token: "t0k3n", world: "w", campaign: bound.campaign }),
+    onWelcome: (welcome) => welcomed.push(welcome.campaign),
+    onStatus: (status) => statuses.push(status.state),
+    WebSocketImpl: /** @type {typeof WebSocket} */ (/** @type {unknown} */ (FakeSocket)),
+  });
+  const last = () => /** @type {FakeSocket} */ (FakeSocket.opened.at(-1));
+  return { l, statuses, welcomed, bound, last };
+}
+
+test("Retry dials an unreachable Core again, with no reload, and never on its own", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { l, statuses, welcomed, bound, last } = link();
+  const before = FakeSocket.opened.length;
+  assert.equal(l.dial(), true);
+  last().close(); // closed during the dial: unreachable, not stuck dialing
+  assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7240/foundry" });
+  t.mock.timers.tick(60000);
+  assert.equal(FakeSocket.opened.length, before + 1, "no dial without a Retry");
+  bound.campaign = "c1"; // bound by a welcome meanwhile: the next hello carries it
+  assert.equal(l.dial(), true);
+  last().dispatchEvent(new Event("open"));
+  assert.equal(JSON.parse(last().sent[0]).campaign, "c1");
+  last().reply(WELCOME);
+  assert.deepEqual(statuses, ["dialing", "unreachable", "dialing", "connected"]);
+  assert.deepEqual(welcomed, ["c1"]);
+});
+
+test("a double click on Retry dials once; a connected link is not dialed again", () => {
+  const { l, last } = link();
+  const before = FakeSocket.opened.length;
+  assert.equal(l.dial(), true);
+  assert.equal(l.dial(), false);
+  assert.equal(FakeSocket.opened.length, before + 1);
+  last().reply(WELCOME);
+  assert.equal(l.dial(), false);
+  assert.equal(FakeSocket.opened.length, before + 1);
+});
+
+test("a refusal, busy included, keeps the Core's reason and message and allows a Retry", () => {
+  const { l, last } = link();
+  l.dial();
+  const message = "Another GM client is already connected to this campaign; close it first.";
+  last().reply({ type: "refused", reason: "busy", message });
+  last().close(); // the Core closes after refusing: still refused, not unreachable
+  assert.deepEqual(l.status, { state: "refused", reason: "busy", message });
+  assert.equal(l.dial(), true);
+  assert.equal(l.status?.state, "dialing");
+});
+
+test("a malformed reply is a refusal, never a dial stuck waiting", () => {
+  const { l, last } = link();
+  l.dial();
+  last().dispatchEvent(new MessageEvent("message", { data: "not json" }));
+  assert.deepEqual(l.status, {
+    state: "refused",
+    reason: "malformed",
+    message: "The Core sent a malformed reply.",
+  });
+  assert.ok(last().closed);
+});
+
+test("a connection that closes is lost, and Reconnect dials again", () => {
+  const { l, statuses, last } = link();
+  l.dial();
+  last().reply(WELCOME);
+  last().close();
+  assert.equal(l.status?.state, "lost");
+  assert.equal(l.dial(), true);
+  last().reply(WELCOME);
+  assert.deepEqual(statuses, ["dialing", "connected", "lost", "dialing", "connected"]);
+});
+
+test("a welcomed connection the module drops says why, not that it was lost", () => {
+  const { l, last } = link();
+  l.dial();
+  last().reply(WELCOME);
+  const socket = last();
+  l.fail("Install and enable the French translation module.");
+  assert.ok(socket.closed);
+  assert.deepEqual(l.status, {
+    state: "refused",
+    reason: "module",
+    message: "Install and enable the French translation module.",
+  });
 });
