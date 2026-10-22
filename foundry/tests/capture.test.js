@@ -87,6 +87,19 @@ test("a reload mid-session loses no observation", () => {
   assert.deepEqual(after.pending(), []);
 });
 
+test("a Retry without a reload resends what was held while disconnected, once", () => {
+  const capture = createCapture({ store: storage() });
+  const theCore = core();
+  capture.setSession(1);
+  capture.connect(theCore.link(capture));
+  capture.disconnect(); // the bridge closed
+  const held = capture.observe(chat);
+  assert.equal(theCore.recorded.size, 0);
+  capture.connect(theCore.link(capture)); // the next welcome
+  assert.deepEqual([...theCore.recorded.keys()], [held?.id]);
+  assert.deepEqual(capture.pending(), []);
+});
+
 test("only what the whole table saw has players visibility", () => {
   const gm = { isGM: true };
   const player = { isGM: false };

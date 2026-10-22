@@ -1,7 +1,7 @@
 // The module's half of the handshake (docs/contracts/foundry-bridge.md), against the contract's schema.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { connect, coreUrl, hello } from "../secondchair-foundry/scripts/bridge.js";
+import { connect, coreUrl, createLink, hello } from "../secondchair-foundry/scripts/bridge.js";
 
 import { validMessage as valid } from "./schema.js";
 
@@ -11,6 +11,7 @@ class FakeSocket extends EventTarget {
   static opened = [];
   /** @type {string[]} */
   sent = [];
+  closed = false;
   /** @param {string} url */
   constructor(url) {
     super();
@@ -24,6 +25,10 @@ class FakeSocket extends EventTarget {
   /** @param {object} message */
   reply(message) {
     this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(message) }));
+  }
+  close() {
+    this.closed = true;
+    this.dispatchEvent(new Event("close"));
   }
 }
 
@@ -97,7 +102,198 @@ test("a socket that opens or closes in time is never reported as pending", (t) =
   opened.socket.dispatchEvent(new Event("open"));
   const closed = dial();
   closed.socket.dispatchEvent(new Event("close"));
-  t.mock.timers.tick(10000);
+  t.mock.timers.tick(9999); // within the reply timeout, which the next tests cover
   assert.deepEqual(opened.calls, []);
   assert.deepEqual(closed.calls, ["unreachable"]);
+});
+
+const WELCOME = { type: "welcome", protocol: "0.1.0", campaign: "c1", campaign_language: "fr" };
+
+/** A link to a fake Core; the hello is rebuilt from `bound` at each dial. */
+function link() {
+  /** @type {string[]} */
+  const statuses = [];
+  /** @type {string[]} */
+  const welcomed = [];
+  const bound = { campaign: "", port: 7240, token: "t0k3n" };
+  const l = createLink({
+    url: () => coreUrl(bound.port),
+    hello: () => hello({ token: bound.token, world: "w", campaign: bound.campaign }),
+    onWelcome: (welcome) => welcomed.push(welcome.campaign),
+    onStatus: (status) => statuses.push(status.state),
+    WebSocketImpl: /** @type {typeof WebSocket} */ (/** @type {unknown} */ (FakeSocket)),
+  });
+  const last = () => /** @type {FakeSocket} */ (FakeSocket.opened.at(-1));
+  return { l, statuses, welcomed, bound, last };
+}
+
+test("Retry dials the port and token set since, and the notice names the URL dialed", () => {
+  const { l, bound, last } = link();
+  bound.port = 7250;
+  l.dial();
+  assert.equal(last().url, "ws://127.0.0.1:7250/foundry");
+  last().close();
+  assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7250/foundry" });
+  bound.port = 7240; // the GM fixes the port in the settings, no reload
+  bound.token = "n3w";
+  l.dial();
+  assert.equal(last().url, "ws://127.0.0.1:7240/foundry");
+  last().dispatchEvent(new Event("open"));
+  assert.equal(JSON.parse(last().sent[0]).token, "n3w");
+  last().close();
+  assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7240/foundry" });
+});
+
+test("a mistyped port is reported and does not block the Retry after it is fixed", () => {
+  for (const port of [Number.NaN, 99999, -1, 0, 72.4, "abc"]) {
+    const { l, statuses, bound, last } = link();
+    bound.port = /** @type {number} */ (port);
+    const before = FakeSocket.opened.length;
+    assert.equal(l.dial(), true);
+    assert.equal(FakeSocket.opened.length, before, `${port}: no socket`);
+    assert.equal(l.status?.state, "unreachable", String(port));
+    assert.match(/** @type {{error: string}} */ (l.status).error, /from 1 to 65535/);
+    assert.deepEqual(statuses, ["dialing", "unreachable"]);
+    bound.port = 7240;
+    assert.equal(l.dial(), true, `${port}: Retry dials once the port is fixed`);
+    assert.equal(last().url, "ws://127.0.0.1:7240/foundry");
+  }
+});
+
+test("a URL the WebSocket refuses at once is unreachable, not a dial stuck in flight", () => {
+  const l = createLink({
+    url: () => coreUrl(7240),
+    hello: () => hello({ token: "t", world: "w" }),
+    onWelcome: () => {},
+    onStatus: () => {},
+    WebSocketImpl: /** @type {typeof WebSocket} */ (
+      /** @type {unknown} */ (
+        class {
+          constructor() {
+            throw new SyntaxError("The URL is invalid.");
+          }
+        }
+      )
+    ),
+  });
+  assert.equal(l.dial(), true);
+  assert.deepEqual(l.status, {
+    state: "unreachable",
+    url: "ws://127.0.0.1:7240/foundry",
+    error: "The URL is invalid.",
+  });
+  assert.equal(l.dial(), true, "Retry is not refused");
+});
+
+test("Retry dials an unreachable Core again, with no reload, and never on its own", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { l, statuses, welcomed, bound, last } = link();
+  const before = FakeSocket.opened.length;
+  assert.equal(l.dial(), true);
+  last().close(); // closed during the dial: unreachable, not stuck dialing
+  assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7240/foundry" });
+  t.mock.timers.tick(60000);
+  assert.equal(FakeSocket.opened.length, before + 1, "no dial without a Retry");
+  bound.campaign = "c1"; // bound by a welcome meanwhile: the next hello carries it
+  assert.equal(l.dial(), true);
+  last().dispatchEvent(new Event("open"));
+  assert.equal(JSON.parse(last().sent[0]).campaign, "c1");
+  last().reply(WELCOME);
+  assert.deepEqual(statuses, ["dialing", "unreachable", "dialing", "connected"]);
+  assert.deepEqual(welcomed, ["c1"]);
+});
+
+test("a double click on Retry dials once; a connected link is not dialed again", () => {
+  const { l, statuses, last } = link();
+  const before = FakeSocket.opened.length;
+  assert.equal(l.dial(), true);
+  assert.equal(l.dial(), false);
+  assert.equal(FakeSocket.opened.length, before + 1);
+  assert.deepEqual(statuses, ["dialing"], "no second status for an ignored dial");
+  last().reply(WELCOME);
+  assert.equal(l.dial(), false);
+  assert.equal(FakeSocket.opened.length, before + 1);
+});
+
+test("a refusal, busy included, keeps the Core's reason and message and allows a Retry", () => {
+  const { l, last } = link();
+  l.dial();
+  const message = "Another GM client is already connected to this campaign; close it first.";
+  last().reply({ type: "refused", reason: "busy", message });
+  last().close(); // the Core closes after refusing: still refused, not unreachable
+  assert.deepEqual(l.status, { state: "refused", reason: "busy", message });
+  assert.equal(l.dial(), true);
+  assert.equal(l.status?.state, "dialing");
+});
+
+test("a reply that is not a welcome nor a refusal closes the socket as malformed", () => {
+  for (const data of [
+    "not json",
+    "null",
+    "42",
+    '"welcome"',
+    "[]",
+    '{"type": "hello"}',
+    '{"type": "refused"}', // no reason: never shown as "undefined"
+  ]) {
+    const { l, last } = link();
+    l.dial();
+    last().dispatchEvent(new MessageEvent("message", { data }));
+    assert.equal(l.status?.state, "refused", data);
+    assert.equal(/** @type {{reason: string}} */ (l.status).reason, "malformed", data);
+    assert.doesNotMatch(/** @type {{message: string}} */ (l.status).message, /undefined/);
+    assert.ok(last().closed, data);
+    assert.equal(l.dial(), true, `${data}: Retry is offered`);
+  }
+});
+
+test("an open socket that never answers the hello is unreachable, so Retry is offered", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { l, statuses, last } = link();
+  l.dial();
+  last().dispatchEvent(new Event("open"));
+  t.mock.timers.tick(9999);
+  assert.equal(l.status?.state, "dialing");
+  t.mock.timers.tick(1);
+  assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7240/foundry" });
+  assert.ok(last().closed);
+  assert.deepEqual(statuses, ["dialing", "unreachable"], "reported once, close included");
+  last().reply(WELCOME); // too late: ignored
+  assert.equal(l.status?.state, "unreachable");
+});
+
+test("an answer in time stops the reply timeout", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { l, last } = link();
+  l.dial();
+  last().dispatchEvent(new Event("open"));
+  last().reply(WELCOME);
+  t.mock.timers.tick(60000);
+  assert.equal(l.status?.state, "connected");
+  assert.equal(last().closed, false);
+});
+
+test("a connection that closes is lost, and Reconnect dials again", () => {
+  const { l, statuses, last } = link();
+  l.dial();
+  last().reply(WELCOME);
+  last().close();
+  assert.equal(l.status?.state, "lost");
+  assert.equal(l.dial(), true);
+  last().reply(WELCOME);
+  assert.deepEqual(statuses, ["dialing", "connected", "lost", "dialing", "connected"]);
+});
+
+test("a welcomed connection the module drops says why, not that it was lost", () => {
+  const { l, last } = link();
+  l.dial();
+  last().reply(WELCOME);
+  const socket = last();
+  l.fail("Install and enable the French translation module.");
+  assert.ok(socket.closed);
+  assert.deepEqual(l.status, {
+    state: "refused",
+    reason: "module",
+    message: "Install and enable the French translation module.",
+  });
 });

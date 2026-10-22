@@ -1,6 +1,6 @@
 // secondchair-foundry: the active GM's browser dials the loopback Core (ADR 0010).
 import { aboveCeiling, CEILING, createActions, missingTranslation } from "./actions.js";
-import { connect, coreUrl, hello } from "./bridge.js";
+import { coreUrl, createLink, hello } from "./bridge.js";
 import { createCapture, visibilityOf } from "./capture.js";
 import { createDesk, deskHtml, esc } from "./desk.js";
 import {
@@ -160,9 +160,13 @@ const isActiveGM = () => game.user.isGM && game.users.activeGM?.id === game.user
 /** The ceiling as this client last saw it, to record each change's before. */
 let ceiling = CEILING.default;
 
-/** The Director's Desk's link to the Core, once connected (ARC-14). */
+/** The Director's Desk's link to the Core, once first connected (ARC-14). */
 /** @type {ReturnType<typeof createDesk> | null} */
 let desk = null;
+
+/** This client's link to the Core, in the active GM's client with a token only. */
+/** @type {ReturnType<typeof createLink> | null} */
+let link = null;
 
 /** The Director's Desk window, a minimal panel with no tabs, for the GM only (ARC-13, ARC-14). */
 class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
@@ -192,13 +196,14 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
         }
       },
       dismiss: () => desk?.dismissPile(),
+      // Retry or Reconnect: one dial, ignored while one is in flight (a double click).
+      retry: () => link?.dial(),
     },
   };
 
   async _renderHTML() {
-    if (desk?.closed && game.user.isGM)
-      return "<p>Not connected to the Core: reload the world to connect again.</p>";
     return deskHtml({
+      link: link?.status ?? null,
       isGM: game.user.isGM,
       state: desk?.state ?? null,
       pile: desk?.pile ?? null,
@@ -230,6 +235,14 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
 
 /** @type {DirectorsDesk | null} */
 let deskWindow = null;
+
+/** Why this client is not connected to the Core, as a warning. */
+function notConnected() {
+  if (!String(game.settings.get(MODULE, "token") ?? ""))
+    return "SecondChair: no Core token. Run `secondchair token` on the computer running the Core and paste the token into this module's settings.";
+  if (!link) return "SecondChair: not connected to the Core: only the active GM's client connects.";
+  return "SecondChair: not connected to the Core; Shift+D to reconnect.";
+}
 
 /** Show the Desk, or refresh it when open; only ever for a GM (ARC-13). */
 function showDesk(force = false) {
@@ -265,12 +278,11 @@ Hooks.once("init", () => {
   });
   game.settings.register(MODULE, "port", {
     name: "Core port",
-    hint: "The port `secondchair serve` listens on, on this computer's loopback (127.0.0.1).",
+    hint: "The port `secondchair serve` listens on, on this computer's loopback (127.0.0.1). Used at the next connection: Retry on the Director's Desk.",
     scope: "client",
     config: true,
     type: Number,
     default: 7240,
-    requiresReload: true,
   });
   // Consent to behaviour traces (TRC-01) is kept per user in this browser, so nobody else can
   // give it. This setting is only its checkbox: `ready` aligns it with the user signed in here.
@@ -345,8 +357,9 @@ Hooks.once("init", () => {
     editable: [{ key: "KeyD", modifiers: ["Shift"] }],
     restricted: true,
     onDown: () => {
-      if (desk && !desk.closed) showDesk(true);
-      else ui.notifications.warn("SecondChair: not connected to the Core.");
+      // Disconnected, the Desk says why and offers Retry.
+      if (link) showDesk(true);
+      else ui.notifications.warn(notConnected());
       return true;
     },
   });
@@ -357,7 +370,7 @@ Hooks.once("init", () => {
     restricted: true,
     onDown: () => {
       if (!desk || desk.closed) {
-        ui.notifications.warn("SecondChair: not connected to the Core.");
+        ui.notifications.warn(notConnected());
         return true;
       }
       showDesk(true);
@@ -388,122 +401,142 @@ Hooks.once("ready", () => {
   }
   watch();
   adapter?.observe?.((event) => capture.observe(event));
-  const url = coreUrl(Number(game.settings.get(MODULE, "port")));
-  const campaign = String(game.settings.get(MODULE, "campaign") ?? "");
-  // ponytail: no reconnection yet; reload the world to dial again.
-  connect({
-    url,
-    hello: hello({ token, world: game.world.id, campaign }),
-    onWelcome: async (welcome, socket) => {
-      const language = welcome.campaign_language;
-      const active = (/** @type {string} */ id) => game.modules.get(id)?.active === true;
-      const missing = missingTranslation(adapter, language, active);
-      if (missing) {
-        socket.close();
-        ui.notifications.error(`SecondChair: ${missing}`, { permanent: true });
-        return;
-      }
-      const actions = createActions({
-        language: () => language,
-        resolve: async (uuid) => /** @type {Doc | null} */ (await fromUuid(uuid)),
-        // Handled requests live on the GM user, so a reload still knows them (BVE-02).
-        store: {
-          load: () => /** @type {unknown[]} */ (game.user.getFlag(MODULE, "requests") ?? []),
-          save: (list) => game.user.setFlag(MODULE, "requests", list),
-        },
-        adapter: () => adapter,
-        // Read at each request, so a change applies at once (DEL-19).
-        ceiling: () => game.settings.get(MODULE, "ceiling"),
-        // In character, as the token, to the whole table.
-        say: (token, line) => post({ speaker: ChatMessage.getSpeaker({ token }) }, line),
-        // To one player only: a whisper, which capture observes as not seen by the table (CAP-08).
-        tell: (user, line) => post({ whisper: [user.id] }, line),
-        reads: genericReads({
-          browse: async (source, path, options) => {
-            const picker = foundry.applications.apps?.FilePicker?.implementation ?? FilePicker;
-            return picker.browse(source, path, options);
-          },
-          packs: () => game.packs,
-          origin: location.origin,
-          system: () => {
-            const translations = adapter?.translations ?? {};
-            const id = translations[language] ?? translations[language.split("-")[0].toLowerCase()];
-            return {
-              id: game.system.id,
-              version: game.system.version,
-              translation: id ? (game.modules.get(id)?.title ?? id) : null,
-            };
-          },
-          // Foundry's texture loader takes images and videos alike (a .webm map).
-          imageSize: async (path) => {
-            const texture = await foundry.canvas.loadTexture(path);
-            if (!texture) throw new Error(`Cannot load ${path} in the GM's client.`);
-            return { width: texture.width, height: texture.height };
-          },
-          documents: (type) => (type === "Scene" ? game.scenes : collection(type)),
-          fromUuid: async (uuid) => /** @type {Doc | null} */ (await fromUuid(uuid)),
-        }),
-      });
-      /** The calls due now the Desk already showed. @type {Set<number>} */
-      let seen = new Set();
-      desk = createDesk({
-        send: (message) => socket.send(JSON.stringify(message)),
-        isGM: () => game.user.isGM,
-        // A new call due now opens the Desk: it is an interruption (DEL-33).
-        onChange: () => {
-          const due = (desk?.state?.calls ?? []).map((c) => c.id);
-          const fresh = due.some((id) => !seen.has(id));
-          seen = new Set(due);
-          showDesk(fresh);
-        },
-      });
-      socket.addEventListener("message", async (event) => {
-        try {
-          const message = JSON.parse(String(event.data));
-          if (desk?.receive(message)) return;
-          if (message.type === "request")
-            socket.send(JSON.stringify(await asSecondChair(() => actions.handle(message))));
-          else if (message.type === "read")
-            socket.send(JSON.stringify(await actions.read(message)));
-          else if (message.type === "session") capture.setSession(message.session);
-          else if (message.type === "ack") {
-            if (!message.ok) console.error("SecondChair: observation refused:", message.error);
-            capture.ack(message.id);
-          } else if (message.type === "realise" || message.type === "realise_document")
-            socket.send(JSON.stringify(await asSecondChair(() => realiseOne(message))));
-        } catch (error) {
-          // A malformed frame or a closed socket: the Core times the request out as failed.
-          console.error("SecondChair:", error);
-        }
-      });
-      socket.addEventListener("close", () => {
-        capture.disconnect();
-        core = null;
-        desk?.close();
-        showDesk();
-      });
-      core = socket;
-      capture.connect((message) => socket.send(JSON.stringify(message)));
-      if (campaign !== welcome.campaign) {
-        await game.settings.set(MODULE, "campaign", welcome.campaign);
-      }
-      ui.notifications.info("SecondChair: connected to the Core.");
-      showDesk(true);
+  link = createLink({
+    // Read at each dial: a port changed in the settings applies at the next Retry.
+    url: () => coreUrl(Number(game.settings.get(MODULE, "port"))),
+    // Built at each dial: the first welcome binds the world to its campaign (ARC-18).
+    hello: () =>
+      hello({
+        token: String(game.settings.get(MODULE, "token") ?? ""),
+        world: game.world.id,
+        campaign: String(game.settings.get(MODULE, "campaign") ?? ""),
+      }),
+    onWelcome: (welcome, socket) => {
+      welcomed(welcome, socket).catch((/** @type {unknown} */ error) =>
+        console.error("SecondChair:", error),
+      );
     },
-    onRefused: (refusal) =>
-      ui.notifications.error(`SecondChair: ${refusal.message}`, { permanent: true }),
+    // A failed dial (the first, or a Retry) opens the Desk on why, with one action (#196 S2).
+    // A drop mid-session does not: nothing appears on the Desk unasked but calls (ADR 0020).
+    onStatus: (status) => {
+      if (status.state === "lost") {
+        showDesk();
+        ui.notifications.warn("SecondChair: disconnected from the Core; Shift+D to reconnect.");
+      } else showDesk(status.state !== "dialing" && status.state !== "connected");
+    },
     // Chromium holds the socket while its local-network prompt is open (PKG-11).
     onPending: () =>
       ui.notifications.warn(
         "SecondChair: still waiting for the Core. If the browser asks whether this site may access apps and services on this device, allow it; if you missed the prompt, allow the site in the browser's site permissions and reload.",
       ),
-    onUnreachable: () =>
-      ui.notifications.error(
-        `SecondChair: cannot reach the Core at ${url}. Is \`secondchair serve\` running on this computer? If the browser asked whether this site may access local devices, allow it and reload.`,
-        { permanent: true },
-      ),
   });
+  link.dial();
 });
+
+/** The calls due now the Desk already showed. @type {Set<number>} */
+let seen = new Set();
+
+/**
+ * Set up a connection the Core welcomed: requests, the Desk, held observations resent.
+ * @param {import("./bridge.js").Welcome} welcome @param {WebSocket} socket
+ */
+async function welcomed(welcome, socket) {
+  const language = welcome.campaign_language;
+  const active = (/** @type {string} */ id) => game.modules.get(id)?.active === true;
+  const missing = missingTranslation(adapter, language, active);
+  if (missing) {
+    link?.fail(missing);
+    ui.notifications.error(`SecondChair: ${missing}`, { permanent: true });
+    return;
+  }
+  const actions = createActions({
+    language: () => language,
+    resolve: async (uuid) => /** @type {Doc | null} */ (await fromUuid(uuid)),
+    // Handled requests live on the GM user, so a reload still knows them (BVE-02).
+    store: {
+      load: () => /** @type {unknown[]} */ (game.user.getFlag(MODULE, "requests") ?? []),
+      save: (list) => game.user.setFlag(MODULE, "requests", list),
+    },
+    adapter: () => adapter,
+    // Read at each request, so a change applies at once (DEL-19).
+    ceiling: () => game.settings.get(MODULE, "ceiling"),
+    // In character, as the token, to the whole table.
+    say: (token, line) => post({ speaker: ChatMessage.getSpeaker({ token }) }, line),
+    // To one player only: a whisper, which capture observes as not seen by the table (CAP-08).
+    tell: (user, line) => post({ whisper: [user.id] }, line),
+    reads: genericReads({
+      browse: async (source, path, options) => {
+        const picker = foundry.applications.apps?.FilePicker?.implementation ?? FilePicker;
+        return picker.browse(source, path, options);
+      },
+      packs: () => game.packs,
+      origin: location.origin,
+      system: () => {
+        const translations = adapter?.translations ?? {};
+        const id = translations[language] ?? translations[language.split("-")[0].toLowerCase()];
+        return {
+          id: game.system.id,
+          version: game.system.version,
+          translation: id ? (game.modules.get(id)?.title ?? id) : null,
+        };
+      },
+      // Foundry's texture loader takes images and videos alike (a .webm map).
+      imageSize: async (path) => {
+        const texture = await foundry.canvas.loadTexture(path);
+        if (!texture) throw new Error(`Cannot load ${path} in the GM's client.`);
+        return { width: texture.width, height: texture.height };
+      },
+      documents: (type) => (type === "Scene" ? game.scenes : collection(type)),
+      fromUuid: async (uuid) => /** @type {Doc | null} */ (await fromUuid(uuid)),
+    }),
+  });
+  // One Desk for every connection: it closes with the socket and reopens with the next.
+  desk ??= createDesk({
+    send: (message) => core?.send(JSON.stringify(message)),
+    isGM: () => game.user.isGM,
+    // A new call due now opens the Desk: it is an interruption (DEL-33).
+    onChange: () => {
+      const due = (desk?.state?.calls ?? []).map((c) => c.id);
+      const fresh = due.some((id) => !seen.has(id));
+      seen = new Set(due);
+      showDesk(fresh);
+    },
+  });
+  socket.addEventListener("message", async (event) => {
+    try {
+      const message = JSON.parse(String(event.data));
+      if (desk?.receive(message)) return;
+      if (message.type === "request")
+        socket.send(JSON.stringify(await asSecondChair(() => actions.handle(message))));
+      else if (message.type === "read") socket.send(JSON.stringify(await actions.read(message)));
+      else if (message.type === "session") capture.setSession(message.session);
+      else if (message.type === "ack") {
+        if (!message.ok) console.error("SecondChair: observation refused:", message.error);
+        capture.ack(message.id);
+      } else if (message.type === "realise" || message.type === "realise_document")
+        socket.send(JSON.stringify(await asSecondChair(() => realiseOne(message))));
+    } catch (error) {
+      // A malformed frame or a closed socket: the Core times the request out as failed.
+      console.error("SecondChair:", error);
+    }
+  });
+  socket.addEventListener("close", () => {
+    capture.disconnect();
+    if (core === socket) core = null;
+    // Gestures still waiting fail; the Desk shows Reconnect.
+    desk?.close();
+    showDesk();
+  });
+  core = socket;
+  desk.reopen();
+  // Whatever was held while disconnected is resent now (CAP-03).
+  capture.connect((message) => socket.send(JSON.stringify(message)));
+  if (String(game.settings.get(MODULE, "campaign") ?? "") !== welcome.campaign) {
+    await game.settings.set(MODULE, "campaign", welcome.campaign);
+  }
+  ui.notifications.info("SecondChair: connected to the Core.");
+  showDesk(true);
+}
 
 /** Scenes and documents are realised one at a time. */
 /** @type {Promise<unknown>} */
