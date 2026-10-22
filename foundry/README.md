@@ -8,7 +8,7 @@
 2. Run `secondchair token` and copy the token it prints. It is created once and kept in `~/.config/secondchair/foundry-token`, readable only by you.
 3. In Foundry's setup screen, **Install Module** and paste the manifest URL:
    `https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry/module.json`
-4. Enable the module in your world. As GM, open **Configure Settings → SecondChair**, paste the token into **Core token**, and set **Core port** if you changed it from 7240. Both settings stay in this browser only.
+4. Enable the module in your world. As GM, open **Configure Settings → SecondChair**, paste the token into **Core token**, and set **Core port** if you changed it from 7240. Both settings stay in this browser only. A port changed later applies at the next **Retry** on the Director's Desk, with no reload.
 5. Reload. A notification says "connected to the Core", or why the Core refused.
 6. For a Pathfinder Second Edition world, also install **SecondChair for Pathfinder Second Edition** from its manifest URL,
    `https://raw.githubusercontent.com/Hugo-Grellier/SecondChair/main/foundry/secondchair-foundry-pf2e/module.json`,

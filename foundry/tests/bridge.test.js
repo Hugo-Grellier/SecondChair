@@ -115,10 +115,10 @@ function link() {
   const statuses = [];
   /** @type {string[]} */
   const welcomed = [];
-  const bound = { campaign: "" };
+  const bound = { campaign: "", port: 7240, token: "t0k3n" };
   const l = createLink({
-    url: coreUrl(7240),
-    hello: () => hello({ token: "t0k3n", world: "w", campaign: bound.campaign }),
+    url: () => coreUrl(bound.port),
+    hello: () => hello({ token: bound.token, world: "w", campaign: bound.campaign }),
     onWelcome: (welcome) => welcomed.push(welcome.campaign),
     onStatus: (status) => statuses.push(status.state),
     WebSocketImpl: /** @type {typeof WebSocket} */ (/** @type {unknown} */ (FakeSocket)),
@@ -126,6 +126,23 @@ function link() {
   const last = () => /** @type {FakeSocket} */ (FakeSocket.opened.at(-1));
   return { l, statuses, welcomed, bound, last };
 }
+
+test("Retry dials the port and token set since, and the notice names the URL dialed", () => {
+  const { l, bound, last } = link();
+  bound.port = 7250;
+  l.dial();
+  assert.equal(last().url, "ws://127.0.0.1:7250/foundry");
+  last().close();
+  assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7250/foundry" });
+  bound.port = 7240; // the GM fixes the port in the settings, no reload
+  bound.token = "n3w";
+  l.dial();
+  assert.equal(last().url, "ws://127.0.0.1:7240/foundry");
+  last().dispatchEvent(new Event("open"));
+  assert.equal(JSON.parse(last().sent[0]).token, "n3w");
+  last().close();
+  assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7240/foundry" });
+});
 
 test("Retry dials an unreachable Core again, with no reload, and never on its own", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });

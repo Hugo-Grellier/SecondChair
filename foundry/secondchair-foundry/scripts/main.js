@@ -278,12 +278,11 @@ Hooks.once("init", () => {
   });
   game.settings.register(MODULE, "port", {
     name: "Core port",
-    hint: "The port `secondchair serve` listens on, on this computer's loopback (127.0.0.1).",
+    hint: "The port `secondchair serve` listens on, on this computer's loopback (127.0.0.1). Used at the next connection: Retry on the Director's Desk.",
     scope: "client",
     config: true,
     type: Number,
     default: 7240,
-    requiresReload: true,
   });
   // Consent to behaviour traces (TRC-01) is kept per user in this browser, so nobody else can
   // give it. This setting is only its checkbox: `ready` aligns it with the user signed in here.
@@ -403,7 +402,8 @@ Hooks.once("ready", () => {
   watch();
   adapter?.observe?.((event) => capture.observe(event));
   link = createLink({
-    url: coreUrl(Number(game.settings.get(MODULE, "port"))),
+    // Read at each dial: a port changed in the settings applies at the next Retry.
+    url: () => coreUrl(Number(game.settings.get(MODULE, "port"))),
     // Built at each dial: the first welcome binds the world to its campaign (ARC-18).
     hello: () =>
       hello({

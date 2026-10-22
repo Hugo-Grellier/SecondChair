@@ -105,8 +105,9 @@ export function connect({
  * The GM client's link to the Core: one dial at a time, and a new one only when asked (the
  * Desk's Retry), so a Core that is down or refuses is never dialed in a loop.
  * @param {object} args
- * @param {string} args.url
+ * @param {() => string} args.url  read at each dial, so a Retry follows a changed port
  * @param {() => Hello} args.hello  built at each dial, so it carries the campaign bound since
+ *   and a changed token
  * @param {(welcome: Welcome, socket: WebSocket) => void} args.onWelcome
  * @param {(status: LinkStatus) => void} args.onStatus
  * @param {() => void} [args.onPending]
@@ -130,8 +131,9 @@ export function createLink({ url, hello, onWelcome, onStatus, onPending, WebSock
     dial() {
       if (status?.state === "dialing" || status?.state === "connected") return false;
       set({ state: "dialing" });
+      const dialed = url();
       connect({
-        url,
+        url: dialed,
         hello: hello(),
         onPending,
         WebSocketImpl,
@@ -150,7 +152,7 @@ export function createLink({ url, hello, onWelcome, onStatus, onPending, WebSock
             reason: String(refusal.reason),
             message: String(refusal.message),
           }),
-        onUnreachable: () => set({ state: "unreachable", url }),
+        onUnreachable: () => set({ state: "unreachable", url: dialed }),
       });
       return true;
     },
