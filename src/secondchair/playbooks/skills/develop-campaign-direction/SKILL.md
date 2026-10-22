@@ -38,9 +38,9 @@ The GM may ask for any of them, in any order, or skip them. Do only what was ask
    - Accidental railroading: a step that only works if the party does one thing.
    - Payoff without setup: a payoff with no earlier appearance to prepare it.
    - Unearned revelations: a secret revealed without causes the party could have met.
-4. **Choice**: the GM adopts one pitch (status `adopted`; at most one per set), rejects others or merges several into a new note, always with the GM's reason in `reason`. Change a status only at the GM's word. A merge is a new note that `supersedes` its sources.
+4. **Choice**: the GM adopts one pitch (status `adopted`; at most one per set), rejects others or merges several into a new note, always with the GM's reason in `reason`. Change a status only at the GM's word. A merge is a new note that `supersedes` its sources and keeps `alternatives: campaign-direction`.
 5. **Outline**: from the adopted pitch, `notes/direction/outline.md` (status `draft`, `cites` the adopted pitch's canon ids). Arcs are pressures and open questions, not plots. Each revelation is linked to its causes and to at least two ways the players could reach it. Never write a fixed ending. Then, only if the GM wants it, a short **campaign primer** for session zero: what the players may know (premise, tone, the promise, how to make a character, the safety tools the brief names), written with `write_prep` at `campaign-primer.md`. Check every line the players will read with `check_audience_content` for the `party` audience, citing the facts it uses; rewrite what is refused. The primer holds no secret, no twist and no hint of the outline's revelations.
-6. **Revision**: never edit an adopted or rejected note in place. Write a new note with `supersedes: [<old id>]` and the GM's `reason`; the old note becomes `superseded` at the GM's word. Git keeps the history.
+6. **Revision**: never edit an adopted or rejected note in place. Write a new note that keeps `alternatives: campaign-direction`, with `supersedes: [<old id>]` and the GM's `reason`; the old note becomes `superseded` at the GM's word. Git keeps the history.
 
 ## Closing
 

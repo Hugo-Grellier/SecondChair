@@ -36,6 +36,10 @@ Also read, when they exist: earlier handoffs (`prep/session-*/handoff.md`), the 
 4. **The NPCs** likely to appear: their facts, their goals, and for each what they know and do not know (`what_knows` with their id). Check any line a player will hear with `check_audience_content` before you write it as a player-facing line.
 5. **Sources**: when the reference library is available, search it (`search_campaign_library`) for the setting and rules details the scenes need, and cite filename and page. A Source informs prep; it never overrides canon. Show a conflict with both provenances.
 
+## Plan first
+
+Once you have read the inputs and "What canon says" above, and before you write the handoff or touch Foundry, show the GM one short list: the scenes you will plan (a line each) and the Foundry material you will prepare (scenes, NPC actors, journals, handouts, treasure, playlists), then stop and wait for their go, change or no. Run interactively (the GM asked in conversation: there is no job id): this stop is required, and nothing is written before the answer. Run as a job (you were given a job id, no GM): do not stop; put the same list at the top of the handoff's open questions and proceed. The rest of this playbook, its checks and its delegation rules, is unchanged.
+
 ## The handoff
 
 Write it with `write_prep` at `session-<n>/handoff.md`, in Markdown, organised for reading at the table: short sections, headings the GM can jump to, bullet points over prose, bold for what must not be missed. Mark everything canon does not already hold as a proposal (for example *(proposition)*), so the GM sees at a glance what is decided and what is yours. Prep is not canon: what is played becomes canon at the wrap.

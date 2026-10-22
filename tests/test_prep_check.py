@@ -169,3 +169,26 @@ def test_the_playbook_is_a_standard_prep_task() -> None:
 
     meta = runner.playbook("prepare-an-adventure")
     assert (meta["tier"], meta["responsibility"]) == ("standard", "prep")
+
+
+def test_adventure_and_session_playbooks_onboard_the_gm() -> None:
+    """A title (never a path), one up-front question, a plan before the deep run."""
+    from secondchair import runner
+
+    assert "session_count?" in runner.playbook("prepare-an-adventure")["inputs"]
+    skills = {s.name: (s / "SKILL.md").read_text() for s in runner.skills()}
+    adventure = skills["prepare-an-adventure"]
+    assert "never invent a path" in adventure and "## Ask once, up front" in adventure
+    assert "check_prep_guide" in adventure
+    session = skills["prepare-a-session"]
+    assert "## Plan first" in session and "check_audience_content" in session
+    assert "call `finish_job` listing the candidate titles" in adventure
+    assert "starts with `notes/` and ends in `.md`" in adventure
+    assert "write no encounter blocks" in adventure
+    assert "there is no job id" in session
+    assert session.index("## What canon says") < session.index("## Plan first")
+    assert session.index("## Plan first") < session.index("## The handoff")
+    assert "or a note that `supersedes` one that had it" in adventure
+    assert "leaving out any note that another note `supersedes`" in adventure
+    direction = skills["develop-campaign-direction"]
+    assert direction.count("keeps `alternatives: campaign-direction`") == 2
