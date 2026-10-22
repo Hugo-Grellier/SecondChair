@@ -669,7 +669,7 @@ def ready(ws: Workspace, context: object = CONTEXT) -> dict:
 
 
 def failing(card: dict) -> list[str]:
-    return [c["check"] for c in card["checks"] if not c["ok"]]
+    return [c["check"] for c in card["checks"] if c["ok"] is False]
 
 
 def test_a_ready_connection_passes_every_check_and_writes_nothing(
@@ -725,9 +725,9 @@ SERVED = ".secondchair/serve.json"
         ("snapshot", CONTEXT, _write(SNAPSHOT, "{")),
         ("agent_host", CONTEXT, lambda ws: (ws.root / SERVED).unlink()),
         ("agent_host", CONTEXT, _write(SERVED, "[")),
-        ("agent_host", CONTEXT, _home(".claude.json", "{oops")),
+        ("agent_host", CONTEXT, _write(SERVED, '{"port": true}')),  # a bool is no port
+        ("agent_host", CONTEXT, _write(SERVED, "[" * 100_000 + "]" * 100_000)),  # recursion
         ("agent_host", CONTEXT, _home(".claude.json", '{"mcpServers": {}}')),
-        ("agent_host", CONTEXT, _home(".claude.json", None)),
         ("agent_host", CONTEXT, _home("bin/claude", None)),
     ],
 )
@@ -757,10 +757,43 @@ def test_the_card_carries_no_token_host_content_or_path_outside_the_workspace(
     (ws.root / "foundry.yaml").write_text("world: [" + FOUNDRY_TOKEN)
     (ws.root / SNAPSHOT).write_text("{" + HOST_SECRET)
     card = ready(ws, CONTEXT | {"system": "dnd5e", "modules": {}})
-    assert failing(card) == [c["check"] for c in card["checks"] if c["check"] != "adapter"]
+    assert failing(card) == ["binding", "adapter_version", "system", "snapshot"]
+    assert card["checks"][-1]["ok"] is None  # the host file cannot tell
     for shown in (passing, json.dumps(card)):
         for secret in secrets:
             assert secret not in shown, secret
+
+
+@pytest.mark.parametrize("host_file", ["{oops", None])
+def test_an_unverifiable_agent_host_says_so_and_leaves_the_card_ready(
+    ws: Workspace, machine: Path, host_file: str | None
+) -> None:
+    _home(".claude.json", host_file)(ws)
+    card = ready(ws)
+    assert (card["ready"], failing(card)) == (True, [])
+    host = card["checks"][-1]
+    assert (host["check"], host["ok"]) == ("agent_host", None)
+    assert host["says"].startswith("Cannot verify") and host["fix"]
+
+
+def test_values_from_the_gm_client_are_shown_as_short_text_only(
+    ws: Workspace, machine: Path
+) -> None:
+    long = "w" * 500
+    (ws.root / "foundry.yaml").write_text(yaml.safe_dump({"world": long, "campaign": "c1"}))
+    modules = {"secondchair-foundry": 123, desk.ADAPTER: "9" * 500}
+    card = desk.readiness(ws, long, CONTEXT | {"system": {"id": "pf2e"}, "modules": modules})
+    assert card is not None
+    jsonschema.validate(desk.state(ws, None, card), BRIDGE)
+    says = {c["check"]: c["says"] for c in card["checks"]}
+    assert all(len(s) < 64 + 120 for s in says.values()), says
+    assert "w" * 64 in says["binding"] and "w" * 65 not in says["binding"]
+    assert "9" * 64 in says["adapter_version"] and "9" * 65 not in says["adapter_version"]
+    assert "secondchair-foundry missing" in says["adapter_version"]
+    assert says["system"] == "The world's game system is unknown, not pf2e."
+    card = desk.readiness(ws, long, CONTEXT | {"modules": {desk.ADAPTER: ["x"]}})
+    assert card is not None
+    assert f"{desk.ADAPTER} missing differs" in card["checks"][2]["says"]
 
 
 def test_a_damaged_position_withdraws_the_readiness_card(ws: Workspace, machine: Path) -> None:

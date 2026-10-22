@@ -10,7 +10,7 @@
  * @typedef {{id: string, statement: string, mode: string, party_mode?: string}} CardFact
  * @typedef {{as_of: CueAsOf, scene: string | null, acting: string | null, npcs: {id: string, name: string, shared: CardFact[], secret: CardFact[]}[], handoff: string[], calls: {id: number, kind: string, deadline: string, text: string}[]}} SituationCard
  * @typedef {{session: number, status: "queued" | "running" | "waiting", as_of: CueAsOf}} WrapCard
- * @typedef {{check: string, ok: boolean, says: string, fix: string | null}} ReadinessCheck
+ * @typedef {{check: string, ok: boolean | null, says: string, fix: string | null}} ReadinessCheck
  * @typedef {{ready: boolean, checks: ReadinessCheck[], as_of: CueAsOf}} ReadinessCard
  * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, wrap?: WrapCard | null, readiness?: ReadinessCard | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
@@ -50,6 +50,10 @@ export function createDesk({ send, isGM, onChange }) {
   // Whether the GM opened the situation card: a view preference of this window, not domain
   // state, kept across re-renders; collapsed by default (ARC-14) and again once withdrawn.
   let cardOpen = false;
+  // Whether the GM opened or collapsed the readiness card; null until they do, the card then
+  // open only when a check failed. Reset for each new card.
+  /** @type {boolean | null} */
+  let readinessOpen = null;
   /** @type {Map<string, (result: Result) => void>} */
   const waiting = new Map();
   return {
@@ -62,6 +66,13 @@ export function createDesk({ send, isGM, onChange }) {
     /** The GM opened or collapsed the situation card. @param {boolean} open */
     setCardOpen(open) {
       cardOpen = open;
+    },
+    get readinessOpen() {
+      return readinessOpen;
+    },
+    /** The GM opened or collapsed the readiness card. @param {boolean} open */
+    setReadinessOpen(open) {
+      readinessOpen = open;
     },
     get pile() {
       return pile;
@@ -95,6 +106,7 @@ export function createDesk({ send, isGM, onChange }) {
       closed = true;
       // The readiness card was this connection's: stale once it closed (#196 S3).
       if (state?.readiness) state = { ...state, readiness: null };
+      readinessOpen = null;
       for (const [id, resolve] of waiting)
         resolve({ type: "result", id, ok: false, error: "The connection to the Core closed." });
       waiting.clear();
@@ -109,9 +121,11 @@ export function createDesk({ send, isGM, onChange }) {
     receive(message) {
       if (message.type === "desk") {
         const shown = state?.situation?.as_of.at;
+        const checked = state?.readiness?.as_of?.at;
         state = /** @type {DeskState} */ (message);
         // A withdrawn card, or a new one pulled since: collapsed again.
         if (state.situation?.as_of.at !== shown) cardOpen = false;
+        if (state.readiness?.as_of?.at !== checked) readinessOpen = null;
         onChange();
         return true;
       }
@@ -244,24 +258,29 @@ function wrapHtml(card) {
 /**
  * The readiness card (#196 S3): the Core's checks of this connection. Open by itself only when a
  * check fails, each failure with its one fix; otherwise one collapsed "ready" line the GM can
- * open. A read, with no gesture: a wrong binding is fixed where the fix says, never from here.
+ * open. A check that cannot be verified (ok null) says so with its fix and opens nothing. Once
+ * the GM opens or collapses it, `open` keeps that choice across re-renders.
+ * A read, with no gesture: a wrong binding is fixed where the fix says, never from here.
  * Not a `secondchair-card`, whose toggle the module keeps for the situation card.
- * @param {ReadinessCard | null | undefined} card
+ * @param {ReadinessCard | null | undefined} card @param {boolean | null} open
  */
-function readinessHtml(card) {
+function readinessHtml(card, open) {
   if (!card || !Array.isArray(card.checks)) return "";
-  const failed = card.checks.filter((c) => c.ok !== true).length;
+  const failed = card.checks.filter((c) => c.ok !== true && c.ok !== null).length;
+  const unverified = card.checks.filter((c) => c.ok === null).length;
   const ready = card.ready === true && failed === 0;
   const summary = ready
-    ? "<strong>Ready</strong>: every check passed at connect"
+    ? `<strong>Ready</strong>: ${unverified ? `${unverified} check${unverified === 1 ? "" : "s"} could not be verified` : "every check passed at connect"}`
     : `<strong>Not ready</strong>: ${failed || "a"} check${failed === 1 ? "" : "s"} failed`;
+  const word = (/** @type {boolean | null} */ ok) =>
+    ok === true ? "ok" : ok === null ? "cannot verify" : "<strong>failed</strong>";
   const checks = card.checks
     .map(
       (c) =>
-        `<li>${c.ok === true ? "ok" : "<strong>failed</strong>"}: ${esc(c.says)}${c.ok === true || !c.fix ? "" : `<br>Fix: ${esc(c.fix)}`}</li>`,
+        `<li>${word(c.ok)}: ${esc(c.says)}${c.ok === true || !c.fix ? "" : `<br>Fix: ${esc(c.fix)}`}</li>`,
     )
     .join("");
-  return `<details class="secondchair-readiness"${ready ? "" : " open"}>
+  return `<details class="secondchair-readiness"${(open ?? !ready) ? " open" : ""}>
 <summary>${summary} · ${ageHtml(card.as_of)}</summary>
 <ul>${checks}</ul>
 </details>
@@ -304,9 +323,18 @@ export function keyHint(bindings) {
 /**
  * The Desk's content: nothing at all for a user who is not a GM.
  * `keys` holds the bindings Foundry reports per action; absent, no hint is shown.
- * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown, cardOpen?: boolean, keys?: {desk: Binding[], situation: Binding[]}}} args
+ * `readinessOpen` is the GM's choice for the readiness card, null (absent) until they made one.
+ * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown, cardOpen?: boolean, readinessOpen?: boolean | null, keys?: {desk: Binding[], situation: Binding[]}}} args
  */
-export function deskHtml({ isGM, state, pile, ceiling, cardOpen = false, keys }) {
+export function deskHtml({
+  isGM,
+  state,
+  pile,
+  ceiling,
+  cardOpen = false,
+  readinessOpen = null,
+  keys,
+}) {
   if (!isGM) return "";
   if (!state) return "<p>Waiting for the Core…</p>";
   const live = state.moment === "live-session";
@@ -324,7 +352,7 @@ export function deskHtml({ isGM, state, pile, ceiling, cardOpen = false, keys })
   return `<section class="secondchair-desk">
 <p>Moment: ${esc(state.moment)}${live ? ` (session ${state.session})` : ""} · Ceiling: ${esc(ceiling)}${keys ? ` · Open the Desk: ${keyHint(keys.desk)}` : ""}</p>
 <p>${session} <button type="button" data-action="gesture" data-gesture="break">Break</button></p>
-${readinessHtml(state.readiness)}${wrapHtml(state.wrap)}<h3>Due now</h3>
+${readinessHtml(state.readiness, readinessOpen)}${wrapHtml(state.wrap)}<h3>Due now</h3>
 ${callsHtml(state.calls, "Nothing due now.")}
 <h3>Situation</h3>
 ${situationHtml(state.situation, cardOpen, keys ? keyHint(keys.situation) : "")}

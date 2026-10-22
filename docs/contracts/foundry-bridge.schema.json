@@ -729,7 +729,7 @@
               "properties": {
                 "ready": {
                   "type": "boolean",
-                  "description": "Every check passed. The Desk opens the card by itself only when false."
+                  "description": "No check failed (an unverified one, ok null, does not count). The Desk opens the card by itself only when false."
                 },
                 "checks": {
                   "type": "array",
@@ -745,21 +745,25 @@
                           "snapshot",
                           "agent_host"
                         ],
-                        "description": "binding: foundry.yaml names the world this client said hello with. adapter: a system adapter answered the rules context. adapter_version: secondchair-foundry-pf2e's version equals secondchair-foundry's, both from the rules context's active modules. system: the rules context's system is pf2e. snapshot: a compendium snapshot is kept. agent_host: an agent host on the Core's PATH registers the Core (as `secondchair check-setup` checks it); one that cannot be verified fails."
+                        "description": "binding: foundry.yaml names the world this client said hello with. adapter: a system adapter answered the rules context. adapter_version: secondchair-foundry-pf2e's version equals secondchair-foundry's, both from the rules context's active modules. system: the rules context's system is pf2e. snapshot: a compendium snapshot is kept. agent_host: an agent host on the Core's PATH registers the Core (as `secondchair check-setup` checks it); ok null when no host configuration can tell, false when none registers it or the Core's port cannot be read."
                       },
                       "ok": {
-                        "type": "boolean"
+                        "type": [
+                          "boolean",
+                          "null"
+                        ],
+                        "description": "true: passed. false: failed. null: cannot be verified (agent_host only, as check-setup's WARN); it does not make the card not ready."
                       },
                       "says": {
                         "type": "string",
-                        "description": "What was found, in plain words."
+                        "description": "What was found, in plain words. A value from the GM client (world id, module version, system id) appears only as text cut to 64 characters, else as missing or unknown."
                       },
                       "fix": {
                         "type": [
                           "string",
                           "null"
                         ],
-                        "description": "The one action that fixes a failed check, null when it passed."
+                        "description": "The one action that fixes a failed or unverified check, null when it passed."
                       }
                     },
                     "required": [

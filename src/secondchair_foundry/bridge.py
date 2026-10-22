@@ -13,6 +13,7 @@ import uuid
 from concurrent.futures import Future
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import yaml
 from starlette.routing import BaseRoute, WebSocketRoute
@@ -185,7 +186,7 @@ class Bridge:
             except ValueError:
                 hello = None
             campaign = self.check(hello)
-            assert isinstance(hello, dict)  # `check` passed it
+            world = cast(dict, hello)["world"]  # `check` passed it: a dict with a world
         except Refused as refused:
             await socket.send_json(
                 {"type": "refused", "reason": refused.reason, "message": str(refused)}
@@ -215,7 +216,7 @@ class Bridge:
             watch = asyncio.create_task(self._watch(socket))
             realising = asyncio.create_task(self._realise(socket))
             snapshotting = asyncio.create_task(self._snapshot(socket))
-            readying = asyncio.create_task(self._ready(hello["world"], snapshotting))
+            readying = asyncio.create_task(self._ready(world, snapshotting))
             while True:
                 try:
                     message = json.loads(await socket.receive_text())
