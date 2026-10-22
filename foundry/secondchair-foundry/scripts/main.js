@@ -236,6 +236,14 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
 /** @type {DirectorsDesk | null} */
 let deskWindow = null;
 
+/** Why this client is not connected to the Core, as a warning. */
+function notConnected() {
+  if (!String(game.settings.get(MODULE, "token") ?? ""))
+    return "SecondChair: no Core token. Run `secondchair token` on the computer running the Core and paste the token into this module's settings.";
+  if (!link) return "SecondChair: not connected to the Core: only the active GM's client connects.";
+  return "SecondChair: not connected to the Core; Shift+D to reconnect.";
+}
+
 /** Show the Desk, or refresh it when open; only ever for a GM (ARC-13). */
 function showDesk(force = false) {
   if (!game.user.isGM) return;
@@ -352,7 +360,7 @@ Hooks.once("init", () => {
     onDown: () => {
       // Disconnected, the Desk says why and offers Retry.
       if (link) showDesk(true);
-      else ui.notifications.warn("SecondChair: not connected to the Core.");
+      else ui.notifications.warn(notConnected());
       return true;
     },
   });
@@ -363,7 +371,7 @@ Hooks.once("init", () => {
     restricted: true,
     onDown: () => {
       if (!desk || desk.closed) {
-        ui.notifications.warn("SecondChair: not connected to the Core.");
+        ui.notifications.warn(notConnected());
         return true;
       }
       showDesk(true);
@@ -408,8 +416,14 @@ Hooks.once("ready", () => {
         console.error("SecondChair:", error),
       );
     },
-    // Not connected, the Desk opens on why, with one action: Retry or Reconnect (#196 S2).
-    onStatus: (status) => showDesk(status.state !== "dialing" && status.state !== "connected"),
+    // A failed dial (the first, or a Retry) opens the Desk on why, with one action (#196 S2).
+    // A drop mid-session does not: nothing appears on the Desk unasked but calls (ADR 0020).
+    onStatus: (status) => {
+      if (status.state === "lost") {
+        showDesk();
+        ui.notifications.warn("SecondChair: disconnected from the Core; Shift+D to reconnect.");
+      } else showDesk(status.state !== "dialing" && status.state !== "connected");
+    },
     // Chromium holds the socket while its local-network prompt is open (PKG-11).
     onPending: () =>
       ui.notifications.warn(

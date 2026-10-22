@@ -39,6 +39,8 @@ export function hello({ token, world, campaign }) {
  * @param {() => void} [args.onPending]  the socket is still not open after `pendingMs`, as while
  *   the browser's local-network prompt waits for an answer (PKG-11); the dial goes on
  * @param {number} [args.pendingMs]
+ * @param {number} [args.replyMs]  an open socket with no answer by then is closed, as unreachable:
+ *   whatever accepted it is not a Core that answers
  * @param {typeof WebSocket} [args.WebSocketImpl]
  */
 export function connect({
@@ -49,31 +51,50 @@ export function connect({
   onUnreachable,
   onPending = () => {},
   pendingMs = 5000,
+  replyMs = 10000,
   WebSocketImpl = WebSocket,
 }) {
   const socket = new WebSocketImpl(url);
   let answered = false;
   const pending = setTimeout(onPending, pendingMs);
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let silent;
   socket.addEventListener("open", () => {
     clearTimeout(pending);
     socket.send(JSON.stringify(hello));
+    silent = setTimeout(() => {
+      if (answered) return;
+      answered = true;
+      onUnreachable();
+      socket.close();
+    }, replyMs);
   });
   socket.addEventListener("message", (event) => {
     if (answered) return;
     answered = true;
+    clearTimeout(silent);
     /** @type {any} */
-    let reply;
+    let reply = null;
     try {
       reply = JSON.parse(String(event.data));
-    } catch {
-      reply = { type: "refused", reason: "malformed", message: "The Core sent a malformed reply." };
-      socket.close();
-    }
-    if (reply.type === "welcome") onWelcome(reply, socket);
-    else onRefused(reply);
+    } catch {}
+    const object = typeof reply === "object" && reply !== null;
+    if (object && reply.type === "welcome") return onWelcome(reply, socket);
+    // A refusal the Core closes itself; anything else is not a Core this module understands.
+    socket.close();
+    if (object && reply.type === "refused" && typeof reply.reason === "string")
+      onRefused({ type: "refused", reason: reply.reason, message: String(reply.message ?? "") });
+    else
+      onRefused({
+        type: "refused",
+        reason: "malformed",
+        message:
+          "The Core sent a reply this module does not understand: install matching versions of SecondChair and its module.",
+      });
   });
   socket.addEventListener("close", () => {
     clearTimeout(pending);
+    clearTimeout(silent);
     if (!answered) onUnreachable();
     answered = true;
   });

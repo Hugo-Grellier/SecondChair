@@ -268,7 +268,7 @@ test("disconnected, the Desk names the cause and offers one action", () => {
   assert.doesNotMatch(odd, /<i>/);
 
   const lost = html({ state: "lost" });
-  assert.match(lost, /reconnecting realises them all again/);
+  assert.match(lost, /Anything prepared while disconnected reaches the world when you reconnect/);
   assert.match(lost, />Reconnect</);
   assert.deepEqual(actions(lost), ["retry"]);
 

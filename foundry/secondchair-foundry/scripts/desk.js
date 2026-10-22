@@ -352,7 +352,7 @@ ${retry("Retry")}`;
 ${link.reason === "world" ? `${REBIND}\n` : ""}${retry("Retry")}`;
     }
     case "lost":
-      return `<p><strong>Disconnected from the Core.</strong> Prepared scenes and documents changed since are not in the world yet: reconnecting realises them all again.</p>
+      return `<p><strong>Disconnected from the Core.</strong> Anything prepared while disconnected reaches the world when you reconnect.</p>
 ${retry("Reconnect")}`;
     default:
       return "";

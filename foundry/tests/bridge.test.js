@@ -102,7 +102,7 @@ test("a socket that opens or closes in time is never reported as pending", (t) =
   opened.socket.dispatchEvent(new Event("open"));
   const closed = dial();
   closed.socket.dispatchEvent(new Event("close"));
-  t.mock.timers.tick(10000);
+  t.mock.timers.tick(9999); // within the reply timeout, which the next tests cover
   assert.deepEqual(opened.calls, []);
   assert.deepEqual(closed.calls, ["unreachable"]);
 });
@@ -146,11 +146,12 @@ test("Retry dials an unreachable Core again, with no reload, and never on its ow
 });
 
 test("a double click on Retry dials once; a connected link is not dialed again", () => {
-  const { l, last } = link();
+  const { l, statuses, last } = link();
   const before = FakeSocket.opened.length;
   assert.equal(l.dial(), true);
   assert.equal(l.dial(), false);
   assert.equal(FakeSocket.opened.length, before + 1);
+  assert.deepEqual(statuses, ["dialing"], "no second status for an ignored dial");
   last().reply(WELCOME);
   assert.equal(l.dial(), false);
   assert.equal(FakeSocket.opened.length, before + 1);
@@ -167,16 +168,51 @@ test("a refusal, busy included, keeps the Core's reason and message and allows a
   assert.equal(l.status?.state, "dialing");
 });
 
-test("a malformed reply is a refusal, never a dial stuck waiting", () => {
+test("a reply that is not a welcome nor a refusal closes the socket as malformed", () => {
+  for (const data of [
+    "not json",
+    "null",
+    "42",
+    '"welcome"',
+    "[]",
+    '{"type": "hello"}',
+    '{"type": "refused"}', // no reason: never shown as "undefined"
+  ]) {
+    const { l, last } = link();
+    l.dial();
+    last().dispatchEvent(new MessageEvent("message", { data }));
+    assert.equal(l.status?.state, "refused", data);
+    assert.equal(/** @type {{reason: string}} */ (l.status).reason, "malformed", data);
+    assert.doesNotMatch(/** @type {{message: string}} */ (l.status).message, /undefined/);
+    assert.ok(last().closed, data);
+    assert.equal(l.dial(), true, `${data}: Retry is offered`);
+  }
+});
+
+test("an open socket that never answers the hello is unreachable, so Retry is offered", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { l, statuses, last } = link();
+  l.dial();
+  last().dispatchEvent(new Event("open"));
+  t.mock.timers.tick(9999);
+  assert.equal(l.status?.state, "dialing");
+  t.mock.timers.tick(1);
+  assert.deepEqual(l.status, { state: "unreachable", url: "ws://127.0.0.1:7240/foundry" });
+  assert.ok(last().closed);
+  assert.deepEqual(statuses, ["dialing", "unreachable"], "reported once, close included");
+  last().reply(WELCOME); // too late: ignored
+  assert.equal(l.status?.state, "unreachable");
+});
+
+test("an answer in time stops the reply timeout", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { l, last } = link();
   l.dial();
-  last().dispatchEvent(new MessageEvent("message", { data: "not json" }));
-  assert.deepEqual(l.status, {
-    state: "refused",
-    reason: "malformed",
-    message: "The Core sent a malformed reply.",
-  });
-  assert.ok(last().closed);
+  last().dispatchEvent(new Event("open"));
+  last().reply(WELCOME);
+  t.mock.timers.tick(60000);
+  assert.equal(l.status?.state, "connected");
+  assert.equal(last().closed, false);
 });
 
 test("a connection that closes is lost, and Reconnect dials again", () => {
