@@ -165,10 +165,10 @@ const factsHtml = (facts, none) =>
  * The situation card the GM pulled (#188 D1): GM only, assembled by the Core with no model,
  * withdrawn by the Core once play moves on. Plain words and an empty-state line in each part.
  * Collapsed unless the GM opened it, with the scene and whose turn in its summary.
- * @param {SituationCard | null | undefined} card @param {boolean} open
+ * @param {SituationCard | null | undefined} card @param {boolean} open @param {string} hint (empty: none)
  */
-function situationHtml(card, open) {
-  const pull = `<p><button type="button" data-action="gesture" data-gesture="situation">${card ? "Refresh" : "Show the situation"}</button> <kbd>Shift</kbd>+<kbd>S</kbd></p>`;
+function situationHtml(card, open, hint) {
+  const pull = `<p><button type="button" data-action="gesture" data-gesture="situation">${card ? "Refresh" : "Show the situation"}</button>${hint ? ` ${hint}` : ""}</p>`;
   if (!card)
     return `<p>A read of the scene: who is here, what the party knows, what to keep secret.</p>\n${pull}`;
   // A fact the party only suspects or believes is not one it knows: listed apart, said so.
@@ -229,11 +229,26 @@ ${list(cue.does_not_know)}
 <p><button type="button" data-action="gesture" data-gesture="${gesture}" data-entity="${esc(cue.npc)}">${label}</button></p>`;
 }
 
+/** @typedef {{key: string, modifiers?: string[]}} Binding */
+
+/**
+ * The keys bound to an action, as Foundry reports them (`game.keybindings.get`): the hint
+ * text for the first binding, or a plain line when the GM has unbound it.
+ * @param {Binding[] | undefined} bindings
+ */
+export function keyHint(bindings) {
+  const first = bindings?.[0];
+  if (!first) return "no key bound";
+  const parts = [...(first.modifiers ?? []), first.key.replace(/^(Key|Digit)/, "")];
+  return parts.map((k) => `<kbd>${esc(k)}</kbd>`).join("+");
+}
+
 /**
  * The Desk's content: nothing at all for a user who is not a GM.
- * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown, cardOpen?: boolean}} args
+ * `keys` holds the bindings Foundry reports per action; absent, no hint is shown.
+ * @param {{isGM: boolean, state: DeskState | null, pile: DeskCall[] | null, ceiling: unknown, cardOpen?: boolean, keys?: {desk: Binding[], situation: Binding[]}}} args
  */
-export function deskHtml({ isGM, state, pile, ceiling, cardOpen = false }) {
+export function deskHtml({ isGM, state, pile, ceiling, cardOpen = false, keys }) {
   if (!isGM) return "";
   if (!state) return "<p>Waiting for the Core…</p>";
   const live = state.moment === "live-session";
@@ -249,12 +264,12 @@ export function deskHtml({ isGM, state, pile, ceiling, cardOpen = false }) {
         .join("")}</ul>`
     : "<p>None.</p>";
   return `<section class="secondchair-desk">
-<p>Moment: ${esc(state.moment)}${live ? ` (session ${state.session})` : ""} · Ceiling: ${esc(ceiling)}</p>
+<p>Moment: ${esc(state.moment)}${live ? ` (session ${state.session})` : ""} · Ceiling: ${esc(ceiling)}${keys ? ` · Open the Desk: ${keyHint(keys.desk)}` : ""}</p>
 <p>${session} <button type="button" data-action="gesture" data-gesture="break">Break</button></p>
 <h3>Due now</h3>
 ${callsHtml(state.calls, "Nothing due now.")}
 <h3>Situation</h3>
-${situationHtml(state.situation, cardOpen)}
+${situationHtml(state.situation, cardOpen, keys ? keyHint(keys.situation) : "")}
 <h3>Acting cue</h3>
 ${state.turn_driver ? `<p><em>${esc(state.turn_driver)} runs the GM creatures' turns: agents stay silent.</em></p>\n` : ""}${cueHtml(state.cue)}
 ${

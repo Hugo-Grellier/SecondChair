@@ -204,6 +204,10 @@ class DirectorsDesk extends foundry.applications.api.ApplicationV2 {
       pile: desk?.pile ?? null,
       ceiling,
       cardOpen: desk?.cardOpen ?? false,
+      keys: {
+        desk: game.keybindings.get(MODULE, "desk"),
+        situation: game.keybindings.get(MODULE, "situation"),
+      },
     });
   }
 
