@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import shlex
 import sys
 import urllib.error
 import urllib.request
@@ -162,12 +163,13 @@ def host_setup(host: str) -> str:
 
 
 def _next_steps(root: Path) -> str:
+    q = shlex.quote(str(root.resolve()))
     return f"""
 Next steps:
-  1. Serve the campaign (leave it running):  secondchair serve -w {root}
+  1. Serve the campaign (leave it running):  secondchair serve -w {q}
   2. Connect your agent host:                secondchair host setup claude   (or codex)
   3. Foundry: paste this token into the module settings:  secondchair token
-  4. Open your agent in the workspace:       cd {root} && claude   (or codex)"""
+  4. Open your agent in the workspace:       cd {q} && claude   (or codex)"""
 
 
 def _calendar_arg(value: str) -> str | dict:
@@ -709,7 +711,12 @@ def main(argv: list[str] | None = None) -> int:
         "serve", help="serve a campaign workspace on 127.0.0.1 (default: the current directory)"
     )
     serve_cmd.add_argument(
-        "-w", "--workspace", dest="workspace_opt", type=Path, help="campaign workspace (default: .)"
+        "-w",
+        "--workspace",
+        dest="workspace_opt",
+        metavar="DIR",
+        type=Path,
+        help="campaign workspace (default: .)",
     )
     serve_cmd.add_argument(
         "workspace", nargs="?", type=Path, help="alias of -w, kept for older invocations"
@@ -1128,10 +1135,16 @@ def main(argv: list[str] | None = None) -> int:
             given = args.workspace, args.workspace_opt
             if None not in given and given[0].resolve() != given[1].resolve():
                 raise WorkspaceError(
-                    f"serve got two different workspaces ({given[0]} and -w {given[1]}): "
-                    "give one, preferably `serve -w DIR`."
+                    f"serve got two different workspaces (positional {given[0]} and "
+                    f"-w {given[1]}): give one, preferably `serve -w DIR`."
                 )
-            ws = workspace.load(next((g for g in given if g is not None), Path()))
+            root = next((g for g in given if g is not None), None)
+            try:
+                ws = workspace.load(root or Path())
+            except WorkspaceError as e:
+                if root is None:
+                    raise WorkspaceError(f"{e} (current directory; use -w DIR)") from e
+                raise
             serve(ws, configured_port(), review.routes(ws))
         elif args.command == "jobs":
             return _jobs_command(args)

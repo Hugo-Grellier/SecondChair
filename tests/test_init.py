@@ -1,3 +1,4 @@
+import shlex
 from pathlib import Path
 
 import pytest
@@ -64,6 +65,32 @@ def test_init_prints_the_next_steps(tmp_path: Path, capsys: pytest.CaptureFixtur
     out = capsys.readouterr().out
     assert f"secondchair serve -w {tmp_path}" in out
     assert "secondchair host setup claude" in out and "secondchair token" in out
+
+
+def test_init_next_steps_quote_the_resolved_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["init", "my camp", "--language", "en", "--calendar", "absalom"]) == 0
+    quoted = shlex.quote(str((tmp_path / "my camp").resolve()))
+    out = capsys.readouterr().out
+    assert f"serve -w {quoted}" in out and f"cd {quoted} &&" in out
+
+
+def test_init_next_steps_resolve_a_relative_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["init", "rel", "--language", "en", "--calendar", "absalom"]) == 0
+    assert f"serve -w {(tmp_path / 'rel').resolve()}" in capsys.readouterr().out
+
+
+def test_calendars_with_none_installed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("secondchair.cli.available_calendars", list)
+    assert main(["calendars"]) == 0
+    assert "No calendar installed." in capsys.readouterr().out
 
 
 def test_init_refuses_an_unknown_calendar_name(

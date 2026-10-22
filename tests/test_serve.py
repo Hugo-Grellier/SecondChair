@@ -118,18 +118,49 @@ def test_serve_refuses_an_invalid_port_in_the_machine_configuration(
     assert "port must be an integer" in capsys.readouterr().err
 
 
-def test_serve_takes_w_default_cwd_and_the_positional_alias(
+@pytest.fixture
+def ran(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[Path]:
+    roots: list[Path] = []
+    monkeypatch.setattr("secondchair.cli.serve", lambda ws, *a: roots.append(ws.root.resolve()))
+    main(["init", str(tmp_path / "c"), "--language", "en", "--calendar", "absalom"])
+    return roots
+
+
+def test_serve_takes_w(tmp_path: Path, ran: list[Path]) -> None:
+    assert main(["serve", "-w", str(tmp_path / "c")]) == 0
+    assert ran == [(tmp_path / "c").resolve()]
+
+
+def test_serve_still_takes_the_positional(tmp_path: Path, ran: list[Path]) -> None:
+    assert main(["serve", str(tmp_path / "c")]) == 0
+    assert ran == [(tmp_path / "c").resolve()]
+
+
+def test_serve_accepts_the_same_workspace_twice(tmp_path: Path, ran: list[Path]) -> None:
+    c = str(tmp_path / "c")
+    assert main(["serve", c, "-w", c]) == 0
+    assert len(ran) == 1
+
+
+def test_serve_defaults_to_the_current_directory(
+    tmp_path: Path, ran: list[Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path / "c")
+    assert main(["serve"]) == 0
+    assert ran == [(tmp_path / "c").resolve()]
+
+
+def test_serve_refuses_two_different_workspaces(
+    tmp_path: Path, ran: list[Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["serve", str(tmp_path), "-w", str(tmp_path / "c")]) == 1
+    assert "two different workspaces" in capsys.readouterr().err
+    assert ran == []
+
+
+def test_serve_in_a_non_workspace_cwd_points_to_w(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    ran: list[Path] = []
-    monkeypatch.setattr("secondchair.cli.serve", lambda ws, *a: ran.append(ws.root))
-    main(["init", str(tmp_path / "c"), "--language", "en", "--calendar", "absalom"])
-    ws = (tmp_path / "c").resolve()
-    assert main(["serve", "-w", str(ws)]) == 0
-    assert main(["serve", str(ws)]) == 0
-    assert main(["serve", str(ws), "-w", str(ws)]) == 0
-    monkeypatch.chdir(ws)
-    assert main(["serve"]) == 0
-    assert [r.resolve() for r in ran] == [ws] * 4
-    assert main(["serve", str(tmp_path), "-w", str(ws)]) == 1
-    assert "two different workspaces" in capsys.readouterr().err
+    monkeypatch.chdir(tmp_path)
+    assert main(["serve"]) == 1
+    assert "(current directory; use -w DIR)" in capsys.readouterr().err

@@ -13,7 +13,7 @@ This guide follows one campaign through SecondChair's loop. Each step names what
 ```sh
 uv tool install "secondchair @ git+https://github.com/Hugo-Grellier/SecondChair@main"
 secondchair init ~/campaigns/my-campaign --language fr --calendar absalom
-secondchair serve -w ~/campaigns/my-campaign        # leave it running
+secondchair serve -w ~/campaigns/my-campaign     # leave it running
 secondchair host setup claude                    # or codex: prints the MCP and playbook setup
 ```
 
