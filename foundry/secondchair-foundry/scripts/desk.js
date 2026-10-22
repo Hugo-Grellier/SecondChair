@@ -9,7 +9,8 @@
  * @typedef {{moment: number, session: number | null, observation: string | null, scene: string | null, round: number | null, turn: number | null, at: string}} CueAsOf
  * @typedef {{id: string, statement: string, mode: string, party_mode?: string}} CardFact
  * @typedef {{as_of: CueAsOf, scene: string | null, acting: string | null, npcs: {id: string, name: string, shared: CardFact[], secret: CardFact[]}[], handoff: string[], calls: {id: number, kind: string, deadline: string, text: string}[]}} SituationCard
- * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, turn_driver?: string | null}} DeskState
+ * @typedef {{session: number, status: "queued" | "running" | "waiting", as_of: CueAsOf}} WrapCard
+ * @typedef {{type: "desk", moment: string, session: number | null, calls: DeskCall[], decisions: {id: string, text: string, words: string}[], cue: ActingCue | null, situation?: SituationCard | null, wrap?: WrapCard | null, turn_driver?: string | null}} DeskState
  * @typedef {{type: "result", id: string, ok: boolean, error?: string, pile?: DeskCall[], message?: string}} Result
  */
 
@@ -210,6 +211,32 @@ ${calls}
 ${pull}`;
 }
 
+const WRAP_SAYS = {
+  queued: "wrap queued",
+  running: "wrap running",
+  waiting: "waiting for <code>secondchair wrap</code>",
+};
+const WRAP_WHY = {
+  queued: "The wrap job is queued; no agent has finished it.",
+  running: "An agent is working on the wrap job.",
+  waiting:
+    "The grouped round settles the session's open questions and its dates. It needs an interactive terminal: run <code>secondchair wrap</code> there.",
+};
+
+/**
+ * The wrap-state card (#196 S1): after End session, until the session is wrapped. A read, with
+ * no gesture: the grouped round runs in the CLI. Its summary is the status line.
+ * @param {WrapCard | null | undefined} card
+ */
+function wrapHtml(card) {
+  if (!card || !Object.hasOwn(WRAP_SAYS, card.status)) return "";
+  return `<details class="secondchair-card secondchair-wrap">
+<summary><strong>Session ${esc(card.session)}</strong>: ${WRAP_SAYS[card.status]}</summary>
+<p>${WRAP_WHY[card.status]}</p>
+</details>
+`;
+}
+
 /**
  * The active NPC's acting cue (DEL-15): shown at every level, manual included, since it is a read.
  * Its age is the time it was shown; the Core withdraws it once play moves on (ADR 0020 item 3).
@@ -266,7 +293,7 @@ export function deskHtml({ isGM, state, pile, ceiling, cardOpen = false, keys })
   return `<section class="secondchair-desk">
 <p>Moment: ${esc(state.moment)}${live ? ` (session ${state.session})` : ""} · Ceiling: ${esc(ceiling)}${keys ? ` · Open the Desk: ${keyHint(keys.desk)}` : ""}</p>
 <p>${session} <button type="button" data-action="gesture" data-gesture="break">Break</button></p>
-<h3>Due now</h3>
+${wrapHtml(state.wrap)}<h3>Due now</h3>
 ${callsHtml(state.calls, "Nothing due now.")}
 <h3>Situation</h3>
 ${situationHtml(state.situation, cardOpen, keys ? keyHint(keys.situation) : "")}

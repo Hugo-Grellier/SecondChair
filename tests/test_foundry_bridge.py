@@ -607,3 +607,34 @@ def test_a_situation_card_reaches_the_gm_desk_only(
         assert SECRET not in json.dumps(rest), message
     # In the workspace, only the card's own derived file is new to hold it.
     assert holding(workspace, SECRET) - before == {".secondchair/situation.json"}
+
+
+def test_the_desk_refreshes_when_the_wrap_status_changes(
+    bridge: str, token: str, workspace: Path
+) -> None:
+    from secondchair.core import calls, capture, delegation
+
+    ws = load(workspace)
+    inbox: queue.Queue = queue.Queue()
+    sockets: list[ClientConnection] = []
+    with gm_client(bridge, token, inbox=inbox, sent=sockets):
+        assert next_of(inbox, "desk")["wrap"] is None
+        for gesture in ("start_session", "end_session"):
+            say(sockets[0], {"type": "gesture", "id": gesture, "gesture": gesture})
+        queued = next_of(inbox, "desk", lambda m: m["wrap"] is not None)
+        assert (queued["wrap"]["session"], queued["wrap"]["status"]) == (1, "queued")
+
+        [job] = [j for j in calls._jobs(ws) if j["playbook"] == capture.PLAYBOOK]
+        path = workspace / delegation.JOBS_DIR / f"{job['id']:06d}.yaml"
+        path.write_text(yaml.safe_dump({**job, "status": "started"}))  # no other change
+        running = next_of(inbox, "desk", lambda m: (m["wrap"] or {}).get("status") == "running")
+        assert running["wrap"]["session"] == 1
+
+        path.write_text(yaml.safe_dump({**job, "status": "done"}))
+        assert next_of(inbox, "desk", lambda m: m["wrap"]["status"] == "waiting")
+        data = capture.time(ws)
+        data["sessions"][1] = {"wrapped": True}
+        (workspace / capture.TIME_FILE).write_text(yaml.safe_dump(data))
+        # A client without the GM's token, a player's, is refused and told nothing of the wrap.
+        assert "wrap" not in json.dumps(reply(bridge, hello("not-the-token")))
+        assert next_of(inbox, "desk", lambda m: m["wrap"] is None)

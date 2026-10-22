@@ -683,6 +683,41 @@
             "additionalProperties": false
           }
         },
+        "wrap": {
+          "description": "The wrap-state card (#196 S1, ARC-14): after End session, until the session is marked wrapped, where its wrap stands. Null during a live session, once wrapped, before any session, or when the Core cannot read its state. Only the last session is checked. Absent from a Core before it.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "session": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "The last session, ended."
+                },
+                "as_of": {
+                  "$ref": "#/$defs/as_of"
+                },
+                "status": {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "waiting"
+                  ],
+                  "description": "queued: the wrap job waits for an agent. running: an agent works on it. waiting: no wrap job is queued or started (one done, missed or withdrawn counts as none); the GM's grouped round, `secondchair wrap`, is next."
+                }
+              },
+              "required": [
+                "session",
+                "status",
+                "as_of"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
         "turn_driver": {
           "type": [
             "string",

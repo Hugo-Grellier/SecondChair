@@ -397,3 +397,41 @@ test("a hint escapes the binding, shows only the first, and passes other codes t
   assert.doesNotMatch(html, /<kbd>Z<\/kbd>/);
   assert.match(html, /Show the situation<\/button> <kbd>Numpad4<\/kbd>/);
 });
+
+test("the wrap-state card says where the wrap stands, one collapsed line per status", () => {
+  const between = { ...STATE, moment: "between-sessions", session: null };
+  const show = (/** @type {any} */ wrap) =>
+    deskHtml({ isGM: true, state: { ...between, wrap }, pile: null, ceiling: "propose" });
+  assert.ok(
+    valid({ ...between, wrap: { session: 3, status: "waiting", as_of: CARD.as_of } }),
+    JSON.stringify(valid.errors),
+  );
+  for (const [status, words] of /** @type {[string, RegExp][]} */ ([
+    ["queued", /Session 3<\/strong>: wrap queued/],
+    ["running", /Session 3<\/strong>: wrap running/],
+    ["waiting", /Session 3<\/strong>: waiting for <code>secondchair wrap<\/code>/],
+  ])) {
+    const html = show({ session: 3, status });
+    assert.match(html, words);
+    assert.match(html, /<details class="secondchair-card secondchair-wrap">/); // collapsed
+    assert.doesNotMatch(html, /<details[^>]* open/);
+  }
+  assert.match(show({ session: 3, status: "waiting" }), /interactive terminal/);
+  // Withdrawn (null), absent (an older Core), or a status it does not know: no card.
+  for (const wrap of [null, undefined, { session: 3, status: "<b>x</b>" }])
+    assert.doesNotMatch(show(wrap), /secondchair-wrap/);
+  // Not in a live session, and never for a player.
+  const live = deskHtml({ isGM: true, state: { ...STATE, wrap: null }, pile: null, ceiling: "x" });
+  assert.doesNotMatch(live, /secondchair-wrap/);
+  const queued = /** @type {DeskState} */ ({ ...between, wrap: { session: 3, status: "queued" } });
+  assert.equal(deskHtml({ isGM: false, state: queued, pile: null, ceiling: "x" }), "");
+});
+
+test("the wrap-state card ignores a status that is only an inherited property name", () => {
+  const between = { ...STATE, moment: "between-sessions", session: null };
+  for (const status of ["constructor", "toString", "__proto__"]) {
+    const wrap = /** @type {any} */ ({ session: 3, status });
+    const html = deskHtml({ isGM: true, state: { ...between, wrap }, pile: null, ceiling: "x" });
+    assert.doesNotMatch(html, /secondchair-wrap/);
+  }
+});

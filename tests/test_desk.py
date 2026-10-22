@@ -15,6 +15,7 @@ from test_knowledge import learn
 
 from secondchair.cli import main
 from secondchair.core import (
+    calls,
     capture,
     delegation,
     director,
@@ -544,3 +545,77 @@ def test_a_situation_card_file_with_no_as_of_or_garbled_is_never_shown(ws: Works
     observe(ws, "o2", 1, "chat", "Scene.tower", speaker={"name": "Tovan Reed"})
     assert gesture(ws, "situation")["ok"] is True
     assert (state(ws)["situation"]["scene"], state(ws)["situation"]["npcs"]) == (None, [])
+
+
+def wrapped(ws: Workspace) -> tuple[int, str]:
+    card = state(ws)["wrap"]
+    return card["session"], card["status"]
+
+
+def wrap_jobs(ws: Workspace) -> list[dict]:
+    return [j for j in calls._jobs(ws) if j["playbook"] == capture.PLAYBOOK]
+
+
+def test_the_wrap_card_follows_the_wrap_from_end_session_to_wrapped(ws: Workspace) -> None:
+    assert state(ws)["wrap"] is None  # before any session
+    gesture(ws, "start_session")
+    assert state(ws)["wrap"] is None  # absent live
+    gesture(ws, "end_session")
+    assert wrapped(ws) == (1, "queued")
+    assert state(ws)["wrap"]["as_of"]["moment"] == delegation.current_moment(ws)[1]
+    [job] = wrap_jobs(ws)
+    path = ws.root / delegation.JOBS_DIR / f"{job['id']:06d}.yaml"
+    for stored, shown in (
+        ("started", "running"),
+        ("done", "waiting"),
+        ("missed", "waiting"),
+        ("withdrawn", "waiting"),
+        ("queued", "queued"),  # a failed attempt queues the job again
+    ):
+        path.write_text(yaml.safe_dump({**job, "status": stored}))
+        assert wrapped(ws) == (1, shown)
+    before = sorted(p for p in ws.root.rglob("*") if p.is_file())
+    state(ws)
+    assert sorted(p for p in ws.root.rglob("*") if p.is_file()) == before  # a read
+    data = capture.time(ws)
+    data["sessions"][1] = {"wrapped": True}
+    (ws.root / capture.TIME_FILE).write_text(yaml.safe_dump(data))
+    assert state(ws)["wrap"] is None  # withdrawn once wrapped
+    gesture(ws, "start_session")
+    assert state(ws)["wrap"] is None
+
+
+def test_a_damaged_file_withdraws_the_wrap_card(ws: Workspace) -> None:
+    gesture(ws, "start_session")
+    gesture(ws, "end_session")
+    assert state(ws)["wrap"] is not None
+    (ws.root / capture.TIME_FILE).write_text("sessions: [1, 2")
+    assert state(ws)["wrap"] is None
+    (ws.root / capture.TIME_FILE).write_text("sessions: {1: oops}")
+    assert state(ws)["wrap"] is None
+    (ws.root / capture.TIME_FILE).unlink()
+    [job] = wrap_jobs(ws)
+    (ws.root / delegation.JOBS_DIR / f"{job['id']:06d}.yaml").write_text("- not a mapping")
+    assert state(ws)["wrap"] is None
+
+
+def test_the_wrap_card_is_about_the_last_session_only(ws: Workspace) -> None:
+    for _ in range(2):  # session 1 is never wrapped
+        gesture(ws, "start_session")
+        gesture(ws, "end_session")
+    assert wrapped(ws) == (2, "queued")
+
+
+def test_the_wrap_card_follows_a_moment_change_and_a_damaged_observation_file_withdraws_it(
+    ws: Workspace,
+) -> None:
+    gesture(ws, "start_session")
+    gesture(ws, "end_session")
+    first = state(ws)["wrap"]["as_of"]["moment"]
+    delegation.change_moment(ws, "prep")  # between non-live moments: the card stays
+    card = state(ws)["wrap"]
+    assert (card["session"], card["as_of"]["moment"]) == (1, delegation.current_moment(ws)[1])
+    assert card["as_of"]["moment"] != first
+    (ws.root / observations.path(None)).parent.mkdir(exist_ok=True)
+    (ws.root / observations.path(None)).write_bytes(b"\xff\xfe not text \xff")
+    assert state(ws)["wrap"] is None  # fails closed, and the Desk still builds
