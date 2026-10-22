@@ -431,18 +431,26 @@ def doctor(ws: workspace.Workspace) -> int:
 
 
 def check_setup(root: Path) -> int:
-    """Read-only checks of this machine, one fix per failure; 1 if any FAILs."""
+    """Checks of this machine, one fix per failure; 1 if any FAILs. Writes no host or machine
+    file; the status block may refresh the derived index."""
     plugins = [
         json.loads((d / ".claude-plugin/plugin.json").read_text())["name"]
         for d in runner.playbook_dirs()
     ]
+    port, runners, transcription, error = None, {}, None, False
+    try:
+        port, runners = configured_port(), configured_runners()[0]
+        transcription = configured_transcription()
+    except MachineConfigError:  # its text may quote the file: the line names the file instead
+        error = True
     results = setup_check.run(
         root,
-        port=configured_port(),
-        runners=configured_runners()[0],
-        transcription=configured_transcription(),
+        port=port,
+        runners=runners,
+        transcription=transcription,
         plugins=plugins,
         skills=[s.name for s in runner.skills()],
+        config_error=error,
     )
     for level, what, fix in results:
         print(f"{level:<4} {what}" + (f"\n     Fix: {fix}" if fix else ""))
